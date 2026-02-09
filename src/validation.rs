@@ -4,7 +4,6 @@
 /// validation checks that the tree makes semantic sense (correct book codes,
 /// sequential chapter/verse numbering, milestone pairing, etc.) and emits
 /// diagnostics for anything it finds.
-
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{Document, Node, Span};
@@ -27,28 +26,23 @@ pub fn validate(doc: &Document) -> DiagnosticList {
 /// peripheral).
 const VALID_BOOK_CODES: &[&str] = &[
     // OT
-    "GEN", "EXO", "LEV", "NUM", "DEU", "JOS", "JDG", "RUT", "1SA", "2SA",
-    "1KI", "2KI", "1CH", "2CH", "EZR", "NEH", "EST", "JOB", "PSA", "PRO",
-    "ECC", "SNG", "ISA", "JER", "LAM", "EZK", "DAN", "HOS", "JOL", "AMO",
-    "OBA", "JON", "MIC", "NAM", "HAB", "ZEP", "HAG", "ZEC", "MAL",
+    "GEN", "EXO", "LEV", "NUM", "DEU", "JOS", "JDG", "RUT", "1SA", "2SA", "1KI", "2KI", "1CH",
+    "2CH", "EZR", "NEH", "EST", "JOB", "PSA", "PRO", "ECC", "SNG", "ISA", "JER", "LAM", "EZK",
+    "DAN", "HOS", "JOL", "AMO", "OBA", "JON", "MIC", "NAM", "HAB", "ZEP", "HAG", "ZEC", "MAL",
     // NT
-    "MAT", "MRK", "LUK", "JHN", "ACT", "ROM", "1CO", "2CO", "GAL", "EPH",
-    "PHP", "COL", "1TH", "2TH", "1TI", "2TI", "TIT", "PHM", "HEB", "JAS",
-    "1PE", "2PE", "1JN", "2JN", "3JN", "JUD", "REV",
-    // Deuterocanonical / Apocrypha
-    "TOB", "JDT", "ESG", "WIS", "SIR", "BAR", "LJE", "S3Y", "SUS", "BEL",
-    "1MA", "2MA", "3MA", "4MA", "1ES", "2ES", "MAN", "PS2", "ODA", "PSS",
-    "EZA", "5EZ", "6EZ", "DAG", "PS3", "2BA", "LBA", "JUB", "ENO",
-    "1MQ", "2MQ", "3MQ", "REP", "4BA", "LAO",
-    // Peripheral
+    "MAT", "MRK", "LUK", "JHN", "ACT", "ROM", "1CO", "2CO", "GAL", "EPH", "PHP", "COL", "1TH",
+    "2TH", "1TI", "2TI", "TIT", "PHM", "HEB", "JAS", "1PE", "2PE", "1JN", "2JN", "3JN", "JUD",
+    "REV", // Deuterocanonical / Apocrypha
+    "TOB", "JDT", "ESG", "WIS", "SIR", "BAR", "LJE", "S3Y", "SUS", "BEL", "1MA", "2MA", "3MA",
+    "4MA", "1ES", "2ES", "MAN", "PS2", "ODA", "PSS", "EZA", "5EZ", "6EZ", "DAG", "PS3", "2BA",
+    "LBA", "JUB", "ENO", "1MQ", "2MQ", "3MQ", "REP", "4BA", "LAO", // Peripheral
     "FRT", "BAK", "OTH", "INT", "CNC", "GLO", "TDX", "NDX",
 ];
 
 /// Markers that are *exclusively* note sub-markers and should never appear
 /// outside of a `\f` or `\x` note.
 const NOTE_ONLY_MARKERS: &[&str] = &[
-    "fr", "ft", "fk", "fq", "fqa", "fl", "fw", "fp", "fv", "fdc",
-    "xop", "xot", "xnt", "xdc",
+    "fr", "ft", "fk", "fq", "fqa", "fl", "fw", "fp", "fv", "fdc", "xop", "xot", "xnt", "xdc",
 ];
 
 // ── Verse number helpers ────────────────────────────────────────────────────
@@ -133,7 +127,8 @@ impl<'a> Validator<'a> {
             for node in &doc.content {
                 if let Node::Book { span, .. } = node {
                     if seen {
-                        self.diagnostics.push(Diagnostic::duplicate_id(span.clone()));
+                        self.diagnostics
+                            .push(Diagnostic::duplicate_id(span.clone()));
                     }
                     seen = true;
                 }
@@ -218,8 +213,7 @@ impl<'a> Validator<'a> {
     fn check_text_before_id(&mut self, doc: &Document) {
         if let Some(first) = doc.content.first() {
             if matches!(first, Node::Text(_)) {
-                self.diagnostics
-                    .push(Diagnostic::text_before_id(0..0));
+                self.diagnostics.push(Diagnostic::text_before_id(0..0));
             }
         }
     }
@@ -261,7 +255,10 @@ impl<'a> Validator<'a> {
         if let Node::Char { marker, span, .. } = node {
             if !inside_note && is_note_only_marker(marker) {
                 self.diagnostics
-                    .push(Diagnostic::note_submarker_outside_note(marker, span.clone()));
+                    .push(Diagnostic::note_submarker_outside_note(
+                        marker,
+                        span.clone(),
+                    ));
             }
         }
 
@@ -321,9 +318,7 @@ impl<'a> Validator<'a> {
                         .or_default()
                         .push(span.clone());
                 } else if let Some(base) = marker.strip_suffix("-e") {
-                    ends.entry(base.to_string())
-                        .or_default()
-                        .push(span.clone());
+                    ends.entry(base.to_string()).or_default().push(span.clone());
                 }
             }
             self.collect_milestones(node.children(), starts, ends);
@@ -339,8 +334,7 @@ impl<'a> Validator<'a> {
             .iter()
             .any(|n| matches!(n, Node::Chapter { .. }));
         if has_book && !has_chapter {
-            self.diagnostics
-                .push(Diagnostic::missing_chapter_marker());
+            self.diagnostics.push(Diagnostic::missing_chapter_marker());
         }
     }
 
@@ -396,9 +390,9 @@ impl<'a> Validator<'a> {
             });
             // Check for meaningful attributes (ignore attributes whose values
             // are only pipe characters and whitespace — legacy USFM2 format).
-            let has_meaningful_attrs = attributes.iter().any(|a| {
-                a.value.chars().any(|c| c != '|' && !c.is_whitespace())
-            });
+            let has_meaningful_attrs = attributes
+                .iter()
+                .any(|a| a.value.chars().any(|c| c != '|' && !c.is_whitespace()));
             if !has_text && !has_meaningful_attrs {
                 self.diagnostics
                     .push(Diagnostic::empty_figure(span.clone()));
@@ -430,25 +424,23 @@ impl<'a> Validator<'a> {
                 // Check for required attributes.
                 for &req in markers::required_attributes(clean_marker) {
                     if !attributes.iter().any(|a| a.key == req) {
-                        self.diagnostics.push(
-                            Diagnostic::missing_required_attribute(
+                        self.diagnostics
+                            .push(Diagnostic::missing_required_attribute(
                                 clean_marker,
                                 req,
                                 span.clone(),
-                            ),
-                        );
+                            ));
                     }
                 }
 
                 // Check for unresolved "default" key (marker has no default attribute).
                 if attributes.iter().any(|a| a.key == "default") {
                     if markers::default_attribute(clean_marker).is_none() {
-                        self.diagnostics.push(
-                            Diagnostic::default_attribute_not_defined(
+                        self.diagnostics
+                            .push(Diagnostic::default_attribute_not_defined(
                                 clean_marker,
                                 span.clone(),
-                            ),
-                        );
+                            ));
                     }
                 }
             }
@@ -461,12 +453,11 @@ impl<'a> Validator<'a> {
                 let clean_marker = marker.strip_prefix('+').unwrap_or(marker);
                 if attributes.iter().any(|a| a.key == "default") {
                     if markers::default_attribute(clean_marker).is_none() {
-                        self.diagnostics.push(
-                            Diagnostic::default_attribute_not_defined(
+                        self.diagnostics
+                            .push(Diagnostic::default_attribute_not_defined(
                                 clean_marker,
                                 span.clone(),
-                            ),
-                        );
+                            ));
                     }
                 }
             }
@@ -553,18 +544,22 @@ mod tests {
         }]);
         let diags = validate(&doc);
         assert!(diags.has_errors());
-        assert!(diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::MissingIdMarker));
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::MissingIdMarker)
+        );
     }
 
     #[test]
     fn test_empty_document() {
         let doc = doc_with(vec![]);
         let diags = validate(&doc);
-        assert!(diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::MissingIdMarker));
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::MissingIdMarker)
+        );
     }
 
     // -- 2. Book code validation ---------------------------------------------
@@ -578,9 +573,11 @@ mod tests {
             span: 0..10,
         }]);
         let diags = validate(&doc);
-        assert!(!diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::InvalidBookCode));
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::InvalidBookCode)
+        );
     }
 
     #[test]
@@ -592,9 +589,11 @@ mod tests {
             span: 0..10,
         }]);
         let diags = validate(&doc);
-        assert!(diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::InvalidBookCode));
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::InvalidBookCode)
+        );
     }
 
     // -- 3. Chapter sequence -------------------------------------------------
@@ -626,9 +625,11 @@ mod tests {
             },
         ]);
         let diags = validate(&doc);
-        assert!(!diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::InvalidChapterSequence));
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::InvalidChapterSequence)
+        );
     }
 
     #[test]
@@ -658,9 +659,11 @@ mod tests {
             },
         ]);
         let diags = validate(&doc);
-        assert!(diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::InvalidChapterSequence));
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::InvalidChapterSequence)
+        );
     }
 
     #[test]
@@ -690,9 +693,11 @@ mod tests {
             },
         ]);
         let diags = validate(&doc);
-        assert!(diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::DuplicateChapter));
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::DuplicateChapter)
+        );
     }
 
     // -- 4. Verse sequence ---------------------------------------------------
@@ -740,9 +745,11 @@ mod tests {
             },
         ]);
         let diags = validate(&doc);
-        assert!(!diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::InvalidVerseSequence));
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::InvalidVerseSequence)
+        );
     }
 
     #[test]
@@ -786,9 +793,11 @@ mod tests {
             },
         ]);
         let diags = validate(&doc);
-        assert!(diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::InvalidVerseSequence));
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::InvalidVerseSequence)
+        );
     }
 
     #[test]
@@ -849,9 +858,11 @@ mod tests {
             },
         ]);
         let diags = validate(&doc);
-        assert!(!diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::InvalidVerseSequence));
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::InvalidVerseSequence)
+        );
     }
 
     #[test]
@@ -915,9 +926,11 @@ mod tests {
             },
         ]);
         let diags = validate(&doc);
-        assert!(!diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::InvalidVerseSequence));
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::InvalidVerseSequence)
+        );
     }
 
     // -- 5. Text before \id -------------------------------------------------
@@ -934,9 +947,7 @@ mod tests {
             },
         ]);
         let diags = validate(&doc);
-        assert!(diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::TextBeforeId));
+        assert!(diags.iter().any(|d| d.code == DiagnosticCode::TextBeforeId));
     }
 
     #[test]
@@ -948,9 +959,7 @@ mod tests {
             span: 0..10,
         }]);
         let diags = validate(&doc);
-        assert!(!diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::TextBeforeId));
+        assert!(!diags.iter().any(|d| d.code == DiagnosticCode::TextBeforeId));
     }
 
     // -- 6. Header after body ------------------------------------------------
@@ -979,9 +988,11 @@ mod tests {
             },
         ]);
         let diags = validate(&doc);
-        assert!(diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::HeaderAfterBody));
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::HeaderAfterBody)
+        );
     }
 
     #[test]
@@ -1008,9 +1019,11 @@ mod tests {
             },
         ]);
         let diags = validate(&doc);
-        assert!(!diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::HeaderAfterBody));
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::HeaderAfterBody)
+        );
     }
 
     #[test]
@@ -1035,7 +1048,9 @@ mod tests {
         ]);
         let diags = validate(&doc);
         assert!(
-            !diags.iter().any(|d| d.code == DiagnosticCode::HeaderAfterBody),
+            !diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::HeaderAfterBody),
             "\\rem before \\h should not trigger header-after-body"
         );
     }
@@ -1062,7 +1077,9 @@ mod tests {
         ]);
         let diags = validate(&doc);
         assert!(
-            !diags.iter().any(|d| d.code == DiagnosticCode::HeaderAfterBody),
+            !diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::HeaderAfterBody),
             "\\ip before \\h should not trigger header-after-body"
         );
     }
@@ -1097,7 +1114,9 @@ mod tests {
         ]);
         let diags = validate(&doc);
         assert!(
-            !diags.iter().any(|d| d.code == DiagnosticCode::HeaderAfterBody),
+            !diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::HeaderAfterBody),
             "\\cl after \\c should not trigger header-after-body"
         );
     }
@@ -1132,7 +1151,9 @@ mod tests {
         ]);
         let diags = validate(&doc);
         assert!(
-            !diags.iter().any(|d| d.code == DiagnosticCode::HeaderAfterBody),
+            !diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::HeaderAfterBody),
             "\\mte1 at end of book should not trigger header-after-body"
         );
     }
@@ -1160,9 +1181,11 @@ mod tests {
             },
         ]);
         let diags = validate(&doc);
-        assert!(diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::NoteSubmarkerOutsideNote));
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::NoteSubmarkerOutsideNote)
+        );
     }
 
     #[test]
@@ -1192,9 +1215,11 @@ mod tests {
             },
         ]);
         let diags = validate(&doc);
-        assert!(!diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::NoteSubmarkerOutsideNote));
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::NoteSubmarkerOutsideNote)
+        );
     }
 
     #[test]
@@ -1219,9 +1244,11 @@ mod tests {
             },
         ]);
         let diags = validate(&doc);
-        assert!(!diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::NoteSubmarkerOutsideNote));
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::NoteSubmarkerOutsideNote)
+        );
     }
 
     // -- 8. Milestone pair matching ------------------------------------------
@@ -1247,9 +1274,11 @@ mod tests {
             },
         ]);
         let diags = validate(&doc);
-        assert!(!diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::MilestoneMismatch));
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::MilestoneMismatch)
+        );
     }
 
     #[test]
@@ -1268,9 +1297,11 @@ mod tests {
             },
         ]);
         let diags = validate(&doc);
-        assert!(diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::MilestoneMismatch));
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::MilestoneMismatch)
+        );
     }
 
     #[test]
@@ -1289,9 +1320,11 @@ mod tests {
             },
         ]);
         let diags = validate(&doc);
-        assert!(diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::MilestoneMismatch));
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::MilestoneMismatch)
+        );
     }
 
     // -- Integration: valid document produces no diagnostics ------------------

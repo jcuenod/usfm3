@@ -94,7 +94,9 @@ pub fn default_attribute(marker: &str) -> Option<&'static str> {
         "fig" => Some("src"),
         _ => {
             // Milestone markers: \qt-s, \qt1-s, \qt-e, etc. use "who".
-            let base = marker.strip_suffix("-s").or_else(|| marker.strip_suffix("-e"));
+            let base = marker
+                .strip_suffix("-s")
+                .or_else(|| marker.strip_suffix("-e"));
             if let Some(b) = base {
                 let b = b.trim_end_matches(|c: char| c.is_ascii_digit());
                 if b == "qt" {
@@ -336,14 +338,10 @@ mod tests {
     #[test]
     fn header_markers() {
         let headers = [
-            "id", "usfm", "ide", "h", "h1", "h2", "h3",
-            "toc1", "toc2", "toc3", "toca1", "toca2", "toca3",
-            "mt", "mt1", "mt2", "mt3", "mt4",
-            "mte", "mte1", "mte2",
-            "imt", "imt1", "imt2", "imt3", "imt4",
-            "imte", "imte1", "imte2",
-            "is", "is1", "is2", "is3",
-            "cl", "cp", "cd",
+            "id", "usfm", "ide", "h", "h1", "h2", "h3", "toc1", "toc2", "toc3", "toca1", "toca2",
+            "toca3", "mt", "mt1", "mt2", "mt3", "mt4", "mte", "mte1", "mte2", "imt", "imt1",
+            "imt2", "imt3", "imt4", "imte", "imte1", "imte2", "is", "is1", "is2", "is3", "cl",
+            "cp", "cd",
         ];
         for marker in &headers {
             let info = lookup_marker(marker);
@@ -367,24 +365,13 @@ mod tests {
     #[test]
     fn paragraph_markers() {
         let paragraphs = [
-            "p", "m", "po", "pr", "cls", "pmo", "pm", "pmc", "pmr",
-            "pi", "pi1", "pi2", "pi3", "mi", "nb", "pc",
-            "ph", "ph1", "ph2", "ph3", "b", "pb",
-            "q", "q1", "q2", "q3", "q4", "qr", "qc", "qa",
-            "qm", "qm1", "qm2", "qm3", "qd",
-            "lh", "li", "li1", "li2", "li3", "li4", "lf",
-            "lim", "lim1", "lim2", "lim3",
-            "ms", "ms1", "ms2", "ms3", "mr",
-            "s", "s1", "s2", "s3", "s4", "sr", "r", "sp",
-            "sd", "sd1", "sd2", "sd3", "sd4",
-            "d",
-            "ip", "ipi", "im", "imi", "ipq", "imq", "ipr",
-            "ib",
-            "iq", "iq1", "iq2", "iq3",
-            "iex",
-            "iot", "io", "io1", "io2", "io3", "io4",
-            "ili", "ili1", "ili2",
-            "ie",
+            "p", "m", "po", "pr", "cls", "pmo", "pm", "pmc", "pmr", "pi", "pi1", "pi2", "pi3",
+            "mi", "nb", "pc", "ph", "ph1", "ph2", "ph3", "b", "pb", "q", "q1", "q2", "q3", "q4",
+            "qr", "qc", "qa", "qm", "qm1", "qm2", "qm3", "qd", "lh", "li", "li1", "li2", "li3",
+            "li4", "lf", "lim", "lim1", "lim2", "lim3", "ms", "ms1", "ms2", "ms3", "mr", "s", "s1",
+            "s2", "s3", "s4", "sr", "r", "sp", "sd", "sd1", "sd2", "sd3", "sd4", "d", "ip", "ipi",
+            "im", "imi", "ipq", "imq", "ipr", "ib", "iq", "iq1", "iq2", "iq3", "iex", "iot", "io",
+            "io1", "io2", "io3", "io4", "ili", "ili1", "ili2", "ie",
         ];
         for marker in &paragraphs {
             let info = lookup_marker(marker);
@@ -428,8 +415,8 @@ mod tests {
     #[test]
     fn note_sub_markers_valid_in_note() {
         let note_subs = [
-            "fr", "ft", "fk", "fq", "fqa", "fl", "fw", "fp", "fv", "fdc",
-            "xo", "xop", "xt", "xta", "xk", "xq", "xot", "xnt", "xdc",
+            "fr", "ft", "fk", "fq", "fqa", "fl", "fw", "fp", "fv", "fdc", "xo", "xop", "xt", "xta",
+            "xk", "xq", "xot", "xnt", "xdc",
         ];
         for marker in &note_subs {
             let info = lookup_marker(marker);
@@ -439,11 +426,7 @@ mod tests {
                 "expected Character for note sub-marker \\{}",
                 marker,
             );
-            assert!(
-                info.valid_in_note,
-                "\\{} should be valid_in_note",
-                marker,
-            );
+            assert!(info.valid_in_note, "\\{} should be valid_in_note", marker,);
         }
     }
 
@@ -453,12 +436,9 @@ mod tests {
     #[test]
     fn character_markers() {
         let chars = [
-            "add", "bk", "dc", "ior", "iqt", "k", "litl", "nd", "ord",
-            "pn", "png", "qs", "qt", "sig", "sls", "tl", "wj",
-            "em", "bd", "bdit", "it", "no", "sc", "sup", "rb",
-            "pro", "w", "wg", "wh", "wa",
-            "rq", "ca", "va", "vp",
-            "jmp",
+            "add", "bk", "dc", "ior", "iqt", "k", "litl", "nd", "ord", "pn", "png", "qs", "qt",
+            "sig", "sls", "tl", "wj", "em", "bd", "bdit", "it", "no", "sc", "sup", "rb", "pro",
+            "w", "wg", "wh", "wa", "rq", "ca", "va", "vp", "jmp",
         ];
         for marker in &chars {
             let info = lookup_marker(marker);
@@ -482,9 +462,7 @@ mod tests {
     #[test]
     fn table_cell_markers() {
         let cells = [
-            "th", "th1", "th2", "th3",
-            "tc", "tc1", "tc2", "tc3",
-            "thr", "thr1", "thr2", "thr3",
+            "th", "th1", "th2", "th3", "tc", "tc1", "tc2", "tc3", "thr", "thr1", "thr2", "thr3",
             "tcr", "tcr1", "tcr2", "tcr3",
         ];
         for marker in &cells {

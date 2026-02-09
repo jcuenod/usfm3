@@ -111,9 +111,7 @@ impl Diagnostic {
         Diagnostic {
             severity: Severity::Error,
             span,
-            message: format!(
-                "expected \\{open_marker}* but found \\{close_marker}*"
-            ),
+            message: format!("expected \\{open_marker}* but found \\{close_marker}*"),
             code: DiagnosticCode::MisnestedMarker,
         }
     }
@@ -655,7 +653,10 @@ mod tests {
         list.push(Diagnostic::unknown_marker("a", 0..1));
         list.push(Diagnostic::unknown_marker("b", 1..2));
         let codes: Vec<_> = list.iter().map(|d| d.code).collect();
-        assert_eq!(codes, vec![DiagnosticCode::UnknownMarker, DiagnosticCode::UnknownMarker]);
+        assert_eq!(
+            codes,
+            vec![DiagnosticCode::UnknownMarker, DiagnosticCode::UnknownMarker]
+        );
     }
 
     #[test]

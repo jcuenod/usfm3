@@ -726,10 +726,22 @@ impl TreeBuilder {
                             }
                         }
                         match m {
-                            "ca" => { self.set_last_chapter_altnumber(text); return; }
-                            "cp" => { self.set_last_chapter_pubnumber(text); return; }
-                            "va" => { self.set_last_verse_altnumber(text); return; }
-                            "vp" => { self.set_last_verse_pubnumber(text); return; }
+                            "ca" => {
+                                self.set_last_chapter_altnumber(text);
+                                return;
+                            }
+                            "cp" => {
+                                self.set_last_chapter_pubnumber(text);
+                                return;
+                            }
+                            "va" => {
+                                self.set_last_verse_altnumber(text);
+                                return;
+                            }
+                            "vp" => {
+                                self.set_last_verse_pubnumber(text);
+                                return;
+                            }
                             _ => unreachable!(),
                         }
                     }
@@ -767,7 +779,9 @@ impl TreeBuilder {
         loop {
             let top_kind = self.stack.last().map(|o| o.kind);
             match top_kind {
-                Some(MarkerKind::Character) | Some(MarkerKind::Unknown) | Some(MarkerKind::TableCell) => {
+                Some(MarkerKind::Character)
+                | Some(MarkerKind::Unknown)
+                | Some(MarkerKind::TableCell) => {
                     let top = self.stack.pop().unwrap();
                     let node = self.finalize_open_node(top);
                     self.append_node(node);
@@ -815,7 +829,10 @@ impl TreeBuilder {
         loop {
             let top_kind = self.stack.last().map(|o| o.kind);
             match top_kind {
-                Some(MarkerKind::Character) | Some(MarkerKind::Unknown) | Some(MarkerKind::Figure) | Some(MarkerKind::TableCell) => {
+                Some(MarkerKind::Character)
+                | Some(MarkerKind::Unknown)
+                | Some(MarkerKind::Figure)
+                | Some(MarkerKind::TableCell) => {
                     let top = self.stack.pop().unwrap();
                     if !top.marker.starts_with('z') {
                         self.diagnostics.push(Diagnostic::implicitly_closed(
@@ -827,7 +844,10 @@ impl TreeBuilder {
                     let node = self.finalize_open_node(top);
                     self.append_node(node);
                 }
-                Some(MarkerKind::Paragraph) | Some(MarkerKind::Header) | Some(MarkerKind::Meta) | Some(MarkerKind::TableRow) => {
+                Some(MarkerKind::Paragraph)
+                | Some(MarkerKind::Header)
+                | Some(MarkerKind::Meta)
+                | Some(MarkerKind::TableRow) => {
                     let top = self.stack.pop().unwrap();
                     let node = self.finalize_open_node(top);
                     self.append_node(node);
@@ -916,10 +936,7 @@ impl TreeBuilder {
 
     /// Returns `true` if there is a Note-kind marker on the stack.
     fn in_note_context(&self) -> bool {
-        self.stack
-            .iter()
-            .rev()
-            .any(|o| o.kind == MarkerKind::Note)
+        self.stack.iter().rev().any(|o| o.kind == MarkerKind::Note)
     }
 
     // -----------------------------------------------------------------
@@ -1073,12 +1090,13 @@ impl TreeBuilder {
             if open.kind == MarkerKind::Note {
                 self.diagnostics
                     .push(Diagnostic::unclosed_note(&open.marker, open.span.clone()));
-            } else if open.kind == MarkerKind::SidebarStart
-                || open.kind == MarkerKind::Figure
-            {
+            } else if open.kind == MarkerKind::SidebarStart || open.kind == MarkerKind::Figure {
                 self.diagnostics
                     .push(Diagnostic::unclosed_at_eof(&open.marker, open.span.clone()));
-            } else if open.kind == MarkerKind::Character || open.kind == MarkerKind::Unknown || open.kind == MarkerKind::TableCell {
+            } else if open.kind == MarkerKind::Character
+                || open.kind == MarkerKind::Unknown
+                || open.kind == MarkerKind::TableCell
+            {
                 if !open.marker.starts_with('z') {
                     self.diagnostics
                         .push(Diagnostic::unclosed_at_eof(&open.marker, open.span.clone()));
@@ -1228,11 +1246,9 @@ fn trim_trailing_text(children: &mut Vec<Node>) {
 /// its text content is returned as the category. The `\cat` node (and any
 /// surrounding whitespace-only text) is removed from the children list.
 fn extract_category(mut children: Vec<Node>) -> (Option<String>, Vec<Node>) {
-    let cat_idx = children.iter().position(|n| {
-        match n {
-            Node::Char { marker, .. } | Node::Para { marker, .. } => marker == "cat",
-            _ => false,
-        }
+    let cat_idx = children.iter().position(|n| match n {
+        Node::Char { marker, .. } | Node::Para { marker, .. } => marker == "cat",
+        _ => false,
     });
     if let Some(idx) = cat_idx {
         let cat_node = children.remove(idx);
@@ -1262,7 +1278,11 @@ fn extract_plain_text(content: &[Node]) -> Option<String> {
         }
     }
     let trimmed = text.trim().to_string();
-    if trimmed.is_empty() { None } else { Some(trimmed) }
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
 }
 
 /// Split a string into the first whitespace-delimited word and the remainder.
@@ -1315,7 +1335,8 @@ mod tests {
 
     #[test]
     fn test_footnote() {
-        let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 text\\f + \\fr 1.1 \\ft note text\\f* more");
+        let result =
+            parse("\\id GEN\n\\c 1\n\\p\n\\v 1 text\\f + \\fr 1.1 \\ft note text\\f* more");
         // Should have a Note node inside the Para
         let has_note = result.document.content.iter().any(|n| {
             if let Node::Para { content, .. } = n {
@@ -1360,9 +1381,7 @@ mod tests {
         let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 \\qt1-s text \\qt1-e");
         let has_milestone = result.document.content.iter().any(|n| {
             if let Node::Para { content, .. } = n {
-                content
-                    .iter()
-                    .any(|c| matches!(c, Node::Milestone { .. }))
+                content.iter().any(|c| matches!(c, Node::Milestone { .. }))
             } else {
                 false
             }
@@ -1522,9 +1541,11 @@ mod tests {
     fn test_header_markers_become_para() {
         let result = parse("\\id GEN\n\\h Genesis");
         // \h should become a Para node.
-        let has_para = result.document.content.iter().any(|n| {
-            matches!(n, Node::Para { marker, .. } if marker == "h")
-        });
+        let has_para = result
+            .document
+            .content
+            .iter()
+            .any(|n| matches!(n, Node::Para { marker, .. } if marker == "h"));
         assert!(has_para);
     }
 
@@ -1545,33 +1566,38 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.code == crate::diagnostics::DiagnosticCode::UnknownMarker);
-        assert!(!has_unknown, "\\z-prefix markers should not produce UnknownMarker diagnostics");
+        assert!(
+            !has_unknown,
+            "\\z-prefix markers should not produce UnknownMarker diagnostics"
+        );
     }
 
     #[test]
     fn test_z_prefix_implicit_close_no_diagnostic() {
         // \zcustom implicitly closed by paragraph should not produce diagnostics.
         let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 \\zcustom text\n\\p next para");
-        let implicit_close_on_z = result
-            .diagnostics
-            .iter()
-            .any(|d| d.code == crate::diagnostics::DiagnosticCode::ImplicitClose
-                && d.message.contains("zcustom"));
-        assert!(!implicit_close_on_z,
-            "\\z-prefix markers should not produce ImplicitClose diagnostics");
+        let implicit_close_on_z = result.diagnostics.iter().any(|d| {
+            d.code == crate::diagnostics::DiagnosticCode::ImplicitClose
+                && d.message.contains("zcustom")
+        });
+        assert!(
+            !implicit_close_on_z,
+            "\\z-prefix markers should not produce ImplicitClose diagnostics"
+        );
     }
 
     #[test]
     fn test_z_prefix_unclosed_eof_no_diagnostic() {
         // \zcustom left open at EOF should not produce diagnostics.
         let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 \\zcustom text");
-        let unclosed_eof_on_z = result
-            .diagnostics
-            .iter()
-            .any(|d| d.code == crate::diagnostics::DiagnosticCode::UnclosedAtEof
-                && d.message.contains("zcustom"));
-        assert!(!unclosed_eof_on_z,
-            "\\z-prefix markers should not produce UnclosedAtEof diagnostics");
+        let unclosed_eof_on_z = result.diagnostics.iter().any(|d| {
+            d.code == crate::diagnostics::DiagnosticCode::UnclosedAtEof
+                && d.message.contains("zcustom")
+        });
+        assert!(
+            !unclosed_eof_on_z,
+            "\\z-prefix markers should not produce UnclosedAtEof diagnostics"
+        );
     }
 
     #[test]
@@ -1582,14 +1608,18 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.code == crate::diagnostics::DiagnosticCode::UnknownMarker);
-        assert!(has_unknown,
-            "Non-z unknown markers should still produce UnknownMarker diagnostics");
+        assert!(
+            has_unknown,
+            "Non-z unknown markers should still produce UnknownMarker diagnostics"
+        );
         let has_eof = result
             .diagnostics
             .iter()
             .any(|d| d.code == crate::diagnostics::DiagnosticCode::UnclosedAtEof);
-        assert!(has_eof,
-            "Non-z unknown markers should still produce UnclosedAtEof diagnostics");
+        assert!(
+            has_eof,
+            "Non-z unknown markers should still produce UnclosedAtEof diagnostics"
+        );
     }
 
     #[test]

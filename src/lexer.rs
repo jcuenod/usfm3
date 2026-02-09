@@ -14,7 +14,6 @@ pub type Span = std::ops::Range<usize>;
 #[logos(skip r"[ \t\r]+")] // skip spaces, tabs, and CR (but NOT newlines)
 pub enum Token<'a> {
     // ── Fixed keywords ──────────────────────────────────────────────────
-
     /// `\c` -- chapter marker (takes a numeric argument as the next token).
     #[token("\\c", priority = 5)]
     Chapter,
@@ -24,13 +23,11 @@ pub enum Token<'a> {
     Verse,
 
     // ── Milestones ──────────────────────────────────────────────────────
-
     /// Milestone markers such as `\qt1-s`, `\qt-e`, `\ts-s`, etc.
     #[regex(r"\\[a-z]+[0-9]*-[se]")]
     Milestone(&'a str),
 
     // ── Nested markers (USFM 2.4+) ─────────────────────────────────────
-
     /// `\+marker` -- nested character opening marker.
     #[regex(r"\\\+[a-z]+[0-9]*")]
     NestedMarker(&'a str),
@@ -40,13 +37,11 @@ pub enum Token<'a> {
     NestedClosingMarker(&'a str),
 
     // ── Milestone terminator ────────────────────────────────────────────
-
     /// `\*` -- milestone attribute block terminator.
     #[token("\\*", priority = 5)]
     MilestoneEnd,
 
     // ── Regular markers ─────────────────────────────────────────────────
-
     /// `\marker*` -- character / note closing marker.
     #[regex(r"\\[a-z]+[0-9]*\*")]
     ClosingMarker(&'a str),
@@ -56,13 +51,11 @@ pub enum Token<'a> {
     Marker(&'a str),
 
     // ── Attributes ──────────────────────────────────────────────────────
-
     /// Attribute block starting with `|`, e.g. `|lemma="grace" strong="H1234"`.
     #[regex(r"\|[^\\\n]+")]
     Attributes(&'a str),
 
     // ── Text ────────────────────────────────────────────────────────────
-
     /// Any run of text that is not a backslash, newline, or pipe.
     /// The first character must not be a space, tab, or CR (to avoid conflict
     /// with the skip pattern), but subsequent characters may include whitespace.
@@ -70,7 +63,6 @@ pub enum Token<'a> {
     Text(&'a str),
 
     // ── Structural ──────────────────────────────────────────────────────
-
     /// A newline character -- significant because paragraph boundaries in
     /// USFM often coincide with newlines.
     #[token("\n")]
@@ -391,7 +383,13 @@ mod tests {
         let tokens = tokenize(r"\it testimony \it*");
         let text_tokens: Vec<&str> = tokens
             .iter()
-            .filter_map(|t| if let Token::Text(s) = &t.0 { Some(*s) } else { None })
+            .filter_map(|t| {
+                if let Token::Text(s) = &t.0 {
+                    Some(*s)
+                } else {
+                    None
+                }
+            })
             .collect();
         assert_eq!(text_tokens, vec!["testimony "]);
     }
@@ -401,7 +399,13 @@ mod tests {
         let tokens = tokenize(r"\+nd Lord \+nd*");
         let text_tokens: Vec<&str> = tokens
             .iter()
-            .filter_map(|t| if let Token::Text(s) = &t.0 { Some(*s) } else { None })
+            .filter_map(|t| {
+                if let Token::Text(s) = &t.0 {
+                    Some(*s)
+                } else {
+                    None
+                }
+            })
             .collect();
         assert_eq!(text_tokens, vec!["Lord "]);
     }
@@ -411,7 +415,13 @@ mod tests {
         let tokens = tokenize(r"\it man\it*");
         let text_tokens: Vec<&str> = tokens
             .iter()
-            .filter_map(|t| if let Token::Text(s) = &t.0 { Some(*s) } else { None })
+            .filter_map(|t| {
+                if let Token::Text(s) = &t.0 {
+                    Some(*s)
+                } else {
+                    None
+                }
+            })
             .collect();
         assert_eq!(text_tokens, vec!["man"]);
     }

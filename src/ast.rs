@@ -328,7 +328,7 @@ impl Node {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     // -- Construction helpers ------------------------------------------------
 

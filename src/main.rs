@@ -10,10 +10,12 @@ fn main() {
         })
     } else {
         let mut buf = String::new();
-        std::io::stdin().read_to_string(&mut buf).unwrap_or_else(|e| {
-            eprintln!("Error reading stdin: {}", e);
-            std::process::exit(1);
-        });
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .unwrap_or_else(|e| {
+                eprintln!("Error reading stdin: {}", e);
+                std::process::exit(1);
+            });
         buf
     };
 
@@ -40,8 +42,8 @@ fn main() {
             println!("{json}");
         }
         "usx" => {
-            let xml = rsusfm3::usx::to_usx_string(&result.document)
-                .expect("USX serialization failed");
+            let xml =
+                rsusfm3::usx::to_usx_string(&result.document).expect("USX serialization failed");
             println!("{xml}");
         }
         "usfm" => {

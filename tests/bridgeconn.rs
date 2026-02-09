@@ -109,8 +109,24 @@ fn standard_keys(node_type: &str) -> &'static [&'static str] {
         "ms" => &["type", "marker"],
         "char" => &["type", "marker", "content"],
         "figure" => &["type", "marker", "content"],
-        "chapter" => &["type", "marker", "number", "sid", "altnumber", "pubnumber", "content"],
-        "verse" => &["type", "marker", "number", "sid", "altnumber", "pubnumber", "content"],
+        "chapter" => &[
+            "type",
+            "marker",
+            "number",
+            "sid",
+            "altnumber",
+            "pubnumber",
+            "content",
+        ],
+        "verse" => &[
+            "type",
+            "marker",
+            "number",
+            "sid",
+            "altnumber",
+            "pubnumber",
+            "content",
+        ],
         "book" => &["type", "marker", "code", "content"],
         "para" => &["type", "marker", "content"],
         "note" => &["type", "marker", "caller", "category", "content"],
@@ -235,11 +251,7 @@ fn diff_values(path: &str, ours: &Value, expected: &Value) -> Vec<String> {
         }
         (Value::Array(a), Value::Array(b)) => {
             if a.len() != b.len() {
-                diffs.push(format!(
-                    "{path}: array length {} vs {}",
-                    a.len(),
-                    b.len()
-                ));
+                diffs.push(format!("{path}: array length {} vs {}", a.len(), b.len()));
             }
             for (i, (va, vb)) in a.iter().zip(b.iter()).enumerate() {
                 diffs.extend(diff_values(&format!("{path}[{i}]"), va, vb));
@@ -331,19 +343,13 @@ struct CategoryStats {
     skipped: usize,
 }
 
-fn print_summary(
-    results: &BTreeMap<String, (TestResult, bool)>,
-) -> (Vec<String>, Vec<String>) {
+fn print_summary(results: &BTreeMap<String, (TestResult, bool)>) -> (Vec<String>, Vec<String>) {
     let mut by_category: BTreeMap<String, CategoryStats> = BTreeMap::new();
     let mut unexpected_failures = Vec::new();
     let mut unexpected_passes = Vec::new();
 
     for (name, (result, is_expected_failure)) in results {
-        let category = name
-            .split('/')
-            .next()
-            .unwrap_or("unknown")
-            .to_string();
+        let category = name.split('/').next().unwrap_or("unknown").to_string();
         let stats = by_category.entry(category).or_default();
         stats.total += 1;
 

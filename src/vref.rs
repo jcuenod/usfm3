@@ -75,7 +75,9 @@ pub fn to_vref_map(doc: &Document) -> serde_json::Map<String, serde_json::Value>
             Node::Chapter { number, .. } => {
                 chapter = number.clone();
             }
-            Node::Para { marker, content, .. } => {
+            Node::Para {
+                marker, content, ..
+            } => {
                 if !is_verse_paragraph(marker) {
                     continue;
                 }
@@ -121,10 +123,7 @@ pub fn to_vref_map(doc: &Document) -> serde_json::Map<String, serde_json::Value>
     // Flush the last verse.
     let trimmed = current_text.trim();
     if !current_ref.is_empty() && !trimmed.is_empty() {
-        map.insert(
-            current_ref,
-            serde_json::Value::String(trimmed.to_string()),
-        );
+        map.insert(current_ref, serde_json::Value::String(trimmed.to_string()));
     }
 
     map
@@ -516,13 +515,7 @@ mod tests {
         };
         let map = to_vref_map(&doc);
         assert_eq!(map.len(), 2);
-        assert_eq!(
-            map.get("GEN 1:1").and_then(|v| v.as_str()),
-            Some("First.")
-        );
-        assert_eq!(
-            map.get("GEN 1:2").and_then(|v| v.as_str()),
-            Some("Second.")
-        );
+        assert_eq!(map.get("GEN 1:1").and_then(|v| v.as_str()), Some("First."));
+        assert_eq!(map.get("GEN 1:2").and_then(|v| v.as_str()), Some("Second."));
     }
 }

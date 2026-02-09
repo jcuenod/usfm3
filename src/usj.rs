@@ -117,7 +117,10 @@ mod tests {
         assert_eq!(value["content"][1]["number"], "1");
         assert_eq!(value["content"][2]["type"], "para");
         assert_eq!(value["content"][2]["content"][0]["type"], "verse");
-        assert_eq!(value["content"][2]["content"][1], "In the beginning God created the heavens and the earth.");
+        assert_eq!(
+            value["content"][2]["content"][1],
+            "In the beginning God created the heavens and the earth."
+        );
     }
 
     #[test]
@@ -138,13 +141,11 @@ mod tests {
     #[test]
     fn test_usj_text_is_bare_string() {
         let doc = Document {
-            content: vec![
-                Node::Para {
-                    marker: "p".into(),
-                    content: vec![Node::text("hello world")],
-                    span: 0..20,
-                },
-            ],
+            content: vec![Node::Para {
+                marker: "p".into(),
+                content: vec![Node::text("hello world")],
+                span: 0..20,
+            }],
         };
         let value = to_usj_value(&doc).unwrap();
         // Text nodes should be bare strings, not objects
@@ -154,34 +155,30 @@ mod tests {
     #[test]
     fn test_usj_note() {
         let doc = Document {
-            content: vec![
-                Node::Para {
-                    marker: "p".into(),
+            content: vec![Node::Para {
+                marker: "p".into(),
+                content: vec![Node::Note {
+                    marker: "f".into(),
+                    caller: "+".into(),
+                    category: None,
                     content: vec![
-                        Node::Note {
-                            marker: "f".into(),
-                            caller: "+".into(),
-                            category: None,
-                            content: vec![
-                                Node::Char {
-                                    marker: "fr".into(),
-                                    content: vec![Node::text("1.1")],
-                                    attributes: vec![],
-                                    span: 5..10,
-                                },
-                                Node::Char {
-                                    marker: "ft".into(),
-                                    content: vec![Node::text("A footnote")],
-                                    attributes: vec![],
-                                    span: 10..25,
-                                },
-                            ],
-                            span: 0..30,
+                        Node::Char {
+                            marker: "fr".into(),
+                            content: vec![Node::text("1.1")],
+                            attributes: vec![],
+                            span: 5..10,
+                        },
+                        Node::Char {
+                            marker: "ft".into(),
+                            content: vec![Node::text("A footnote")],
+                            attributes: vec![],
+                            span: 10..25,
                         },
                     ],
-                    span: 0..35,
-                },
-            ],
+                    span: 0..30,
+                }],
+                span: 0..35,
+            }],
         };
         let value = to_usj_value(&doc).unwrap();
         let note = &value["content"][0]["content"][0];

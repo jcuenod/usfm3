@@ -153,7 +153,13 @@ fn serialize_node<W: std::io::Write>(
             }
         }
 
-        Node::Chapter { number, sid, altnumber, pubnumber, .. } => {
+        Node::Chapter {
+            number,
+            sid,
+            altnumber,
+            pubnumber,
+            ..
+        } => {
             // Close previous verse and chapter before opening a new chapter.
             state.close_verse(writer)?;
             state.close_chapter(writer)?;
@@ -174,7 +180,13 @@ fn serialize_node<W: std::io::Write>(
             state.current_chapter_sid = Some(sid_str.to_string());
         }
 
-        Node::Verse { number, sid, altnumber, pubnumber, .. } => {
+        Node::Verse {
+            number,
+            sid,
+            altnumber,
+            pubnumber,
+            ..
+        } => {
             // Close the previous verse before opening a new one.
             state.close_verse(writer)?;
 

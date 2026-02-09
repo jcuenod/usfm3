@@ -65,10 +65,7 @@ impl<'a> UsfmSerializer<'a> {
     /// Ensure a single space separator exists before the next token, unless
     /// we are already at line-start or the output already ends with a space.
     fn ensure_space(&mut self) {
-        if !self.at_line_start
-            && !self.output.ends_with(' ')
-            && !self.output.ends_with('\n')
-        {
+        if !self.at_line_start && !self.output.ends_with(' ') && !self.output.ends_with('\n') {
             self.output.push(' ');
         }
     }
@@ -77,11 +74,14 @@ impl<'a> UsfmSerializer<'a> {
 
     fn serialize_node(&mut self, node: &Node) {
         match node {
-            Node::Book {
-                code, content, ..
-            } => self.serialize_book(code, content),
+            Node::Book { code, content, .. } => self.serialize_book(code, content),
 
-            Node::Chapter { number, altnumber, pubnumber, .. } => {
+            Node::Chapter {
+                number,
+                altnumber,
+                pubnumber,
+                ..
+            } => {
                 self.serialize_chapter(number);
                 if let Some(alt) = altnumber {
                     self.output.push_str(" \\ca ");
@@ -94,7 +94,12 @@ impl<'a> UsfmSerializer<'a> {
                 }
             }
 
-            Node::Verse { number, altnumber, pubnumber, .. } => {
+            Node::Verse {
+                number,
+                altnumber,
+                pubnumber,
+                ..
+            } => {
                 self.serialize_verse(number);
                 if let Some(alt) = altnumber {
                     self.output.push_str("\\va ");
@@ -307,12 +312,7 @@ impl<'a> UsfmSerializer<'a> {
     }
 
     /// Figure: `\fig caption|src="img.jpg"\fig*`
-    fn serialize_figure(
-        &mut self,
-        marker: &str,
-        content: &[Node],
-        attributes: &[Attribute],
-    ) {
+    fn serialize_figure(&mut self, marker: &str, content: &[Node], attributes: &[Attribute]) {
         self.output.push('\\');
         self.output.push_str(marker);
         self.output.push(' ');
