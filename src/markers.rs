@@ -41,6 +41,13 @@ pub enum MarkerKind {
     /// \rem, \sts, \restore -- metadata markers.
     Meta,
 
+    /// \periph -- peripheral content section container.
+    Periph,
+
+    /// \tr -- table row.
+    /// Implicitly closed by the next \tr or paragraph marker.
+    TableRow,
+
     /// \th1, \tc1, \thr1, \tcr1 -- table cells within \tr rows.
     /// Implicitly closed by the next table cell marker within the same row.
     TableCell,
@@ -70,6 +77,42 @@ impl MarkerInfo {
             kind,
             valid_in_note: true,
         }
+    }
+}
+
+/// Return the default attribute key for a marker, if any.
+///
+/// When the USFM pipe syntax uses a bare value (e.g. `\w word|grace\w*`),
+/// this value is treated as the marker's default attribute. For example,
+/// `\w` uses `"lemma"`, so `|grace` becomes `lemma="grace"`.
+pub fn default_attribute(marker: &str) -> Option<&'static str> {
+    match marker {
+        "w" => Some("lemma"),
+        "rb" => Some("gloss"),
+        "jmp" => Some("link-href"),
+        "xt" => Some("href"),
+        "fig" => Some("src"),
+        _ => {
+            // Milestone markers: \qt-s, \qt1-s, \qt-e, etc. use "who".
+            let base = marker.strip_suffix("-s").or_else(|| marker.strip_suffix("-e"));
+            if let Some(b) = base {
+                let b = b.trim_end_matches(|c: char| c.is_ascii_digit());
+                if b == "qt" {
+                    return Some("who");
+                }
+            }
+            None
+        }
+    }
+}
+
+/// Returns the list of required attribute names for a given marker.
+///
+/// Most markers have no required attributes; `\rb` requires `"gloss"`.
+pub fn required_attributes(marker: &str) -> &'static [&'static str] {
+    match marker {
+        "rb" => &["gloss"],
+        _ => &[],
     }
 }
 
@@ -164,13 +207,17 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
 
         // -- introduction end --
         | "ie"
-
-        // -- table row --
-        | "tr"
-
-        // -- peripheral content --
-        | "periph"
         => MarkerInfo::new(MarkerKind::Paragraph),
+
+        // =============================================================
+        // Peripheral content section
+        // =============================================================
+        "periph" => MarkerInfo::new(MarkerKind::Periph),
+
+        // =============================================================
+        // Table row marker
+        // =============================================================
+        "tr" => MarkerInfo::new(MarkerKind::TableRow),
 
         // =============================================================
         // Note markers (footnote, endnote, cross-reference)
@@ -212,6 +259,9 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
         // -- linking --
         | "jmp"
 
+        // -- acrostic / liturgical --
+        | "qac" | "lik" | "liv"
+
         => MarkerInfo::new(MarkerKind::Character),
 
         // =============================================================
@@ -249,6 +299,11 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
         // =============================================================
         "rem" | "sts" | "restore" | "lit" | "cat"
         => MarkerInfo::new(MarkerKind::Meta),
+
+        // =============================================================
+        // Self-closing milestone markers (use \marker\* syntax)
+        // =============================================================
+        "ts" => MarkerInfo::new(MarkerKind::MilestoneStart),
 
         // =============================================================
         // Unknown / unrecognized — with dynamic numbered-variant fallback
@@ -330,8 +385,6 @@ mod tests {
             "iot", "io", "io1", "io2", "io3", "io4",
             "ili", "ili1", "ili2",
             "ie",
-            "tr",
-            "periph",
         ];
         for marker in &paragraphs {
             let info = lookup_marker(marker);
@@ -342,6 +395,10 @@ mod tests {
                 marker,
             );
         }
+        // Periph is its own kind
+        assert_eq!(lookup_marker("periph").kind, MarkerKind::Periph);
+        // Table row is its own kind
+        assert_eq!(lookup_marker("tr").kind, MarkerKind::TableRow);
     }
 
     // -----------------------------------------------------------------

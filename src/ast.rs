@@ -57,6 +57,10 @@ pub enum Node {
         number: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         sid: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        altnumber: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pubnumber: Option<String>,
         #[serde(skip)]
         span: Span,
     },
@@ -68,6 +72,10 @@ pub enum Node {
         number: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         sid: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        altnumber: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pubnumber: Option<String>,
         #[serde(skip)]
         span: Span,
     },
@@ -88,6 +96,8 @@ pub enum Node {
         marker: String,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         content: Vec<Node>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        attributes: Vec<Attribute>,
         #[serde(skip)]
         span: Span,
     },
@@ -97,6 +107,8 @@ pub enum Node {
     Note {
         marker: String,
         caller: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        category: Option<String>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         content: Vec<Node>,
         #[serde(skip)]
@@ -129,6 +141,51 @@ pub enum Node {
     #[serde(rename = "sidebar")]
     Sidebar {
         marker: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        category: Option<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        content: Vec<Node>,
+        #[serde(skip)]
+        span: Span,
+    },
+
+    /// `\periph` -- peripheral content section.
+    #[serde(rename = "periph")]
+    Periph {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        alt: Option<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        content: Vec<Node>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        attributes: Vec<Attribute>,
+        #[serde(skip)]
+        span: Span,
+    },
+
+    /// Table container wrapping consecutive `\tr` rows.
+    #[serde(rename = "table")]
+    Table {
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        content: Vec<Node>,
+        #[serde(skip)]
+        span: Span,
+    },
+
+    /// `\tr` -- table row container.
+    #[serde(rename = "table:row")]
+    TableRow {
+        marker: String,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        content: Vec<Node>,
+        #[serde(skip)]
+        span: Span,
+    },
+
+    /// `\th1`, `\tc2`, etc. -- table cell.
+    #[serde(rename = "table:cell")]
+    TableCell {
+        marker: String,
+        align: String,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         content: Vec<Node>,
         #[serde(skip)]
@@ -185,6 +242,10 @@ impl Node {
             | Node::Note { content, .. }
             | Node::Figure { content, .. }
             | Node::Sidebar { content, .. }
+            | Node::Periph { content, .. }
+            | Node::Table { content, .. }
+            | Node::TableRow { content, .. }
+            | Node::TableCell { content, .. }
             | Node::Unknown { content, .. } => content,
             Node::Chapter { .. } | Node::Verse { .. } | Node::Milestone { .. } | Node::Text(_) => {
                 &[]
@@ -204,6 +265,10 @@ impl Node {
             | Node::Note { content, .. }
             | Node::Figure { content, .. }
             | Node::Sidebar { content, .. }
+            | Node::Periph { content, .. }
+            | Node::Table { content, .. }
+            | Node::TableRow { content, .. }
+            | Node::TableCell { content, .. }
             | Node::Unknown { content, .. } => Some(content),
             Node::Chapter { .. } | Node::Verse { .. } | Node::Milestone { .. } | Node::Text(_) => {
                 None
@@ -225,8 +290,10 @@ impl Node {
             | Node::Milestone { marker, .. }
             | Node::Figure { marker, .. }
             | Node::Sidebar { marker, .. }
+            | Node::TableRow { marker, .. }
+            | Node::TableCell { marker, .. }
             | Node::Unknown { marker, .. } => Some(marker),
-            Node::Text(_) => None,
+            Node::Table { .. } | Node::Periph { .. } | Node::Text(_) => None,
         }
     }
 
@@ -244,6 +311,10 @@ impl Node {
             | Node::Milestone { span, .. }
             | Node::Figure { span, .. }
             | Node::Sidebar { span, .. }
+            | Node::Periph { span, .. }
+            | Node::Table { span, .. }
+            | Node::TableRow { span, .. }
+            | Node::TableCell { span, .. }
             | Node::Unknown { span, .. } => Some(span),
             Node::Text(_) => None,
         }
@@ -286,6 +357,8 @@ mod tests {
             marker: "c".into(),
             number: "1".into(),
             sid: Some("GEN 1".into()),
+            altnumber: None,
+            pubnumber: None,
             span: 10..14,
         };
         assert_eq!(node.marker(), Some("c"));
@@ -301,6 +374,8 @@ mod tests {
             marker: "v".into(),
             number: "3-4".into(),
             sid: Some("GEN 1:3-4".into()),
+            altnumber: None,
+            pubnumber: None,
             span: 20..25,
         };
         assert_eq!(node.marker(), Some("v"));
@@ -323,6 +398,7 @@ mod tests {
         let node = Node::Char {
             marker: "nd".into(),
             content: vec![Node::text("Lord")],
+            attributes: vec![],
             span: 40..55,
         };
         assert_eq!(node.marker(), Some("nd"));
@@ -334,6 +410,7 @@ mod tests {
         let node = Node::Note {
             marker: "f".into(),
             caller: "+".into(),
+            category: None,
             content: vec![Node::text("A footnote.")],
             span: 60..80,
         };
@@ -380,6 +457,7 @@ mod tests {
     fn create_sidebar_node() {
         let node = Node::Sidebar {
             marker: "esb".into(),
+            category: None,
             content: vec![Node::Para {
                 marker: "p".into(),
                 content: vec![Node::text("Sidebar content")],
@@ -443,6 +521,8 @@ mod tests {
             marker: "v".into(),
             number: "1".into(),
             sid: None,
+            altnumber: None,
+            pubnumber: None,
             span: 0..3,
         };
         assert!(node.children_mut().is_none());
@@ -474,6 +554,8 @@ mod tests {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
+                    altnumber: None,
+                    pubnumber: None,
                     span: 20..25,
                 },
                 Node::Para {
@@ -483,6 +565,8 @@ mod tests {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
+                            altnumber: None,
+                            pubnumber: None,
                             span: 30..33,
                         },
                         Node::text("In the beginning God created the heavens and the earth."),
@@ -537,15 +621,18 @@ mod tests {
         let note = Node::Note {
             marker: "f".into(),
             caller: "+".into(),
+            category: None,
             content: vec![
                 Node::Char {
                     marker: "fr".into(),
                     content: vec![Node::text("1.1")],
+                    attributes: vec![],
                     span: 0..5,
                 },
                 Node::Char {
                     marker: "ft".into(),
                     content: vec![Node::text("Some manuscripts read ...")],
+                    attributes: vec![],
                     span: 5..30,
                 },
             ],
@@ -631,6 +718,8 @@ mod tests {
             marker: "v".into(),
             number: "1".into(),
             sid: None,
+            altnumber: None,
+            pubnumber: None,
             span: 0..3,
         };
 
@@ -651,6 +740,7 @@ mod tests {
         let node = Node::Char {
             marker: "nd".into(),
             content: vec![Node::text("Lord")],
+            attributes: vec![],
             span: 0..10,
         };
 
@@ -664,6 +754,7 @@ mod tests {
     fn serialize_sidebar_to_json() {
         let node = Node::Sidebar {
             marker: "esb".into(),
+            category: None,
             content: vec![Node::Para {
                 marker: "p".into(),
                 content: vec![Node::text("Sidebar text")],

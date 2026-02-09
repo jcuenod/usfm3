@@ -42,6 +42,7 @@ pub enum DiagnosticCode {
     InvalidChapterSequence,
     InvalidVerseSequence,
     DuplicateChapter,
+    DuplicateId,
     MissingIdMarker,
     InvalidBookCode,
     NoteSubmarkerOutsideNote,
@@ -51,6 +52,12 @@ pub enum DiagnosticCode {
     InvalidAttributes,
     MissingChapterNumber,
     MissingVerseNumber,
+    MissingChapterMarker,
+    CharCrossesVerseBoundary,
+    EmptyFigure,
+    UnquotedAttributeValue,
+    MissingRequiredAttribute,
+    DefaultAttributeNotDefined,
 }
 
 /// A diagnostic message with source location.
@@ -79,13 +86,15 @@ impl Diagnostic {
         }
     }
 
-    /// A marker was implicitly closed (e.g., paragraph closed by next paragraph).
+    /// A marker was implicitly closed (e.g., character marker closed by next
+    /// paragraph).  In USFM 3.1, character styles must be explicitly closed,
+    /// so this is an error.
     ///
     /// The `close_span` is used as the diagnostic span (where the problem manifests),
     /// while the opening location is mentioned in the message.
     pub fn implicitly_closed(marker: &str, open_span: Span, close_span: Span) -> Self {
         Diagnostic {
-            severity: Severity::Warning,
+            severity: Severity::Error,
             span: close_span,
             message: format!(
                 "\\{marker} (opened at byte {}) was implicitly closed",
@@ -243,6 +252,16 @@ impl Diagnostic {
         }
     }
 
+    /// A duplicate `\id` marker was found in the document.
+    pub fn duplicate_id(span: Span) -> Self {
+        Diagnostic {
+            severity: Severity::Error,
+            span,
+            message: "duplicate \\id marker found".to_string(),
+            code: DiagnosticCode::DuplicateId,
+        }
+    }
+
     /// A `\c` marker is missing its chapter number.
     pub fn missing_chapter_number(span: Span) -> Self {
         Diagnostic {
@@ -260,6 +279,68 @@ impl Diagnostic {
             span,
             message: "\\v marker is missing a verse number".to_string(),
             code: DiagnosticCode::MissingVerseNumber,
+        }
+    }
+
+    /// The document has no `\c` chapter marker.
+    pub fn missing_chapter_marker() -> Self {
+        Diagnostic {
+            severity: Severity::Error,
+            span: 0..0,
+            message: "document has no \\c chapter marker".to_string(),
+            code: DiagnosticCode::MissingChapterMarker,
+        }
+    }
+
+    /// A character marker spans across a verse boundary.
+    pub fn char_crosses_verse(marker: &str, span: Span) -> Self {
+        Diagnostic {
+            severity: Severity::Error,
+            span,
+            message: format!("\\{marker} spans across a verse boundary"),
+            code: DiagnosticCode::CharCrossesVerseBoundary,
+        }
+    }
+
+    /// A `\fig` marker has no content or attributes.
+    pub fn empty_figure(span: Span) -> Self {
+        Diagnostic {
+            severity: Severity::Error,
+            span,
+            message: "\\fig has no content or attributes".to_string(),
+            code: DiagnosticCode::EmptyFigure,
+        }
+    }
+
+    /// An attribute value is not properly quoted.
+    pub fn unquoted_attribute_value(attr: &str, span: Span) -> Self {
+        Diagnostic {
+            severity: Severity::Error,
+            span,
+            message: format!("attribute value for \"{attr}\" must be quoted"),
+            code: DiagnosticCode::UnquotedAttributeValue,
+        }
+    }
+
+    /// A required attribute is missing.
+    pub fn missing_required_attribute(marker: &str, attr: &str, span: Span) -> Self {
+        Diagnostic {
+            severity: Severity::Error,
+            span,
+            message: format!("\\{marker} is missing required attribute \"{attr}\""),
+            code: DiagnosticCode::MissingRequiredAttribute,
+        }
+    }
+
+    /// A default attribute was used on a marker that has no default attribute defined.
+    pub fn default_attribute_not_defined(marker: &str, span: Span) -> Self {
+        Diagnostic {
+            severity: Severity::Error,
+            span,
+            message: format!(
+                "\\{marker} does not define a default attribute; value after | is invalid"
+            ),
+            code: DiagnosticCode::DefaultAttributeNotDefined,
         }
     }
 }
@@ -348,7 +429,7 @@ mod tests {
     #[test]
     fn test_implicitly_closed() {
         let d = Diagnostic::implicitly_closed("p", 0..2, 50..53);
-        assert_eq!(d.severity, Severity::Warning);
+        assert_eq!(d.severity, Severity::Error);
         assert_eq!(d.code, DiagnosticCode::ImplicitClose);
         assert_eq!(d.span, 50..53);
         assert!(d.message.contains("\\p"));
@@ -525,7 +606,7 @@ mod tests {
 
     #[test]
     fn test_diagnostic_display_warning() {
-        let d = Diagnostic::implicitly_closed("p", 0..2, 50..53);
+        let d = Diagnostic::invalid_chapter_sequence(1, 3, 20..22);
         let s = format!("{d}");
         assert!(s.starts_with("warning: "));
     }
@@ -581,12 +662,12 @@ mod tests {
     fn test_diagnostic_list_errors_filter() {
         let mut list = DiagnosticList::new();
         list.push(Diagnostic::unknown_marker("zzz", 0..3)); // Error
-        list.push(Diagnostic::implicitly_closed("p", 0..2, 50..53)); // Warning
+        list.push(Diagnostic::implicitly_closed("p", 0..2, 50..53)); // Error
         list.push(Diagnostic::stray_close("nd", 10..14)); // Error
         list.push(Diagnostic::invalid_chapter_sequence(1, 3, 20..22)); // Warning
 
         let errors: Vec<_> = list.errors().collect();
-        assert_eq!(errors.len(), 2);
+        assert_eq!(errors.len(), 3);
         assert!(errors.iter().all(|d| d.severity == Severity::Error));
     }
 
@@ -594,12 +675,12 @@ mod tests {
     fn test_diagnostic_list_warnings_filter() {
         let mut list = DiagnosticList::new();
         list.push(Diagnostic::unknown_marker("zzz", 0..3)); // Error
-        list.push(Diagnostic::implicitly_closed("p", 0..2, 50..53)); // Warning
+        list.push(Diagnostic::implicitly_closed("p", 0..2, 50..53)); // Error
         list.push(Diagnostic::stray_close("nd", 10..14)); // Error
         list.push(Diagnostic::invalid_chapter_sequence(1, 3, 20..22)); // Warning
 
         let warnings: Vec<_> = list.warnings().collect();
-        assert_eq!(warnings.len(), 2);
+        assert_eq!(warnings.len(), 1);
         assert!(warnings.iter().all(|d| d.severity == Severity::Warning));
     }
 
@@ -607,9 +688,6 @@ mod tests {
     fn test_diagnostic_list_has_errors() {
         let mut list = DiagnosticList::new();
         list.push(Diagnostic::implicitly_closed("p", 0..2, 50..53));
-        assert!(!list.has_errors());
-
-        list.push(Diagnostic::unknown_marker("zzz", 0..3));
         assert!(list.has_errors());
     }
 

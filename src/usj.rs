@@ -62,6 +62,8 @@ mod tests {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
+                    altnumber: None,
+                    pubnumber: None,
                     span: 20..25,
                 },
                 Node::Para {
@@ -71,6 +73,8 @@ mod tests {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
+                            altnumber: None,
+                            pubnumber: None,
                             span: 30..33,
                         },
                         Node::text("In the beginning God created the heavens and the earth."),
@@ -157,15 +161,18 @@ mod tests {
                         Node::Note {
                             marker: "f".into(),
                             caller: "+".into(),
+                            category: None,
                             content: vec![
                                 Node::Char {
                                     marker: "fr".into(),
                                     content: vec![Node::text("1.1")],
+                                    attributes: vec![],
                                     span: 5..10,
                                 },
                                 Node::Char {
                                     marker: "ft".into(),
                                     content: vec![Node::text("A footnote")],
+                                    attributes: vec![],
                                     span: 10..25,
                                 },
                             ],

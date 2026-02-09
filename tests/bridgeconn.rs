@@ -1,5 +1,6 @@
 use rsusfm3::builder;
 use rsusfm3::usj;
+use rsusfm3::validation;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
@@ -108,15 +109,15 @@ fn standard_keys(node_type: &str) -> &'static [&'static str] {
         "ms" => &["type", "marker"],
         "char" => &["type", "marker", "content"],
         "figure" => &["type", "marker", "content"],
-        "chapter" => &["type", "marker", "number", "sid", "content"],
-        "verse" => &["type", "marker", "number", "sid", "content"],
+        "chapter" => &["type", "marker", "number", "sid", "altnumber", "pubnumber", "content"],
+        "verse" => &["type", "marker", "number", "sid", "altnumber", "pubnumber", "content"],
         "book" => &["type", "marker", "code", "content"],
         "para" => &["type", "marker", "content"],
-        "note" => &["type", "marker", "caller", "content"],
+        "note" => &["type", "marker", "caller", "category", "content"],
         "table" => &["type", "content"],
         "table:row" => &["type", "marker", "content"],
         "table:cell" => &["type", "marker", "align", "content"],
-        "sidebar" => &["type", "marker", "content"],
+        "sidebar" => &["type", "marker", "category", "content"],
         _ => &["type", "marker", "content"],
     }
 }
@@ -187,11 +188,14 @@ fn normalize_for_comparison(value: &mut Value) {
                 }
             }
 
-            // Recurse into content arrays
+            // Recurse into content arrays, then remove empty strings
             if let Some(Value::Array(arr)) = map.get_mut("content") {
-                for item in arr {
+                for item in &mut *arr {
                     normalize_for_comparison(item);
                 }
+                // Remove empty string entries — semantically meaningless zero-length
+                // text nodes that either side may produce.
+                arr.retain(|item| !matches!(item, Value::String(s) if s.is_empty()));
             }
         }
         Value::Array(arr) => {
@@ -199,11 +203,7 @@ fn normalize_for_comparison(value: &mut Value) {
                 normalize_for_comparison(item);
             }
         }
-        Value::String(s) => {
-            // Trim trailing whitespace from text nodes
-            let trimmed = s.trim_end().to_string();
-            *s = trimmed;
-        }
+        Value::String(_) => {}
         _ => {}
     }
 }
@@ -274,9 +274,12 @@ fn run_test_case(case: &TestCase) -> TestResult {
     // Parse with our parser
     let result = builder::parse(&usfm);
 
-    // For "fail" tests, just check that we produce diagnostics
+    // For "fail" tests, check that we produce diagnostics (from parsing or validation).
     if !case.validated_pass {
-        if result.diagnostics.has_errors() {
+        let has_parse_errors = result.diagnostics.has_errors();
+        let validation_diags = validation::validate(&result.document);
+        let has_validation_errors = validation_diags.has_errors();
+        if has_parse_errors || has_validation_errors {
             return TestResult::Pass;
         } else {
             return TestResult::Fail(vec![

@@ -81,17 +81,43 @@ impl<'a> UsfmSerializer<'a> {
                 code, content, ..
             } => self.serialize_book(code, content),
 
-            Node::Chapter { number, .. } => self.serialize_chapter(number),
+            Node::Chapter { number, altnumber, pubnumber, .. } => {
+                self.serialize_chapter(number);
+                if let Some(alt) = altnumber {
+                    self.output.push_str(" \\ca ");
+                    self.output.push_str(alt);
+                    self.output.push_str("\\ca*");
+                }
+                if let Some(pub_) = pubnumber {
+                    self.output.push_str(" \\cp ");
+                    self.output.push_str(pub_);
+                }
+            }
 
-            Node::Verse { number, .. } => self.serialize_verse(number),
+            Node::Verse { number, altnumber, pubnumber, .. } => {
+                self.serialize_verse(number);
+                if let Some(alt) = altnumber {
+                    self.output.push_str("\\va ");
+                    self.output.push_str(alt);
+                    self.output.push_str("\\va*");
+                }
+                if let Some(pub_) = pubnumber {
+                    self.output.push_str("\\vp ");
+                    self.output.push_str(pub_);
+                    self.output.push_str("\\vp*");
+                }
+            }
 
             Node::Para {
                 marker, content, ..
             } => self.serialize_para(marker, content),
 
             Node::Char {
-                marker, content, ..
-            } => self.serialize_char(marker, content),
+                marker,
+                content,
+                attributes,
+                ..
+            } => self.serialize_char(marker, content, attributes),
 
             Node::Note {
                 marker,
@@ -112,6 +138,29 @@ impl<'a> UsfmSerializer<'a> {
             } => self.serialize_figure(marker, content, attributes),
 
             Node::Sidebar { content, .. } => self.serialize_sidebar(content),
+
+            Node::Periph { content, .. } => {
+                self.ensure_newline();
+                self.output.push_str("\\periph");
+                self.at_line_start = false;
+                for child in content {
+                    self.serialize_node(child);
+                }
+            }
+
+            Node::Table { content, .. } => {
+                for child in content {
+                    self.serialize_node(child);
+                }
+            }
+
+            Node::TableRow {
+                marker, content, ..
+            } => self.serialize_para(marker, content),
+
+            Node::TableCell {
+                marker, content, ..
+            } => self.serialize_char(marker, content, &[]),
 
             Node::Text(s) => self.serialize_text(s),
 
@@ -208,8 +257,8 @@ impl<'a> UsfmSerializer<'a> {
         }
     }
 
-    /// Character-level inline marker: `\nd Lord\nd*`
-    fn serialize_char(&mut self, marker: &str, content: &[Node]) {
+    /// Character-level inline marker: `\nd Lord\nd*` or `\w word|lemma="grace"\w*`
+    fn serialize_char(&mut self, marker: &str, content: &[Node], attributes: &[Attribute]) {
         self.output.push('\\');
         self.output.push_str(marker);
         self.output.push(' ');
@@ -217,6 +266,10 @@ impl<'a> UsfmSerializer<'a> {
 
         for child in content {
             self.serialize_node(child);
+        }
+
+        if !attributes.is_empty() {
+            self.serialize_attributes(attributes);
         }
 
         self.output.push('\\');
@@ -357,6 +410,8 @@ mod tests {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
+                    altnumber: None,
+                    pubnumber: None,
                     span: 20..25,
                 },
                 Node::Para {
@@ -366,6 +421,8 @@ mod tests {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
+                            altnumber: None,
+                            pubnumber: None,
                             span: 30..33,
                         },
                         Node::text("In the beginning God created the heavens and the earth."),
@@ -392,6 +449,7 @@ mod tests {
                     Node::Char {
                         marker: "nd".into(),
                         content: vec![Node::text("Lord")],
+                        attributes: vec![],
                         span: 5..15,
                     },
                     Node::text(" spoke."),
@@ -413,15 +471,18 @@ mod tests {
                     Node::Note {
                         marker: "f".into(),
                         caller: "+".into(),
+                        category: None,
                         content: vec![
                             Node::Char {
                                 marker: "fr".into(),
                                 content: vec![Node::text("1.1")],
+                                attributes: vec![],
                                 span: 5..10,
                             },
                             Node::Char {
                                 marker: "ft".into(),
                                 content: vec![Node::text("A note")],
+                                attributes: vec![],
                                 span: 10..20,
                             },
                         ],
@@ -449,6 +510,8 @@ mod tests {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: None,
+                            altnumber: None,
+                            pubnumber: None,
                             span: 0..3,
                         },
                         Node::text("O Lord, I have heard of what you have done,"),
@@ -472,6 +535,7 @@ mod tests {
         let doc = Document {
             content: vec![Node::Sidebar {
                 marker: "esb".into(),
+                category: None,
                 content: vec![Node::Para {
                     marker: "p".into(),
                     content: vec![Node::text("Sidebar content")],
@@ -591,6 +655,8 @@ mod tests {
                         marker: "v".into(),
                         number: "1".into(),
                         sid: None,
+                        altnumber: None,
+                        pubnumber: None,
                         span: 0..3,
                     },
                     Node::text("First verse text."),
@@ -598,6 +664,8 @@ mod tests {
                         marker: "v".into(),
                         number: "2".into(),
                         sid: None,
+                        altnumber: None,
+                        pubnumber: None,
                         span: 20..23,
                     },
                     Node::text("Second verse text."),
@@ -663,9 +731,11 @@ mod tests {
                         Node::Char {
                             marker: "nd".into(),
                             content: vec![Node::text("Lord")],
+                            attributes: vec![],
                             span: 10..20,
                         },
                     ],
+                    attributes: vec![],
                     span: 0..25,
                 }],
                 span: 0..30,
@@ -685,9 +755,11 @@ mod tests {
                     Node::Note {
                         marker: "x".into(),
                         caller: "-".into(),
+                        category: None,
                         content: vec![Node::Char {
                             marker: "xt".into(),
                             content: vec![Node::text("Gen 1:1")],
+                            attributes: vec![],
                             span: 5..15,
                         }],
                         span: 0..20,

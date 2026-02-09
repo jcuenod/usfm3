@@ -11,7 +11,7 @@ pub type Span = std::ops::Range<usize>;
 /// the more-specific nested / closing / milestone patterns over the plain
 /// `Marker` pattern.
 #[derive(Logos, Debug, Clone, PartialEq)]
-#[logos(skip r"[ \t]+")] // skip spaces and tabs (but NOT newlines)
+#[logos(skip r"[ \t\r]+")] // skip spaces, tabs, and CR (but NOT newlines)
 pub enum Token<'a> {
     // ── Fixed keywords ──────────────────────────────────────────────────
 
@@ -39,6 +39,12 @@ pub enum Token<'a> {
     #[regex(r"\\\+[a-z]+[0-9]*\*")]
     NestedClosingMarker(&'a str),
 
+    // ── Milestone terminator ────────────────────────────────────────────
+
+    /// `\*` -- milestone attribute block terminator.
+    #[token("\\*", priority = 5)]
+    MilestoneEnd,
+
     // ── Regular markers ─────────────────────────────────────────────────
 
     /// `\marker*` -- character / note closing marker.
@@ -58,9 +64,9 @@ pub enum Token<'a> {
     // ── Text ────────────────────────────────────────────────────────────
 
     /// Any run of text that is not a backslash, newline, or pipe.
-    /// The first character must not be a space or tab (to avoid conflict with
-    /// the skip pattern), but subsequent characters may include whitespace.
-    #[regex(r"[^ \t\\\n|][^\\\n|]*")]
+    /// The first character must not be a space, tab, or CR (to avoid conflict
+    /// with the skip pattern), but subsequent characters may include whitespace.
+    #[regex(r"[^ \t\r\\\n|][^\\\r\n|]*")]
     Text(&'a str),
 
     // ── Structural ──────────────────────────────────────────────────────
@@ -92,7 +98,37 @@ pub fn tokenize(input: &str) -> Vec<(Token<'_>, Span)> {
         }
     }
 
-    tokens
+    // Post-process: restore significant whitespace after closing markers.
+    // The logos skip pattern `[ \t]+` eats spaces between closing markers and
+    // subsequent text.  Those spaces are word-separator content and must be
+    // preserved.  We detect them by looking for byte-offset gaps after closing
+    // tokens when the next token is Text, and inserting the gap as a Text token.
+    // Gaps before markers/structural tokens are structural whitespace and are
+    // intentionally discarded.
+    let mut result = Vec::with_capacity(tokens.len() + tokens.len() / 4);
+    for i in 0..tokens.len() {
+        result.push(tokens[i].clone());
+        if i + 1 < tokens.len() {
+            let is_close = matches!(
+                &tokens[i].0,
+                Token::ClosingMarker(_) | Token::NestedClosingMarker(_) | Token::MilestoneEnd
+            );
+            let next_is_text = matches!(&tokens[i + 1].0, Token::Text(_));
+            if is_close && next_is_text {
+                let gap_start = tokens[i].1.end;
+                let gap_end = tokens[i + 1].1.start;
+                if gap_start < gap_end {
+                    let ws = &input[gap_start..gap_end];
+                    result.push((Token::Text(ws), gap_start..gap_end));
+                }
+            }
+
+            // NOTE: whitespace preceding a closing marker is preserved per
+            // USFM spec ("Normalized whitespace preceding the closing marker
+            // of a character or note marker pair is preserved.").
+        }
+    }
+    result
 }
 
 /// Strip the leading backslash from a marker string.
@@ -252,6 +288,7 @@ mod tests {
                 Token::NestedMarker(_) => "NestedMarker",
                 Token::NestedClosingMarker(_) => "NestedClosingMarker",
                 Token::ClosingMarker(_) => "ClosingMarker",
+                Token::MilestoneEnd => "MilestoneEnd",
                 Token::Marker(_) => "Marker",
                 Token::Attributes(_) => "Attributes",
                 Token::Text(_) => "Text",
@@ -343,5 +380,39 @@ mod tests {
         let tokens = tokenize(r"\q2");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].0, Token::Marker(r"\q2"));
+    }
+
+    // ── Whitespace preservation before closing markers ──────────────────
+    // Per USFM spec: "Normalized whitespace preceding the closing marker
+    // of a character or note marker pair is preserved."
+
+    #[test]
+    fn test_trailing_space_before_closing_marker_preserved() {
+        let tokens = tokenize(r"\it testimony \it*");
+        let text_tokens: Vec<&str> = tokens
+            .iter()
+            .filter_map(|t| if let Token::Text(s) = &t.0 { Some(*s) } else { None })
+            .collect();
+        assert_eq!(text_tokens, vec!["testimony "]);
+    }
+
+    #[test]
+    fn test_trailing_space_before_nested_closing_marker_preserved() {
+        let tokens = tokenize(r"\+nd Lord \+nd*");
+        let text_tokens: Vec<&str> = tokens
+            .iter()
+            .filter_map(|t| if let Token::Text(s) = &t.0 { Some(*s) } else { None })
+            .collect();
+        assert_eq!(text_tokens, vec!["Lord "]);
+    }
+
+    #[test]
+    fn test_no_trailing_space_when_no_space_before_close() {
+        let tokens = tokenize(r"\it man\it*");
+        let text_tokens: Vec<&str> = tokens
+            .iter()
+            .filter_map(|t| if let Token::Text(s) = &t.0 { Some(*s) } else { None })
+            .collect();
+        assert_eq!(text_tokens, vec!["man"]);
     }
 }

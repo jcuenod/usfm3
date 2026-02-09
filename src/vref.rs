@@ -82,10 +82,11 @@ pub fn to_vref_map(doc: &Document) -> serde_json::Map<String, serde_json::Value>
                 for child in content {
                     if let Node::Verse { number, .. } = child {
                         // Flush the previous verse.
-                        if !current_ref.is_empty() {
+                        let trimmed = current_text.trim();
+                        if !current_ref.is_empty() && !trimmed.is_empty() {
                             map.insert(
                                 current_ref.clone(),
-                                serde_json::Value::String(current_text.trim().to_string()),
+                                serde_json::Value::String(trimmed.to_string()),
                             );
                         }
                         current_ref = format!("{} {}:{}", book, chapter, number);
@@ -95,15 +96,34 @@ pub fn to_vref_map(doc: &Document) -> serde_json::Map<String, serde_json::Value>
                     }
                 }
             }
+            // Handle root-level verses (valid per USFM 3.1 — verses can be
+            // siblings of paragraphs in chapter content).
+            Node::Verse { number, .. } => {
+                // Flush the previous verse.
+                let trimmed = current_text.trim();
+                if !current_ref.is_empty() && !trimmed.is_empty() {
+                    map.insert(
+                        current_ref.clone(),
+                        serde_json::Value::String(trimmed.to_string()),
+                    );
+                }
+                current_ref = format!("{} {}:{}", book, chapter, number);
+                current_text = String::new();
+            }
+            // Collect root-level text into the current verse.
+            node if !current_ref.is_empty() => {
+                collect_text(node, &mut current_text);
+            }
             _ => {}
         }
     }
 
     // Flush the last verse.
-    if !current_ref.is_empty() {
+    let trimmed = current_text.trim();
+    if !current_ref.is_empty() && !trimmed.is_empty() {
         map.insert(
             current_ref,
-            serde_json::Value::String(current_text.trim().to_string()),
+            serde_json::Value::String(trimmed.to_string()),
         );
     }
 
@@ -132,6 +152,8 @@ mod tests {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
+                    altnumber: None,
+                    pubnumber: None,
                     span: 10..15,
                 },
                 Node::Para {
@@ -141,6 +163,8 @@ mod tests {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
+                            altnumber: None,
+                            pubnumber: None,
                             span: 15..20,
                         },
                         Node::text("In the beginning God created the heavens and the earth."),
@@ -148,6 +172,8 @@ mod tests {
                             marker: "v".into(),
                             number: "2".into(),
                             sid: Some("GEN 1:2".into()),
+                            altnumber: None,
+                            pubnumber: None,
                             span: 80..85,
                         },
                         Node::text("The earth was without form and void."),
@@ -193,6 +219,8 @@ mod tests {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
+                    altnumber: None,
+                    pubnumber: None,
                     span: 5..10,
                 },
                 Node::Para {
@@ -202,12 +230,15 @@ mod tests {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
+                            altnumber: None,
+                            pubnumber: None,
                             span: 10..14,
                         },
                         Node::text("In the beginning"),
                         Node::Note {
                             marker: "f".into(),
                             caller: "+".into(),
+                            category: None,
                             content: vec![Node::text("A footnote")],
                             span: 30..45,
                         },
@@ -238,6 +269,8 @@ mod tests {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
+                    altnumber: None,
+                    pubnumber: None,
                     span: 5..10,
                 },
                 // Section heading -- should be ignored.
@@ -253,6 +286,8 @@ mod tests {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
+                            altnumber: None,
+                            pubnumber: None,
                             span: 25..29,
                         },
                         Node::text("In the beginning."),
@@ -283,6 +318,8 @@ mod tests {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
+                    altnumber: None,
+                    pubnumber: None,
                     span: 5..10,
                 },
                 Node::Para {
@@ -292,12 +329,15 @@ mod tests {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
+                            altnumber: None,
+                            pubnumber: None,
                             span: 10..14,
                         },
                         Node::text("The "),
                         Node::Char {
                             marker: "nd".into(),
                             content: vec![Node::text("Lord")],
+                            attributes: vec![],
                             span: 18..28,
                         },
                         Node::text(" said."),
@@ -333,6 +373,8 @@ mod tests {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
+                    altnumber: None,
+                    pubnumber: None,
                     span: 5..10,
                 },
                 Node::Para {
@@ -342,6 +384,8 @@ mod tests {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
+                            altnumber: None,
+                            pubnumber: None,
                             span: 10..14,
                         },
                         Node::text("First part."),
@@ -370,5 +414,115 @@ mod tests {
         assert!(json.contains("\"GEN 1:1\""));
         assert!(json.contains("\"GEN 1:2\""));
         assert!(json.contains("In the beginning"));
+    }
+
+    #[test]
+    fn test_root_level_verses_collected() {
+        // Verses at root level (no Para wrapper) — valid per USFM 3.1.
+        let doc = Document {
+            content: vec![
+                Node::Book {
+                    marker: "id".into(),
+                    code: "GEN".into(),
+                    content: vec![],
+                    span: 0..5,
+                },
+                Node::Chapter {
+                    marker: "c".into(),
+                    number: "1".into(),
+                    sid: Some("GEN 1".into()),
+                    altnumber: None,
+                    pubnumber: None,
+                    span: 5..10,
+                },
+                Node::Verse {
+                    marker: "v".into(),
+                    number: "1".into(),
+                    sid: Some("GEN 1:1".into()),
+                    altnumber: None,
+                    pubnumber: None,
+                    span: 10..14,
+                },
+                Node::text("In the beginning."),
+                Node::Verse {
+                    marker: "v".into(),
+                    number: "2".into(),
+                    sid: Some("GEN 1:2".into()),
+                    altnumber: None,
+                    pubnumber: None,
+                    span: 30..34,
+                },
+                Node::text("And God said."),
+            ],
+        };
+        let map = to_vref_map(&doc);
+        assert_eq!(map.len(), 2);
+        assert_eq!(
+            map.get("GEN 1:1").and_then(|v| v.as_str()),
+            Some("In the beginning.")
+        );
+        assert_eq!(
+            map.get("GEN 1:2").and_then(|v| v.as_str()),
+            Some("And God said.")
+        );
+    }
+
+    #[test]
+    fn test_root_level_verses_then_paragraph() {
+        // Root-level verses followed by a paragraph with more verses.
+        let doc = Document {
+            content: vec![
+                Node::Book {
+                    marker: "id".into(),
+                    code: "GEN".into(),
+                    content: vec![],
+                    span: 0..5,
+                },
+                Node::Chapter {
+                    marker: "c".into(),
+                    number: "1".into(),
+                    sid: Some("GEN 1".into()),
+                    altnumber: None,
+                    pubnumber: None,
+                    span: 5..10,
+                },
+                // Root-level verse.
+                Node::Verse {
+                    marker: "v".into(),
+                    number: "1".into(),
+                    sid: Some("GEN 1:1".into()),
+                    altnumber: None,
+                    pubnumber: None,
+                    span: 10..14,
+                },
+                Node::text("First."),
+                // Then a paragraph with verse 2.
+                Node::Para {
+                    marker: "p".into(),
+                    content: vec![
+                        Node::Verse {
+                            marker: "v".into(),
+                            number: "2".into(),
+                            sid: Some("GEN 1:2".into()),
+                            altnumber: None,
+                            pubnumber: None,
+                            span: 20..24,
+                        },
+                        Node::text("Second."),
+                    ],
+                    span: 18..30,
+                },
+            ],
+        };
+        let map = to_vref_map(&doc);
+        assert_eq!(map.len(), 2);
+        assert_eq!(
+            map.get("GEN 1:1").and_then(|v| v.as_str()),
+            Some("First.")
+        );
+        assert_eq!(
+            map.get("GEN 1:2").and_then(|v| v.as_str()),
+            Some("Second.")
+        );
     }
 }

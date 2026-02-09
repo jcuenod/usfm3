@@ -60,6 +60,9 @@ struct TreeBuilder {
     // number argument.
     pending_chapter: Option<Span>,
     pending_verse: Option<Span>,
+
+    // \usfm marker — absorb the following text (version string) and discard.
+    pending_usfm: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +79,7 @@ impl TreeBuilder {
             current_chapter: None,
             pending_chapter: None,
             pending_verse: None,
+            pending_usfm: false,
         }
     }
 
@@ -90,7 +94,8 @@ impl TreeBuilder {
             Token::Marker(m) => self.handle_marker(m, span),
             Token::Attributes(a) => self.handle_attributes(a, span),
             Token::Text(t) => self.append_text(t),
-            Token::Newline => { /* ignored for tree building */ }
+            Token::MilestoneEnd => self.handle_milestone_end(span),
+            Token::Newline => self.handle_newline(),
         }
     }
 
@@ -100,6 +105,13 @@ impl TreeBuilder {
 
     fn handle_marker(&mut self, m: &str, span: Span) {
         let name = lexer::strip_marker_backslash(m);
+
+        // \usfm marker — absorb the version string and discard.
+        if name == "usfm" {
+            self.pending_usfm = true;
+            return;
+        }
+
         let info = markers::lookup_marker(name);
 
         match info.kind {
@@ -134,10 +146,24 @@ impl TreeBuilder {
                 self.push_open(name.to_string(), MarkerKind::Character, span);
             }
 
+            MarkerKind::TableRow => {
+                // Close previous table cell and row if any.
+                self.close_table_cell_in_row();
+                self.close_table_row();
+                self.push_open(name.to_string(), MarkerKind::TableRow, span);
+            }
+
             MarkerKind::TableCell => {
                 // Implicitly close the previous table cell (sibling, not nested).
                 self.close_table_cell_in_row();
                 self.push_open(name.to_string(), MarkerKind::TableCell, span);
+            }
+
+            MarkerKind::Periph => {
+                // Periph acts as a section-level container (like sidebar).
+                self.force_close_notes();
+                self.close_paragraph(&span);
+                self.push_open(name.to_string(), MarkerKind::Periph, span);
             }
 
             MarkerKind::Figure => {
@@ -212,6 +238,8 @@ impl TreeBuilder {
                 marker: "c".into(),
                 number: String::new(),
                 sid: None,
+                altnumber: None,
+                pubnumber: None,
                 span,
             };
             self.append_node(node);
@@ -228,6 +256,8 @@ impl TreeBuilder {
                 marker: "v".into(),
                 number: String::new(),
                 sid: None,
+                altnumber: None,
+                pubnumber: None,
                 span,
             };
             self.append_node(node);
@@ -246,6 +276,27 @@ impl TreeBuilder {
             span,
         };
         self.append_node(node);
+    }
+
+    /// Handle `\*` — the milestone attribute block terminator.
+    ///
+    /// If there is an open node on the stack with no children (i.e., a
+    /// self-closing marker like `\ts\*` or `\zms\*`), pop it and convert
+    /// it into a milestone node. Otherwise it's just closing an attribute
+    /// block for the most recently appended milestone (handled by
+    /// `handle_attributes`).
+    fn handle_milestone_end(&mut self, _span: Span) {
+        if let Some(top) = self.stack.last() {
+            if top.children.is_empty() && top.caller.is_none() {
+                let open = self.stack.pop().unwrap();
+                let node = Node::Milestone {
+                    marker: open.marker,
+                    attributes: open.attributes,
+                    span: open.span,
+                };
+                self.append_node(node);
+            }
+        }
     }
 
     // -----------------------------------------------------------------
@@ -337,10 +388,16 @@ impl TreeBuilder {
         // the stack, or to the most recently appended milestone in the current
         // context.
 
-        // First, check the stack for a character or figure marker.
+        // First, check the stack for a character, figure, or periph marker.
         for open in self.stack.iter_mut().rev() {
-            if open.kind == MarkerKind::Character || open.kind == MarkerKind::Figure {
-                open.attributes.extend(attrs);
+            if open.kind == MarkerKind::Character
+                || open.kind == MarkerKind::Figure
+                || open.kind == MarkerKind::Periph
+            {
+                // Resolve bare "default" attribute keys to marker-specific names
+                // (e.g. "default" → "lemma" for \w).
+                let resolved = resolve_default_attr_keys(&open.marker, attrs);
+                open.attributes.extend(resolved);
                 return;
             }
         }
@@ -354,8 +411,12 @@ impl TreeBuilder {
         };
 
         if let Some(last) = children.last_mut() {
-            if let Node::Milestone { attributes, .. } = last {
-                attributes.extend(attrs);
+            if let Node::Milestone {
+                marker, attributes, ..
+            } = last
+            {
+                let resolved = resolve_default_attr_keys(marker, attrs);
+                attributes.extend(resolved);
             }
         }
     }
@@ -365,19 +426,25 @@ impl TreeBuilder {
     // -----------------------------------------------------------------
 
     fn append_text(&mut self, text: &str) {
+        // 0. \usfm marker — absorb the version text and discard.
+        if self.pending_usfm {
+            self.pending_usfm = false;
+            return;
+        }
+
         // 1. Pending chapter consumes the first word as the chapter number.
         if let Some(span) = self.pending_chapter.take() {
             let (number, rest) = split_first_word(text);
             let number = number.to_string();
             self.current_chapter = Some(number.clone());
-            let sid = self
-                .current_book_code
-                .as_ref()
-                .map(|book| format!("{} {}", book, number));
+            let book = self.current_book_code.as_deref().unwrap_or("");
+            let sid = Some(format!("{} {}", book, number));
             let node = Node::Chapter {
                 marker: "c".into(),
                 number,
                 sid,
+                altnumber: None,
+                pubnumber: None,
                 span,
             };
             self.append_node(node);
@@ -391,14 +458,15 @@ impl TreeBuilder {
         if let Some(span) = self.pending_verse.take() {
             let (number, rest) = split_first_word(text);
             let number = number.to_string();
-            let sid = match (&self.current_book_code, &self.current_chapter) {
-                (Some(book), Some(ch)) => Some(format!("{} {}:{}", book, ch, number)),
-                _ => None,
-            };
+            let book = self.current_book_code.as_deref().unwrap_or("");
+            let ch = self.current_chapter.as_deref().unwrap_or("");
+            let sid = Some(format!("{} {}:{}", book, ch, number));
             let node = Node::Verse {
                 marker: "v".into(),
                 number,
                 sid,
+                altnumber: None,
+                pubnumber: None,
                 span,
             };
             self.append_node(node);
@@ -419,25 +487,36 @@ impl TreeBuilder {
                 // For now, record it as caller (ab)using that field.
                 top.caller = Some(code.to_string());
                 if !rest.is_empty() {
-                    top.children.push(Node::text(rest));
+                    let rest = rest.replace('~', "\u{00a0}");
+                    top.children.push(Node::text(&rest));
+                }
+                return;
+            }
+        }
+
+        // 3b. If the top of stack is a \periph that hasn't received its alt text
+        //     yet, extract the entire text as alt.
+        if let Some(top) = self.stack.last_mut() {
+            if top.kind == MarkerKind::Periph && top.caller.is_none() {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    top.caller = Some(trimmed.to_string());
                 }
                 return;
             }
         }
 
         // 4. If the top of stack is a Note that hasn't received its caller yet,
-        //    extract the first non-whitespace character as the caller.
+        //    extract the first word as the caller.
         if let Some(top) = self.stack.last_mut() {
             if top.kind == MarkerKind::Note && top.caller.is_none() {
                 let trimmed = text.trim_start();
                 if !trimmed.is_empty() {
-                    // The caller is the first non-whitespace character.
-                    let mut chars = trimmed.chars();
-                    let caller_char = chars.next().unwrap();
-                    top.caller = Some(caller_char.to_string());
-                    let remainder = chars.as_str().trim_start();
+                    let (caller, remainder) = split_first_word(trimmed);
+                    top.caller = Some(caller.to_string());
                     if !remainder.is_empty() {
-                        top.children.push(Node::text(remainder));
+                        let remainder = remainder.replace('~', "\u{00a0}");
+                        top.children.push(Node::text(&remainder));
                     }
                     return;
                 }
@@ -448,13 +527,157 @@ impl TreeBuilder {
         self.append_text_raw(text);
     }
 
+    /// Handle a newline token: insert a space as a word separator when the
+    /// last child in the current context is a text node. This ensures that
+    /// multi-line USFM text like "the\nsubject" becomes "the subject" rather
+    /// than "thesubject". Does nothing when there is no preceding text
+    /// (e.g., after a marker or at the start of a block).
+    fn handle_newline(&mut self) {
+        // If we have pending chapter or verse, the newline is just structural.
+        if self.pending_chapter.is_some() || self.pending_verse.is_some() || self.pending_usfm {
+            return;
+        }
+        let children = if let Some(top) = self.stack.last_mut() {
+            &mut top.children
+        } else {
+            &mut self.root_children
+        };
+        if let Some(Node::Text(prev)) = children.last_mut() {
+            // Only add the space if the text doesn't already end with one.
+            if !prev.ends_with(' ') && !prev.ends_with('\u{00a0}') {
+                prev.push(' ');
+            }
+        }
+    }
+
     /// Append a text node to the current context without any special processing.
+    /// Strips `\r` (from CRLF line endings) and replaces `~` with non-breaking
+    /// space (U+00A0) per USFM spec. Merges with a preceding text node if one
+    /// exists, so that sequences like `" "` + `"text"` become `" text"`.
     fn append_text_raw(&mut self, text: &str) {
         if text.is_empty() {
             return;
         }
-        let node = Node::text(text);
-        self.append_node(node);
+        // Strip carriage returns (CRLF → LF normalisation).
+        let clean: std::borrow::Cow<str> = if text.contains('\r') {
+            text.replace('\r', "").into()
+        } else {
+            text.into()
+        };
+        if clean.is_empty() {
+            return;
+        }
+        // Collapse runs of multiple spaces into a single space.
+        let collapsed: std::borrow::Cow<str> = if clean.contains("  ") {
+            let mut result = String::with_capacity(clean.len());
+            let mut prev_space = false;
+            for ch in clean.chars() {
+                if ch == ' ' {
+                    if !prev_space {
+                        result.push(' ');
+                    }
+                    prev_space = true;
+                } else {
+                    prev_space = false;
+                    result.push(ch);
+                }
+            }
+            result.into()
+        } else {
+            clean
+        };
+        // Replace ~ with non-breaking space per USFM spec.
+        let final_text: String = if collapsed.contains('~') {
+            collapsed.replace('~', "\u{00a0}")
+        } else {
+            collapsed.into_owned()
+        };
+
+        // Merge with the previous child if it is also a text node.
+        let children = if let Some(top) = self.stack.last_mut() {
+            &mut top.children
+        } else {
+            &mut self.root_children
+        };
+
+        if let Some(Node::Text(prev)) = children.last_mut() {
+            prev.push_str(&final_text);
+        } else {
+            children.push(Node::text(final_text));
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Alt/pub number helpers
+    // -----------------------------------------------------------------
+
+    fn set_last_chapter_altnumber(&mut self, value: String) {
+        for node in self.root_children.iter_mut().rev() {
+            if let Node::Chapter { altnumber, .. } = node {
+                *altnumber = Some(value);
+                return;
+            }
+        }
+        for open in self.stack.iter_mut().rev() {
+            for node in open.children.iter_mut().rev() {
+                if let Node::Chapter { altnumber, .. } = node {
+                    *altnumber = Some(value);
+                    return;
+                }
+            }
+        }
+    }
+
+    fn set_last_chapter_pubnumber(&mut self, value: String) {
+        for node in self.root_children.iter_mut().rev() {
+            if let Node::Chapter { pubnumber, .. } = node {
+                *pubnumber = Some(value);
+                return;
+            }
+        }
+        for open in self.stack.iter_mut().rev() {
+            for node in open.children.iter_mut().rev() {
+                if let Node::Chapter { pubnumber, .. } = node {
+                    *pubnumber = Some(value);
+                    return;
+                }
+            }
+        }
+    }
+
+    fn set_last_verse_altnumber(&mut self, value: String) {
+        // Verse is typically inside a paragraph (stack), check there first.
+        for open in self.stack.iter_mut().rev() {
+            for node in open.children.iter_mut().rev() {
+                if let Node::Verse { altnumber, .. } = node {
+                    *altnumber = Some(value);
+                    return;
+                }
+            }
+        }
+        for node in self.root_children.iter_mut().rev() {
+            if let Node::Verse { altnumber, .. } = node {
+                *altnumber = Some(value);
+                return;
+            }
+        }
+    }
+
+    fn set_last_verse_pubnumber(&mut self, value: String) {
+        for open in self.stack.iter_mut().rev() {
+            for node in open.children.iter_mut().rev() {
+                if let Node::Verse { pubnumber, .. } = node {
+                    *pubnumber = Some(value);
+                    return;
+                }
+            }
+        }
+        for node in self.root_children.iter_mut().rev() {
+            if let Node::Verse { pubnumber, .. } = node {
+                *pubnumber = Some(value);
+                return;
+            }
+        }
     }
 
     // -----------------------------------------------------------------
@@ -474,12 +697,67 @@ impl TreeBuilder {
     }
 
     /// Append a finished node to the current parent (top of stack or root).
+    ///
+    /// Special handling: when appending a `TableRow` node, wrap it in a `Table`
+    /// container (or append to an existing one) so consecutive rows are grouped.
     fn append_node(&mut self, node: Node) {
-        if let Some(top) = self.stack.last_mut() {
-            top.children.push(node);
-        } else {
-            self.root_children.push(node);
+        // Smart finalization: when a \ca/\cp/\va/\vp node contains only
+        // plain text, extract the text and set altnumber/pubnumber on the
+        // nearest Chapter/Verse instead of appending the node.
+        // If it contains nested markers (complex content), keep it as-is.
+        {
+            let maybe_marker = match &node {
+                Node::Char { marker, .. } | Node::Para { marker, .. } => Some(marker.as_str()),
+                _ => None,
+            };
+            if let Some(m) = maybe_marker {
+                if matches!(m, "ca" | "cp" | "va" | "vp") {
+                    if let Some(text) = extract_plain_text(node.children()) {
+                        // Remove preceding whitespace-only text node (the gap
+                        // after the previous closing marker, e.g. `\va*`).
+                        let children = if let Some(top) = self.stack.last_mut() {
+                            &mut top.children
+                        } else {
+                            &mut self.root_children
+                        };
+                        if let Some(Node::Text(t)) = children.last() {
+                            if t.trim().is_empty() {
+                                children.pop();
+                            }
+                        }
+                        match m {
+                            "ca" => { self.set_last_chapter_altnumber(text); return; }
+                            "cp" => { self.set_last_chapter_pubnumber(text); return; }
+                            "va" => { self.set_last_verse_altnumber(text); return; }
+                            "vp" => { self.set_last_verse_pubnumber(text); return; }
+                            _ => unreachable!(),
+                        }
+                    }
+                }
+            }
         }
+
+        let children = if let Some(top) = self.stack.last_mut() {
+            &mut top.children
+        } else {
+            &mut self.root_children
+        };
+
+        // If the node is a TableRow, wrap/merge into a Table container.
+        if matches!(&node, Node::TableRow { .. }) {
+            if let Some(Node::Table { content, .. }) = children.last_mut() {
+                content.push(node);
+            } else {
+                let span = node.span().cloned().unwrap_or(0..0);
+                children.push(Node::Table {
+                    content: vec![node],
+                    span,
+                });
+            }
+            return;
+        }
+
+        children.push(node);
     }
 
     /// Inside a note, close character markers on top of the stack until we
@@ -516,6 +794,17 @@ impl TreeBuilder {
         }
     }
 
+    /// Close the current table row (if one is open on the stack).
+    fn close_table_row(&mut self) {
+        if let Some(top_kind) = self.stack.last().map(|o| o.kind) {
+            if top_kind == MarkerKind::TableRow {
+                let top = self.stack.pop().unwrap();
+                let node = self.finalize_open_node(top);
+                self.append_node(node);
+            }
+        }
+    }
+
     /// Close all character markers on top of the stack, then close the current
     /// paragraph (or header/meta) if one exists.
     fn close_paragraph(&mut self, trigger_span: &Span) {
@@ -528,15 +817,17 @@ impl TreeBuilder {
             match top_kind {
                 Some(MarkerKind::Character) | Some(MarkerKind::Unknown) | Some(MarkerKind::Figure) | Some(MarkerKind::TableCell) => {
                     let top = self.stack.pop().unwrap();
-                    self.diagnostics.push(Diagnostic::implicitly_closed(
-                        &top.marker,
-                        top.span.clone(),
-                        trigger_span.clone(),
-                    ));
+                    if !top.marker.starts_with('z') {
+                        self.diagnostics.push(Diagnostic::implicitly_closed(
+                            &top.marker,
+                            top.span.clone(),
+                            trigger_span.clone(),
+                        ));
+                    }
                     let node = self.finalize_open_node(top);
                     self.append_node(node);
                 }
-                Some(MarkerKind::Paragraph) | Some(MarkerKind::Header) | Some(MarkerKind::Meta) => {
+                Some(MarkerKind::Paragraph) | Some(MarkerKind::Header) | Some(MarkerKind::Meta) | Some(MarkerKind::TableRow) => {
                     let top = self.stack.pop().unwrap();
                     let node = self.finalize_open_node(top);
                     self.append_node(node);
@@ -587,11 +878,13 @@ impl TreeBuilder {
                 // Close everything above the sidebar.
                 while self.stack.len() > idx + 1 {
                     let top = self.stack.pop().unwrap();
-                    self.diagnostics.push(Diagnostic::implicitly_closed(
-                        &top.marker,
-                        top.span.clone(),
-                        trigger_span.clone(),
-                    ));
+                    if !top.marker.starts_with('z') {
+                        self.diagnostics.push(Diagnostic::implicitly_closed(
+                            &top.marker,
+                            top.span.clone(),
+                            trigger_span.clone(),
+                        ));
+                    }
                     let node = self.finalize_open_node(top);
                     self.append_node(node);
                 }
@@ -635,6 +928,21 @@ impl TreeBuilder {
 
     /// Convert an [`OpenNode`] into the appropriate [`Node`] variant.
     fn finalize_open_node(&self, open: OpenNode) -> Node {
+        let mut children = open.children;
+        // Only trim trailing whitespace for block-level nodes.
+        // Inline elements (Character, Note, Figure) preserve trailing spaces
+        // because they separate content from subsequent siblings.
+        let is_block = matches!(
+            open.kind,
+            MarkerKind::Paragraph
+                | MarkerKind::Header
+                | MarkerKind::Meta
+                | MarkerKind::TableRow
+                | MarkerKind::SidebarStart
+        );
+        if is_block {
+            trim_trailing_text(&mut children);
+        }
         match open.kind {
             MarkerKind::Header => {
                 if open.marker == "id" {
@@ -643,7 +951,7 @@ impl TreeBuilder {
                     Node::Book {
                         marker: open.marker,
                         code,
-                        content: open.children,
+                        content: children,
                         span: open.span,
                     }
                 } else {
@@ -651,7 +959,7 @@ impl TreeBuilder {
                     // to match USJ.
                     Node::Para {
                         marker: open.marker,
-                        content: open.children,
+                        content: children,
                         span: open.span,
                     }
                 }
@@ -659,60 +967,83 @@ impl TreeBuilder {
 
             MarkerKind::Paragraph => Node::Para {
                 marker: open.marker,
-                content: open.children,
+                content: children,
                 span: open.span,
             },
 
-            MarkerKind::Character => {
-                // NOTE: The Char AST node does not currently carry an attributes
-                // field, so any attributes collected on this OpenNode (e.g. from
-                // \w |lemma="...") are silently dropped.  A future AST revision
-                // could add attribute support to Char.
-                Node::Char {
-                    marker: open.marker,
-                    content: open.children,
-                    span: open.span,
-                }
-            }
+            MarkerKind::Character => Node::Char {
+                marker: open.marker,
+                content: children,
+                attributes: open.attributes,
+                span: open.span,
+            },
 
             MarkerKind::Note => {
                 let caller = open.caller.unwrap_or_default();
+                let (category, cat_children) = extract_category(children);
                 Node::Note {
                     marker: open.marker,
                     caller,
-                    content: open.children,
+                    category,
+                    content: cat_children,
                     span: open.span,
                 }
             }
 
             MarkerKind::Figure => Node::Figure {
                 marker: open.marker,
-                content: open.children,
+                content: children,
                 attributes: open.attributes,
                 span: open.span,
             },
 
-            MarkerKind::SidebarStart => Node::Sidebar {
-                marker: open.marker,
-                content: open.children,
+            MarkerKind::Periph => Node::Periph {
+                alt: open.caller,
+                content: children,
+                attributes: open.attributes,
                 span: open.span,
             },
+
+            MarkerKind::SidebarStart => {
+                let (category, cat_children) = extract_category(children);
+                Node::Sidebar {
+                    marker: open.marker,
+                    category,
+                    content: cat_children,
+                    span: open.span,
+                }
+            }
 
             MarkerKind::Meta => Node::Para {
                 marker: open.marker,
-                content: open.children,
+                content: children,
                 span: open.span,
             },
 
-            MarkerKind::TableCell => Node::Char {
+            MarkerKind::TableRow => Node::TableRow {
                 marker: open.marker,
-                content: open.children,
+                content: children,
                 span: open.span,
             },
+
+            MarkerKind::TableCell => {
+                // Determine alignment from marker name: thr*/tcr* → "end", others → "start"
+                let align = if open.marker.contains('r') {
+                    "end".to_string()
+                } else {
+                    "start".to_string()
+                };
+                Node::TableCell {
+                    marker: open.marker,
+                    align,
+                    content: children,
+                    span: open.span,
+                }
+            }
 
             MarkerKind::Unknown => Node::Unknown {
                 marker: open.marker,
-                content: open.children,
+                content: children,
                 span: open.span,
             },
 
@@ -724,7 +1055,7 @@ impl TreeBuilder {
             | MarkerKind::MilestoneStart
             | MarkerKind::MilestoneEnd => Node::Unknown {
                 marker: open.marker,
-                content: open.children,
+                content: children,
                 span: open.span,
             },
         }
@@ -742,9 +1073,16 @@ impl TreeBuilder {
             if open.kind == MarkerKind::Note {
                 self.diagnostics
                     .push(Diagnostic::unclosed_note(&open.marker, open.span.clone()));
-            } else if open.kind == MarkerKind::Character || open.kind == MarkerKind::Unknown || open.kind == MarkerKind::TableCell {
+            } else if open.kind == MarkerKind::SidebarStart
+                || open.kind == MarkerKind::Figure
+            {
                 self.diagnostics
                     .push(Diagnostic::unclosed_at_eof(&open.marker, open.span.clone()));
+            } else if open.kind == MarkerKind::Character || open.kind == MarkerKind::Unknown || open.kind == MarkerKind::TableCell {
+                if !open.marker.starts_with('z') {
+                    self.diagnostics
+                        .push(Diagnostic::unclosed_at_eof(&open.marker, open.span.clone()));
+                }
             }
             // Paragraphs, headers, etc. are implicitly closed at EOF -- no
             // diagnostic needed for those.
@@ -776,7 +1114,7 @@ impl TreeBuilder {
 /// Leading `|` is stripped. A bare value without `key=` is stored with key
 /// `"default"`.
 pub fn parse_attributes(attr_str: &str) -> Vec<Attribute> {
-    let s = attr_str.strip_prefix('|').unwrap_or(attr_str).trim();
+    let s = attr_str.strip_prefix('|').unwrap_or(attr_str).trim_start();
     if s.is_empty() {
         return Vec::new();
     }
@@ -824,25 +1162,108 @@ pub fn parse_attributes(attr_str: &str) -> Vec<Attribute> {
             }
         }
 
-        // No '=' or the part before '=' has spaces -- treat as a bare default value.
-        // Take until whitespace.
-        let end = remaining
-            .find(char::is_whitespace)
-            .unwrap_or(remaining.len());
-        let value = remaining[..end].to_string();
+        // No '=' or the part before '=' has spaces -- treat as a bare default
+        // value.  Take everything remaining as the value (since bare defaults
+        // can contain spaces, commas, and other punctuation).
         attrs.push(Attribute {
             key: "default".to_string(),
-            value,
+            value: remaining.to_string(),
         });
-        remaining = &remaining[end..];
+        break;
     }
 
     attrs
 }
 
+/// Replace any `"default"` attribute keys with the marker-specific default
+/// attribute name (e.g. `"lemma"` for `\w`, `"gloss"` for `\rb`).
+/// Also applies marker-specific key renaming (e.g. `src` → `file` for `\fig`).
+fn resolve_default_attr_keys(marker: &str, attrs: Vec<Attribute>) -> Vec<Attribute> {
+    let default_key = markers::default_attribute(marker);
+    attrs
+        .into_iter()
+        .map(|a| {
+            // Resolve bare "default" key to marker-specific name.
+            if a.key == "default" {
+                if let Some(key_name) = default_key {
+                    return Attribute {
+                        key: key_name.to_string(),
+                        value: a.value,
+                    };
+                }
+            }
+            // Rename \fig's "src" attribute to "file" per USJ spec.
+            if marker == "fig" && a.key == "src" {
+                return Attribute {
+                    key: "file".to_string(),
+                    value: a.value,
+                };
+            }
+            a
+        })
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Utility
 // ---------------------------------------------------------------------------
+
+/// Extract a `\cat` child from a list of nodes, returning (category, remaining children).
+///
+/// Trim trailing whitespace from the last text child of a node list.
+/// This removes spurious trailing spaces produced by newline-to-space
+/// conversion at block boundaries.
+fn trim_trailing_text(children: &mut Vec<Node>) {
+    if let Some(Node::Text(s)) = children.last_mut() {
+        let trimmed = s.trim_end();
+        if trimmed.is_empty() {
+            children.pop();
+        } else if trimmed.len() != s.len() {
+            *s = trimmed.to_string();
+        }
+    }
+}
+
+/// If a `\cat` node is found among the children (possibly wrapped in a `Para`),
+/// its text content is returned as the category. The `\cat` node (and any
+/// surrounding whitespace-only text) is removed from the children list.
+fn extract_category(mut children: Vec<Node>) -> (Option<String>, Vec<Node>) {
+    let cat_idx = children.iter().position(|n| {
+        match n {
+            Node::Char { marker, .. } | Node::Para { marker, .. } => marker == "cat",
+            _ => false,
+        }
+    });
+    if let Some(idx) = cat_idx {
+        let cat_node = children.remove(idx);
+        let text = extract_plain_text(cat_node.children());
+        // Also remove a preceding whitespace-only text node if present.
+        if idx > 0 {
+            if let Some(Node::Text(t)) = children.get(idx - 1) {
+                if t.trim().is_empty() {
+                    children.remove(idx - 1);
+                }
+            }
+        }
+        (text, children)
+    } else {
+        (None, children)
+    }
+}
+
+/// If `content` is all [`Node::Text`] nodes, concatenate and return the trimmed
+/// text.  Returns `None` if any non-text node is present or the result is empty.
+fn extract_plain_text(content: &[Node]) -> Option<String> {
+    let mut text = String::new();
+    for node in content {
+        match node {
+            Node::Text(s) => text.push_str(s),
+            _ => return None,
+        }
+    }
+    let trimmed = text.trim().to_string();
+    if trimmed.is_empty() { None } else { Some(trimmed) }
+}
 
 /// Split a string into the first whitespace-delimited word and the remainder.
 fn split_first_word(s: &str) -> (&str, &str) {
@@ -1125,6 +1546,50 @@ mod tests {
             .iter()
             .any(|d| d.code == crate::diagnostics::DiagnosticCode::UnknownMarker);
         assert!(!has_unknown, "\\z-prefix markers should not produce UnknownMarker diagnostics");
+    }
+
+    #[test]
+    fn test_z_prefix_implicit_close_no_diagnostic() {
+        // \zcustom implicitly closed by paragraph should not produce diagnostics.
+        let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 \\zcustom text\n\\p next para");
+        let implicit_close_on_z = result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == crate::diagnostics::DiagnosticCode::ImplicitClose
+                && d.message.contains("zcustom"));
+        assert!(!implicit_close_on_z,
+            "\\z-prefix markers should not produce ImplicitClose diagnostics");
+    }
+
+    #[test]
+    fn test_z_prefix_unclosed_eof_no_diagnostic() {
+        // \zcustom left open at EOF should not produce diagnostics.
+        let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 \\zcustom text");
+        let unclosed_eof_on_z = result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == crate::diagnostics::DiagnosticCode::UnclosedAtEof
+                && d.message.contains("zcustom"));
+        assert!(!unclosed_eof_on_z,
+            "\\z-prefix markers should not produce UnclosedAtEof diagnostics");
+    }
+
+    #[test]
+    fn test_non_z_unknown_still_gets_diagnostics() {
+        // Non-z unknown markers should still produce diagnostics.
+        let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 \\notreal text");
+        let has_unknown = result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == crate::diagnostics::DiagnosticCode::UnknownMarker);
+        assert!(has_unknown,
+            "Non-z unknown markers should still produce UnknownMarker diagnostics");
+        let has_eof = result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == crate::diagnostics::DiagnosticCode::UnclosedAtEof);
+        assert!(has_eof,
+            "Non-z unknown markers should still produce UnclosedAtEof diagnostics");
     }
 
     #[test]

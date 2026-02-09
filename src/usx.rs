@@ -153,7 +153,7 @@ fn serialize_node<W: std::io::Write>(
             }
         }
 
-        Node::Chapter { number, sid, .. } => {
+        Node::Chapter { number, sid, altnumber, pubnumber, .. } => {
             // Close previous verse and chapter before opening a new chapter.
             state.close_verse(writer)?;
             state.close_chapter(writer)?;
@@ -163,12 +163,18 @@ fn serialize_node<W: std::io::Write>(
             elem.push_attribute(("number", number.as_str()));
             elem.push_attribute(("style", "c"));
             elem.push_attribute(("sid", sid_str));
+            if let Some(alt) = altnumber {
+                elem.push_attribute(("altnumber", alt.as_str()));
+            }
+            if let Some(pub_) = pubnumber {
+                elem.push_attribute(("pubnumber", pub_.as_str()));
+            }
             writer.write_event(Event::Empty(elem))?;
 
             state.current_chapter_sid = Some(sid_str.to_string());
         }
 
-        Node::Verse { number, sid, .. } => {
+        Node::Verse { number, sid, altnumber, pubnumber, .. } => {
             // Close the previous verse before opening a new one.
             state.close_verse(writer)?;
 
@@ -177,6 +183,12 @@ fn serialize_node<W: std::io::Write>(
             elem.push_attribute(("number", number.as_str()));
             elem.push_attribute(("style", "v"));
             elem.push_attribute(("sid", sid_str));
+            if let Some(alt) = altnumber {
+                elem.push_attribute(("altnumber", alt.as_str()));
+            }
+            if let Some(pub_) = pubnumber {
+                elem.push_attribute(("pubnumber", pub_.as_str()));
+            }
             writer.write_event(Event::Empty(elem))?;
 
             state.current_verse_sid = Some(sid_str.to_string());
@@ -199,10 +211,16 @@ fn serialize_node<W: std::io::Write>(
         }
 
         Node::Char {
-            marker, content, ..
+            marker,
+            content,
+            attributes,
+            ..
         } => {
             let mut elem = BytesStart::new("char");
             elem.push_attribute(("style", marker.as_str()));
+            for attr in attributes {
+                elem.push_attribute((attr.key.as_str(), attr.value.as_str()));
+            }
             if content.is_empty() {
                 writer.write_event(Event::Empty(elem))?;
             } else {
@@ -287,6 +305,53 @@ fn serialize_node<W: std::io::Write>(
             writer.write_event(Event::Text(BytesText::new(s)))?;
         }
 
+        Node::Periph { content, .. } => {
+            let elem = BytesStart::new("periph");
+            writer.write_event(Event::Start(elem))?;
+            for child in content {
+                serialize_node(writer, child, state)?;
+            }
+            writer.write_event(Event::End(BytesEnd::new("periph")))?;
+        }
+
+        Node::Table { content, .. } => {
+            let elem = BytesStart::new("table");
+            writer.write_event(Event::Start(elem))?;
+            for child in content {
+                serialize_node(writer, child, state)?;
+            }
+            writer.write_event(Event::End(BytesEnd::new("table")))?;
+        }
+
+        Node::TableRow { content, .. } => {
+            let elem = BytesStart::new("row");
+            writer.write_event(Event::Start(elem.to_owned()))?;
+            for child in content {
+                serialize_node(writer, child, state)?;
+            }
+            writer.write_event(Event::End(BytesEnd::new("row")))?;
+        }
+
+        Node::TableCell {
+            marker,
+            align,
+            content,
+            ..
+        } => {
+            let mut elem = BytesStart::new("cell");
+            elem.push_attribute(("style", marker.as_str()));
+            elem.push_attribute(("align", align.as_str()));
+            if content.is_empty() {
+                writer.write_event(Event::Empty(elem))?;
+            } else {
+                writer.write_event(Event::Start(elem))?;
+                for child in content {
+                    serialize_node(writer, child, state)?;
+                }
+                writer.write_event(Event::End(BytesEnd::new("cell")))?;
+            }
+        }
+
         Node::Unknown {
             marker, content, ..
         } => {
@@ -329,6 +394,8 @@ mod tests {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
+                    altnumber: None,
+                    pubnumber: None,
                     span: 20..25,
                 },
                 Node::Para {
@@ -338,6 +405,8 @@ mod tests {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
+                            altnumber: None,
+                            pubnumber: None,
                             span: 30..33,
                         },
                         Node::text("In the beginning God created the heavens and the earth."),
@@ -374,12 +443,16 @@ mod tests {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
+                    altnumber: None,
+                    pubnumber: None,
                     span: 5..10,
                 },
                 Node::Chapter {
                     marker: "c".into(),
                     number: "2".into(),
                     sid: Some("GEN 2".into()),
+                    altnumber: None,
+                    pubnumber: None,
                     span: 10..15,
                 },
             ],
@@ -405,6 +478,8 @@ mod tests {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
+                    altnumber: None,
+                    pubnumber: None,
                     span: 5..10,
                 },
                 Node::Para {
@@ -414,6 +489,8 @@ mod tests {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
+                            altnumber: None,
+                            pubnumber: None,
                             span: 10..14,
                         },
                         Node::text("First verse. "),
@@ -421,6 +498,8 @@ mod tests {
                             marker: "v".into(),
                             number: "2".into(),
                             sid: Some("GEN 1:2".into()),
+                            altnumber: None,
+                            pubnumber: None,
                             span: 20..24,
                         },
                         Node::text("Second verse."),
@@ -442,9 +521,11 @@ mod tests {
                 content: vec![Node::Note {
                     marker: "f".into(),
                     caller: "+".into(),
+                    category: None,
                     content: vec![Node::Char {
                         marker: "ft".into(),
                         content: vec![Node::text("A footnote")],
+                        attributes: vec![],
                         span: 5..20,
                     }],
                     span: 0..25,
