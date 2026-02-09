@@ -134,6 +134,12 @@ impl TreeBuilder {
                 self.push_open(name.to_string(), MarkerKind::Character, span);
             }
 
+            MarkerKind::TableCell => {
+                // Implicitly close the previous table cell (sibling, not nested).
+                self.close_table_cell_in_row();
+                self.push_open(name.to_string(), MarkerKind::TableCell, span);
+            }
+
             MarkerKind::Figure => {
                 self.push_open(name.to_string(), MarkerKind::Figure, span);
             }
@@ -155,8 +161,11 @@ impl TreeBuilder {
             }
 
             MarkerKind::Unknown => {
-                self.diagnostics
-                    .push(Diagnostic::unknown_marker(name, span.clone()));
+                // Don't emit diagnostics for \z-prefix markers (USFM 3.0 custom namespace).
+                if !name.starts_with('z') {
+                    self.diagnostics
+                        .push(Diagnostic::unknown_marker(name, span.clone()));
+                }
                 self.push_open(name.to_string(), MarkerKind::Unknown, span);
             }
 
@@ -271,7 +280,7 @@ impl TreeBuilder {
     /// If no match is found, emit a stray-close diagnostic.
     fn close_matching_marker(&mut self, name: &str, span: &Span) {
         // Is this a note-closing marker?
-        let is_note_close = matches!(name, "f" | "fe" | "x");
+        let is_note_close = matches!(name, "f" | "fe" | "x" | "ef" | "ex");
 
         // Find the matching opener.
         let match_idx = self.stack.iter().rposition(|open| {
@@ -287,11 +296,20 @@ impl TreeBuilder {
                 // Close everything above the match (mis-nested).
                 while self.stack.len() > idx + 1 {
                     let top = self.stack.pop().unwrap();
-                    self.diagnostics.push(Diagnostic::misnested_close(
-                        &top.marker,
-                        name,
-                        span.clone(),
-                    ));
+                    // When closing a Note, child Character/Unknown markers are
+                    // implicitly closed per USFM spec — not an error.
+                    if !is_note_close
+                        || !matches!(
+                            top.kind,
+                            MarkerKind::Character | MarkerKind::Unknown | MarkerKind::TableCell
+                        )
+                    {
+                        self.diagnostics.push(Diagnostic::misnested_close(
+                            &top.marker,
+                            name,
+                            span.clone(),
+                        ));
+                    }
                     let node = self.finalize_open_node(top);
                     // Append to new top or root.
                     self.append_node(node);
@@ -471,12 +489,28 @@ impl TreeBuilder {
         loop {
             let top_kind = self.stack.last().map(|o| o.kind);
             match top_kind {
-                Some(MarkerKind::Character) | Some(MarkerKind::Unknown) => {
+                Some(MarkerKind::Character) | Some(MarkerKind::Unknown) | Some(MarkerKind::TableCell) => {
                     let top = self.stack.pop().unwrap();
                     let node = self.finalize_open_node(top);
                     self.append_node(node);
                 }
                 // Stop at the Note boundary (or anything else).
+                _ => break,
+            }
+        }
+    }
+
+    /// Inside a table row, close the current table cell (if any) so the
+    /// next cell becomes a sibling rather than a nested child.
+    fn close_table_cell_in_row(&mut self) {
+        loop {
+            let top_kind = self.stack.last().map(|o| o.kind);
+            match top_kind {
+                Some(MarkerKind::TableCell) => {
+                    let top = self.stack.pop().unwrap();
+                    let node = self.finalize_open_node(top);
+                    self.append_node(node);
+                }
                 _ => break,
             }
         }
@@ -492,7 +526,7 @@ impl TreeBuilder {
         loop {
             let top_kind = self.stack.last().map(|o| o.kind);
             match top_kind {
-                Some(MarkerKind::Character) | Some(MarkerKind::Unknown) | Some(MarkerKind::Figure) => {
+                Some(MarkerKind::Character) | Some(MarkerKind::Unknown) | Some(MarkerKind::Figure) | Some(MarkerKind::TableCell) => {
                     let top = self.stack.pop().unwrap();
                     self.diagnostics.push(Diagnostic::implicitly_closed(
                         &top.marker,
@@ -584,7 +618,7 @@ impl TreeBuilder {
         self.stack
             .iter()
             .rev()
-            .any(|o| o.kind == MarkerKind::Character)
+            .any(|o| o.kind == MarkerKind::Character || o.kind == MarkerKind::TableCell)
     }
 
     /// Returns `true` if there is a Note-kind marker on the stack.
@@ -670,6 +704,12 @@ impl TreeBuilder {
                 span: open.span,
             },
 
+            MarkerKind::TableCell => Node::Char {
+                marker: open.marker,
+                content: open.children,
+                span: open.span,
+            },
+
             MarkerKind::Unknown => Node::Unknown {
                 marker: open.marker,
                 content: open.children,
@@ -702,7 +742,7 @@ impl TreeBuilder {
             if open.kind == MarkerKind::Note {
                 self.diagnostics
                     .push(Diagnostic::unclosed_note(&open.marker, open.span.clone()));
-            } else if open.kind == MarkerKind::Character || open.kind == MarkerKind::Unknown {
+            } else if open.kind == MarkerKind::Character || open.kind == MarkerKind::Unknown || open.kind == MarkerKind::TableCell {
                 self.diagnostics
                     .push(Diagnostic::unclosed_at_eof(&open.marker, open.span.clone()));
             }
@@ -1069,12 +1109,22 @@ mod tests {
 
     #[test]
     fn test_unknown_marker_diagnostic() {
-        let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 \\zcustom text\\zcustom*");
+        let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 \\notreal text\\notreal*");
         let has_unknown = result
             .diagnostics
             .iter()
             .any(|d| d.code == crate::diagnostics::DiagnosticCode::UnknownMarker);
         assert!(has_unknown);
+    }
+
+    #[test]
+    fn test_z_prefix_no_diagnostic() {
+        let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 \\zcustom text\\zcustom*");
+        let has_unknown = result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == crate::diagnostics::DiagnosticCode::UnknownMarker);
+        assert!(!has_unknown, "\\z-prefix markers should not produce UnknownMarker diagnostics");
     }
 
     #[test]

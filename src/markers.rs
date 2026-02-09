@@ -41,6 +41,10 @@ pub enum MarkerKind {
     /// \rem, \sts, \restore -- metadata markers.
     Meta,
 
+    /// \th1, \tc1, \thr1, \tcr1 -- table cells within \tr rows.
+    /// Implicitly closed by the next table cell marker within the same row.
+    TableCell,
+
     /// Anything in the \z namespace or unrecognized.
     Unknown,
 }
@@ -105,6 +109,7 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
         | "mt" | "mt1" | "mt2" | "mt3" | "mt4"
         | "mte" | "mte1" | "mte2"
         | "imt" | "imt1" | "imt2" | "imt3" | "imt4"
+        | "imte" | "imte1" | "imte2"
         | "is" | "is1" | "is2" | "is3"
         | "cl" | "cp" | "cd"
         => MarkerInfo::new(MarkerKind::Header),
@@ -119,7 +124,7 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
         | "pi" | "pi1" | "pi2" | "pi3"
         | "mi" | "nb" | "pc"
         | "ph" | "ph1" | "ph2" | "ph3"
-        | "b"
+        | "b" | "pb"
 
         // -- poetry --
         | "q" | "q1" | "q2" | "q3" | "q4"
@@ -146,6 +151,9 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
         // -- introduction paragraphs --
         | "ip" | "ipi" | "im" | "imi"
         | "ipq" | "imq" | "ipr"
+        | "ib"
+        | "iq" | "iq1" | "iq2" | "iq3"
+        | "iex"
 
         // -- introduction outline --
         | "iot"
@@ -167,7 +175,7 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
         // =============================================================
         // Note markers (footnote, endnote, cross-reference)
         // =============================================================
-        "f" | "fe" | "x"
+        "f" | "fe" | "x" | "ef" | "ex"
         => MarkerInfo::new(MarkerKind::Note),
 
         // =============================================================
@@ -189,7 +197,7 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
         // -- special text --
         "add" | "bk" | "dc" | "ior" | "iqt"
         | "k" | "litl" | "nd" | "ord"
-        | "pn" | "png" | "qt" | "sig"
+        | "pn" | "png" | "qs" | "qt" | "sig"
         | "sls" | "tl" | "wj"
 
         // -- formatting --
@@ -204,12 +212,16 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
         // -- linking --
         | "jmp"
 
-        // -- table cells (character markers within \tr) --
-        | "th1" | "th2" | "th3"
-        | "tc1" | "tc2" | "tc3"
-        | "thr1" | "thr2" | "thr3"
-        | "tcr1" | "tcr2" | "tcr3"
         => MarkerInfo::new(MarkerKind::Character),
+
+        // =============================================================
+        // Table cell markers (within \tr rows, implicitly close siblings)
+        // =============================================================
+        "th" | "th1" | "th2" | "th3"
+        | "tc" | "tc1" | "tc2" | "tc3"
+        | "thr" | "thr1" | "thr2" | "thr3"
+        | "tcr" | "tcr1" | "tcr2" | "tcr3"
+        => MarkerInfo::new(MarkerKind::TableCell),
 
         // =============================================================
         // Chapter
@@ -239,9 +251,20 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
         => MarkerInfo::new(MarkerKind::Meta),
 
         // =============================================================
-        // Unknown / unrecognized
+        // Unknown / unrecognized — with dynamic numbered-variant fallback
         // =============================================================
-        _ => MarkerInfo::new(MarkerKind::Unknown),
+        _ => {
+            // Strip trailing digits and re-check the base name.
+            // e.g., "ms5" -> "ms" (Paragraph), "tc4" -> "tc" (TableCell)
+            let base = name.trim_end_matches(|c: char| c.is_ascii_digit());
+            if !base.is_empty() && base != name {
+                let base_info = lookup_marker(base);
+                if base_info.kind != MarkerKind::Unknown {
+                    return base_info;
+                }
+            }
+            MarkerInfo::new(MarkerKind::Unknown)
+        }
     }
 }
 
@@ -263,6 +286,7 @@ mod tests {
             "mt", "mt1", "mt2", "mt3", "mt4",
             "mte", "mte1", "mte2",
             "imt", "imt1", "imt2", "imt3", "imt4",
+            "imte", "imte1", "imte2",
             "is", "is1", "is2", "is3",
             "cl", "cp", "cd",
         ];
@@ -290,7 +314,7 @@ mod tests {
         let paragraphs = [
             "p", "m", "po", "pr", "cls", "pmo", "pm", "pmc", "pmr",
             "pi", "pi1", "pi2", "pi3", "mi", "nb", "pc",
-            "ph", "ph1", "ph2", "ph3", "b",
+            "ph", "ph1", "ph2", "ph3", "b", "pb",
             "q", "q1", "q2", "q3", "q4", "qr", "qc", "qa",
             "qm", "qm1", "qm2", "qm3", "qd",
             "lh", "li", "li1", "li2", "li3", "li4", "lf",
@@ -300,6 +324,9 @@ mod tests {
             "sd", "sd1", "sd2", "sd3", "sd4",
             "d",
             "ip", "ipi", "im", "imi", "ipq", "imq", "ipr",
+            "ib",
+            "iq", "iq1", "iq2", "iq3",
+            "iex",
             "iot", "io", "io1", "io2", "io3", "io4",
             "ili", "ili1", "ili2",
             "ie",
@@ -322,7 +349,7 @@ mod tests {
     // -----------------------------------------------------------------
     #[test]
     fn note_markers() {
-        for marker in &["f", "fe", "x"] {
+        for marker in &["f", "fe", "x", "ef", "ex"] {
             let info = lookup_marker(marker);
             assert_eq!(
                 info.kind,
@@ -370,13 +397,11 @@ mod tests {
     fn character_markers() {
         let chars = [
             "add", "bk", "dc", "ior", "iqt", "k", "litl", "nd", "ord",
-            "pn", "png", "qt", "sig", "sls", "tl", "wj",
+            "pn", "png", "qs", "qt", "sig", "sls", "tl", "wj",
             "em", "bd", "bdit", "it", "no", "sc", "sup", "rb",
             "pro", "w", "wg", "wh", "wa",
             "rq", "ca", "va", "vp",
             "jmp",
-            "th1", "th2", "th3", "tc1", "tc2", "tc3",
-            "thr1", "thr2", "thr3", "tcr1", "tcr2", "tcr3",
         ];
         for marker in &chars {
             let info = lookup_marker(marker);
@@ -392,6 +417,53 @@ mod tests {
                 marker,
             );
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Table cell markers
+    // -----------------------------------------------------------------
+    #[test]
+    fn table_cell_markers() {
+        let cells = [
+            "th", "th1", "th2", "th3",
+            "tc", "tc1", "tc2", "tc3",
+            "thr", "thr1", "thr2", "thr3",
+            "tcr", "tcr1", "tcr2", "tcr3",
+        ];
+        for marker in &cells {
+            let info = lookup_marker(marker);
+            assert_eq!(
+                info.kind,
+                MarkerKind::TableCell,
+                "expected TableCell for \\{}",
+                marker,
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Dynamic numbered-variant fallback
+    // -----------------------------------------------------------------
+    #[test]
+    fn dynamic_numbered_variants() {
+        // Paragraph variants
+        assert_eq!(lookup_marker("s5").kind, MarkerKind::Paragraph);
+        assert_eq!(lookup_marker("ms4").kind, MarkerKind::Paragraph);
+        assert_eq!(lookup_marker("ms7").kind, MarkerKind::Paragraph);
+        assert_eq!(lookup_marker("q5").kind, MarkerKind::Paragraph);
+        assert_eq!(lookup_marker("li5").kind, MarkerKind::Paragraph);
+        assert_eq!(lookup_marker("io5").kind, MarkerKind::Paragraph);
+
+        // TableCell variants
+        assert_eq!(lookup_marker("th4").kind, MarkerKind::TableCell);
+        assert_eq!(lookup_marker("tc4").kind, MarkerKind::TableCell);
+        assert_eq!(lookup_marker("tc5").kind, MarkerKind::TableCell);
+        assert_eq!(lookup_marker("thr4").kind, MarkerKind::TableCell);
+        assert_eq!(lookup_marker("tcr4").kind, MarkerKind::TableCell);
+
+        // Genuinely unknown should stay unknown
+        assert_eq!(lookup_marker("notamarker").kind, MarkerKind::Unknown);
+        assert_eq!(lookup_marker("xyz99").kind, MarkerKind::Unknown);
     }
 
     // -----------------------------------------------------------------

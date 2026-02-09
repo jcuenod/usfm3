@@ -1,0 +1,8 @@
+\id GEN
+\h Genesis
+\c 1
+\p
+\v 1 Before the table.
+\tr \th1 Name \th2 Age \th3 City \th4 Country
+\tr \tc1 John \tc2 30 \tc3 NYC \tc4 USA
+\tr \tcr1 Jane \tcr2 25 \tcr3 LA \tcr4 USA

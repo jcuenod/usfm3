@@ -1,1 +1,3 @@
 /target
+test_usfm.sh
+tests/fixtures/usfm-grammar/

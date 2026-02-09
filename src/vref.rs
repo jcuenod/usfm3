@@ -3,7 +3,7 @@ use crate::ast::{Document, Node};
 /// Returns true for paragraph markers that carry verse-level body text
 /// (as opposed to section headings, introductions, etc.).
 fn is_verse_paragraph(marker: &str) -> bool {
-    matches!(
+    if matches!(
         marker,
         // body paragraphs
         "p" | "m" | "po" | "pr" | "cls"
@@ -11,6 +11,7 @@ fn is_verse_paragraph(marker: &str) -> bool {
             | "pi" | "pi1" | "pi2" | "pi3"
             | "mi" | "nb" | "pc"
             | "ph" | "ph1" | "ph2" | "ph3"
+            | "pb"
             // poetry
             | "q" | "q1" | "q2" | "q3" | "q4"
             | "qr" | "qc" | "qa"
@@ -21,14 +22,23 @@ fn is_verse_paragraph(marker: &str) -> bool {
             | "li" | "li1" | "li2" | "li3" | "li4"
             | "lf"
             | "lim" | "lim1" | "lim2" | "lim3"
-    )
+    ) {
+        return true;
+    }
+    // Fallback: strip trailing digits to handle higher-numbered variants
+    // (e.g., q5, li5) that are valid via dynamic marker lookup.
+    let base = marker.trim_end_matches(|c: char| c.is_ascii_digit());
+    if !base.is_empty() && base != marker {
+        return is_verse_paragraph(base);
+    }
+    false
 }
 
 /// Recursively collect plain text from a node, skipping notes and milestones.
 fn collect_text(node: &Node, buf: &mut String) {
     match node {
         Node::Text(s) => buf.push_str(s),
-        Node::Char { content, .. } => {
+        Node::Char { content, .. } | Node::Unknown { content, .. } => {
             for child in content {
                 collect_text(child, buf);
             }

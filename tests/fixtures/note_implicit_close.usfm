@@ -1,0 +1,6 @@
+\id GEN
+\h Genesis
+\c 1
+\p
+\v 1 In the beginning \f + \ft This is a footnote\f*
+\v 2 Next verse text.
