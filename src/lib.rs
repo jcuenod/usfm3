@@ -7,3 +7,4 @@ pub mod usfm;
 pub mod usj;
 pub mod usx;
 pub mod validation;
+pub mod vref;

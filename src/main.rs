@@ -48,8 +48,12 @@ fn main() {
             let usfm = rsusfm3::usfm::to_usfm_string(&result.document);
             print!("{usfm}");
         }
+        "vref" => {
+            let json = rsusfm3::vref::to_vref_json_string(&result.document);
+            println!("{json}");
+        }
         other => {
-            eprintln!("Unknown format '{other}'. Use 'usj', 'usx', or 'usfm'.");
+            eprintln!("Unknown format '{other}'. Use 'usj', 'usx', 'usfm', or 'vref'.");
             std::process::exit(1);
         }
     }
