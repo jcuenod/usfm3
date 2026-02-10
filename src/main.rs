@@ -2,10 +2,12 @@ use std::io::Read;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    let no_validate = args.iter().any(|a| a == "--no-validate");
+    let positional: Vec<&String> = args.iter().skip(1).filter(|a| a.as_str() != "--no-validate").collect();
 
-    let input = if args.len() > 1 {
-        std::fs::read_to_string(&args[1]).unwrap_or_else(|e| {
-            eprintln!("Error reading file '{}': {}", args[1], e);
+    let input = if let Some(path) = positional.first() {
+        std::fs::read_to_string(path).unwrap_or_else(|e| {
+            eprintln!("Error reading file '{}': {}", path, e);
             std::process::exit(1);
         })
     } else {
@@ -27,13 +29,15 @@ fn main() {
     }
 
     // Run validation
-    let validation_diags = rsusfm3::validation::validate(&result.document);
-    for diag in validation_diags.iter() {
-        eprintln!("[{}:{}] {}", diag.span.start, diag.span.end, diag);
+    if !no_validate {
+        let validation_diags = rsusfm3::validation::validate(&result.document);
+        for diag in validation_diags.iter() {
+            eprintln!("[{}:{}] {}", diag.span.start, diag.span.end, diag);
+        }
     }
 
     // Determine output format from args
-    let format = args.get(2).map(|s| s.as_str()).unwrap_or("usj");
+    let format = positional.get(1).map(|s| s.as_str()).unwrap_or("usj");
 
     match format {
         "usj" => {
