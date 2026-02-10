@@ -1,3 +1,4 @@
 /target
 test_usfm.sh
-tests/fixtures/usfm-grammar/
+crates/usfm3/tests/fixtures/usfm-grammar/
+crates/usfm3-wasm/pkg/

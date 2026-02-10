@@ -553,9 +553,11 @@ impl<'a> Validator<'a> {
                 Node::Para { marker, span, .. } => {
                     let info = markers::lookup_marker(marker);
                     if info.kind == MarkerKind::Paragraph && !is_introduction_marker(marker) {
-                        self.diagnostics.push(
-                            Diagnostic::body_paragraph_before_chapter(marker, span.clone()),
-                        );
+                        self.diagnostics
+                            .push(Diagnostic::body_paragraph_before_chapter(
+                                marker,
+                                span.clone(),
+                            ));
                     }
                 }
                 _ => {}

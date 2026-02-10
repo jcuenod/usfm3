@@ -1,9 +1,9 @@
-use rsusfm3::builder;
-use rsusfm3::usj;
-use rsusfm3::validation;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
+use usfm3::builder;
+use usfm3::usj;
+use usfm3::validation;
 
 const FIXTURE_ROOT: &str = "tests/fixtures/usfm-grammar";
 const EXPECTED_FAILURES_FILE: &str = "tests/bridgeconn_expected_failures.txt";
@@ -244,16 +244,12 @@ fn normalize_for_comparison(value: &mut Value) {
                     for item in arr.iter_mut() {
                         if let Value::Object(child_map) = item {
                             if child_map.get("type").and_then(|v| v.as_str()) == Some("char") {
-                                if let Some(Value::Array(cc)) =
-                                    child_map.get_mut("content")
-                                {
+                                if let Some(Value::Array(cc)) = child_map.get_mut("content") {
                                     if let Some(Value::String(s)) = cc.first_mut() {
                                         *s = s.trim_start().to_string();
                                     }
                                     // Remove empty strings left over from trimming
-                                    cc.retain(|v| {
-                                        !matches!(v, Value::String(s) if s.is_empty())
-                                    });
+                                    cc.retain(|v| !matches!(v, Value::String(s) if s.is_empty()));
                                 }
                                 // Remove empty content arrays
                                 if child_map

@@ -1569,8 +1569,7 @@ pub fn parse_attributes(attr_str: &str) -> Option<Vec<Attribute>> {
                     // Quoted value: find the closing (unescaped) quote.
                     remaining = &remaining[1..];
                     if let Some(end_quote) = find_unescaped_quote(remaining) {
-                        let value =
-                            remaining[..end_quote].replace("\\\"", "\"");
+                        let value = remaining[..end_quote].replace("\\\"", "\"");
                         attrs.push(Attribute { key, value });
                         remaining = &remaining[end_quote + 1..];
                     } else {
@@ -1868,8 +1867,7 @@ mod tests {
 
     #[test]
     fn test_parse_attributes_escaped_quotes() {
-        let attrs =
-            parse_attributes(r#"|alt="He said: \"hello\"" src="img.jpg""#).unwrap();
+        let attrs = parse_attributes(r#"|alt="He said: \"hello\"" src="img.jpg""#).unwrap();
         assert_eq!(attrs.len(), 2);
         assert_eq!(attrs[0].key, "alt");
         assert_eq!(attrs[0].value, r#"He said: "hello""#);

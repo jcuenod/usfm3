@@ -210,7 +210,7 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
 
         // -- introduction end --
         | "ie"
-        
+
         // -- liturgical note marker --
         | "lit"
         => MarkerInfo::new(MarkerKind::Paragraph),
@@ -515,6 +515,9 @@ mod tests {
         assert_eq!(lookup_marker("thc4").kind, MarkerKind::TableCell);
         assert_eq!(lookup_marker("tcc4").kind, MarkerKind::TableCell);
 
+        // Liturgical note
+        assert_eq!(lookup_marker("lit").kind, MarkerKind::Paragraph);
+
         // Genuinely unknown should stay unknown
         assert_eq!(lookup_marker("notamarker").kind, MarkerKind::Unknown);
         assert_eq!(lookup_marker("xyz99").kind, MarkerKind::Unknown);
@@ -564,7 +567,7 @@ mod tests {
     // -----------------------------------------------------------------
     #[test]
     fn meta_markers() {
-        for marker in &["rem", "sts", "restore", "lit", "cat"] {
+        for marker in &["rem", "sts", "restore", "cat"] {
             let info = lookup_marker(marker);
             assert_eq!(
                 info.kind,

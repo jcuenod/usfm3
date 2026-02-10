@@ -170,7 +170,9 @@ impl<'a> UsfmSerializer<'a> {
             Node::Text(s) => self.serialize_text(s),
 
             Node::Ref {
-                content, attributes, ..
+                content,
+                attributes,
+                ..
             } => self.serialize_char("ref", content, attributes),
 
             Node::Unknown {

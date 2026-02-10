@@ -1,9 +1,14 @@
-[package]
-name = "rsusfm3"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = [
+    "crates/usfm3",
+    "crates/usfm3-cli",
+    "crates/usfm3-python",
+    "crates/usfm3-wasm",
+]
+resolver = "3"
 
-[dependencies]
+[workspace.dependencies]
+usfm3 = { path = "crates/usfm3" }
 logos = "0.15"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

@@ -13,7 +13,7 @@ pub type Span = std::ops::Range<usize>;
 #[derive(Logos, Debug, Clone, PartialEq)]
 pub enum Token<'a> {
     // ── Whitespace ────────────────────────────────────────────────────
-    /// Runs of spaces, tabs, and carriage returns.  The builder will 
+    /// Runs of spaces, tabs, and carriage returns.  The builder will
     /// decide contextually whether to emit, normalize, or discard
     /// whitespace.
     #[regex(r"[ \t]+")]
