@@ -169,9 +169,15 @@ impl<'a> UsfmSerializer<'a> {
 
             Node::Text(s) => self.serialize_text(s),
 
+            Node::Ref {
+                content, attributes, ..
+            } => self.serialize_char("ref", content, attributes),
+
             Node::Unknown {
                 marker, content, ..
             } => self.serialize_unknown(marker, content),
+
+            Node::OptBreak => self.output.push_str("//"),
         }
     }
 

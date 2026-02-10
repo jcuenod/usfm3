@@ -2,52 +2,26 @@
 # One test path per line (relative to tests/fixtures/usfm-grammar/).
 # Lines starting with # are comments.
 
-# --- biblica ---
-biblica/BlankLinesWithFigures
-biblica/CategoriesOnNotes
-biblica/CrossRefWithPipe
-
 # --- bugfixes ---
-bugfixes/empty-table-cell
-bugfixes/liv1
-bugfixes/multiple-sr
-bugfixes/nestedchar-footnote
-bugfixes/q4
-bugfixes/rem_with_char
-bugfixes/tcc
+# thc: BridgeConn fixture expects "start" align for thr3/tcr3, but the USFM
+# spec says right-aligned columns use "end". Our output is correct.
 bugfixes/thc
-
-# --- introductions ---
-introductions/bad/test1
-
-# --- paratextTests ---
-paratextTests/WordlistMarkerMissingFromGlossaryCitationForms
-
-# --- specExamples ---
-specExamples/chapter-verse
-specExamples/character
-specExamples/extended/contentCatogories1
-specExamples/footnote
-specExamples/milestone
-specExamples/table
+# empty-table-cell: BridgeConn drops verse content from table cells that
+# contain sub-verse markers. Our parser preserves the content.
+bugfixes/empty-table-cell
 
 # --- special-cases ---
+# empty-attributes: BridgeConn rejects empty-quoted attribute values (e.g.
+# lemma="") and falls back to treating the entire |... string as text content.
+# The USFM spec does not explicitly forbid empty values; lemma="" is
+# syntactically well-formed. Our parser accepts it and lets validation flag
+# the empty value separately.
 special-cases/empty-attributes
-special-cases/empty-attributes2
-special-cases/empty-attributes3
-special-cases/empty-attributes4
-special-cases/empty-attributes5
-special-cases/figure_with_quotes_in_desc
 
 # --- usfmjsTests ---
-usfmjsTests/57-TIT.greek.oldformat
-usfmjsTests/f10_gen12-2_empty_word
-usfmjsTests/isa_footnote
-usfmjsTests/isa_inline_quotes
-usfmjsTests/isa_verse_span
-usfmjsTests/misc_footnotes
-usfmjsTests/nb
-usfmjsTests/pro_quotes
-usfmjsTests/tit_1_12_footnote
-usfmjsTests/tstudio
+# usfmBodyTestD: BridgeConn unnests \fv from \fqa, but the USFM spec says
+# "\fv will typically be nested within another footnote content element, like
+# \ft, \fq or \fqa" (see docs.usfm.bible and ubsicap.github.io/usfm). Our
+# parser nests \fv inside \fqa per spec. BridgeConn is also inconsistent —
+# it nests \fv correctly in specExamples/footnote but not here.
 usfmjsTests/usfmBodyTestD

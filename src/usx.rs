@@ -317,6 +317,10 @@ fn serialize_node<W: std::io::Write>(
             writer.write_event(Event::Text(BytesText::new(s)))?;
         }
 
+        Node::OptBreak => {
+            writer.write_event(Event::Empty(BytesStart::new("optbreak")))?;
+        }
+
         Node::Periph { content, .. } => {
             let elem = BytesStart::new("periph");
             writer.write_event(Event::Start(elem))?;
@@ -361,6 +365,26 @@ fn serialize_node<W: std::io::Write>(
                     serialize_node(writer, child, state)?;
                 }
                 writer.write_event(Event::End(BytesEnd::new("cell")))?;
+            }
+        }
+
+        Node::Ref {
+            content,
+            attributes,
+            ..
+        } => {
+            let mut elem = BytesStart::new("ref");
+            for attr in attributes {
+                elem.push_attribute((attr.key.as_str(), attr.value.as_str()));
+            }
+            if content.is_empty() {
+                writer.write_event(Event::Empty(elem))?;
+            } else {
+                writer.write_event(Event::Start(elem))?;
+                for child in content {
+                    serialize_node(writer, child, state)?;
+                }
+                writer.write_event(Event::End(BytesEnd::new("ref")))?;
             }
         }
 

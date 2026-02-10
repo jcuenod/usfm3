@@ -38,7 +38,7 @@ fn is_verse_paragraph(marker: &str) -> bool {
 fn collect_text(node: &Node, buf: &mut String) {
     match node {
         Node::Text(s) => buf.push_str(s),
-        Node::Char { content, .. } | Node::Unknown { content, .. } => {
+        Node::Char { content, .. } | Node::Ref { content, .. } | Node::Unknown { content, .. } => {
             for child in content {
                 collect_text(child, buf);
             }

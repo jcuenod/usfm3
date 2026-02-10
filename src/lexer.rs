@@ -11,8 +11,14 @@ pub type Span = std::ops::Range<usize>;
 /// the more-specific nested / closing / milestone patterns over the plain
 /// `Marker` pattern.
 #[derive(Logos, Debug, Clone, PartialEq)]
-#[logos(skip r"[ \t\r]+")] // skip spaces, tabs, and CR (but NOT newlines)
 pub enum Token<'a> {
+    // ── Whitespace ────────────────────────────────────────────────────
+    /// Runs of spaces, tabs, and carriage returns.  The builder will 
+    /// decide contextually whether to emit, normalize, or discard
+    /// whitespace.
+    #[regex(r"[ \t]+")]
+    Whitespace(&'a str),
+
     // ── Fixed keywords ──────────────────────────────────────────────────
     /// `\c` -- chapter marker (takes a numeric argument as the next token).
     #[token("\\c", priority = 5)]
@@ -43,16 +49,19 @@ pub enum Token<'a> {
 
     // ── Regular markers ─────────────────────────────────────────────────
     /// `\marker*` -- character / note closing marker.
-    #[regex(r"\\[a-z]+[0-9]*\*")]
+    #[regex(r"\\[a-z]+[0-9]*(-[0-9]+)?\*")]
     ClosingMarker(&'a str),
 
     /// `\marker` -- paragraph or character opening marker (catch-all).
-    #[regex(r"\\[a-z]+[0-9]*", priority = 2)]
+    /// The optional `-[0-9]+` suffix handles column-spanning table markers
+    /// like `\tcr1-2` (spanning columns 1-2).
+    #[regex(r"\\[a-z]+[0-9]*(-[0-9]+)?", priority = 2)]
     Marker(&'a str),
 
     // ── Attributes ──────────────────────────────────────────────────────
     /// Attribute block starting with `|`, e.g. `|lemma="grace" strong="H1234"`.
-    #[regex(r"\|[^\\\n]+")]
+    /// The regex allows `\"` (escaped quotes) within the attribute string.
+    #[regex(r#"\|(?:[^\\\n]|\\")+"#)]
     Attributes(&'a str),
 
     // ── Text ────────────────────────────────────────────────────────────
@@ -65,7 +74,7 @@ pub enum Token<'a> {
     // ── Structural ──────────────────────────────────────────────────────
     /// A newline character -- significant because paragraph boundaries in
     /// USFM often coincide with newlines.
-    #[token("\n")]
+    #[regex(r"\r?\n")]
     Newline,
 }
 
@@ -90,37 +99,7 @@ pub fn tokenize(input: &str) -> Vec<(Token<'_>, Span)> {
         }
     }
 
-    // Post-process: restore significant whitespace after closing markers.
-    // The logos skip pattern `[ \t]+` eats spaces between closing markers and
-    // subsequent text.  Those spaces are word-separator content and must be
-    // preserved.  We detect them by looking for byte-offset gaps after closing
-    // tokens when the next token is Text, and inserting the gap as a Text token.
-    // Gaps before markers/structural tokens are structural whitespace and are
-    // intentionally discarded.
-    let mut result = Vec::with_capacity(tokens.len() + tokens.len() / 4);
-    for i in 0..tokens.len() {
-        result.push(tokens[i].clone());
-        if i + 1 < tokens.len() {
-            let is_close = matches!(
-                &tokens[i].0,
-                Token::ClosingMarker(_) | Token::NestedClosingMarker(_) | Token::MilestoneEnd
-            );
-            let next_is_text = matches!(&tokens[i + 1].0, Token::Text(_));
-            if is_close && next_is_text {
-                let gap_start = tokens[i].1.end;
-                let gap_end = tokens[i + 1].1.start;
-                if gap_start < gap_end {
-                    let ws = &input[gap_start..gap_end];
-                    result.push((Token::Text(ws), gap_start..gap_end));
-                }
-            }
-
-            // NOTE: whitespace preceding a closing marker is preserved per
-            // USFM spec ("Normalized whitespace preceding the closing marker
-            // of a character or note marker pair is preserved.").
-        }
-    }
-    result
+    tokens
 }
 
 /// Strip the leading backslash from a marker string.
@@ -245,12 +224,15 @@ mod tests {
     fn test_spans_are_correct() {
         let input = r"\p Hello";
         let tokens = tokenize(input);
-        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens.len(), 3);
         // \p occupies bytes 0..2
         assert_eq!(tokens[0].1, 0..2);
+        // Whitespace at byte 2..3
+        assert_eq!(tokens[1].0, Token::Whitespace(" "));
+        assert_eq!(tokens[1].1, 2..3);
         // "Hello" starts after "\p " (3 bytes)
-        assert_eq!(tokens[1].1, 3..8);
-        assert_eq!(&input[tokens[1].1.clone()], "Hello");
+        assert_eq!(tokens[2].1, 3..8);
+        assert_eq!(&input[tokens[2].1.clone()], "Hello");
     }
 
     // ── Complete USFM snippet ───────────────────────────────────────────
@@ -260,16 +242,19 @@ mod tests {
         let input = "\\id GEN\n\\c 1\n\\p\n\\v 1 In the beginning";
         let tokens = tokenize(input);
 
-        // Expected sequence:
+        // Expected sequence (with explicit Whitespace tokens):
         // \id  -> Marker
+        //      -> Whitespace
         // GEN  -> Text
         // \n   -> Newline
         // \c   -> Chapter
+        //      -> Whitespace
         // 1    -> Text
         // \n   -> Newline
         // \p   -> Marker
         // \n   -> Newline
         // \v   -> Verse
+        //      -> Whitespace
         // 1 In the beginning -> Text (spaces within text are preserved)
         let kinds: Vec<&str> = tokens
             .iter()
@@ -284,6 +269,7 @@ mod tests {
                 Token::Marker(_) => "Marker",
                 Token::Attributes(_) => "Attributes",
                 Token::Text(_) => "Text",
+                Token::Whitespace(_) => "Whitespace",
                 Token::Newline => "Newline",
             })
             .collect();
@@ -291,27 +277,30 @@ mod tests {
         assert_eq!(
             kinds,
             vec![
-                "Marker",  // \id
-                "Text",    // GEN
-                "Newline", // \n
-                "Chapter", // \c
-                "Text",    // 1
-                "Newline", // \n
-                "Marker",  // \p
-                "Newline", // \n
-                "Verse",   // \v
-                "Text",    // 1 In the beginning
+                "Marker",     // \id
+                "Whitespace", // " "
+                "Text",       // GEN
+                "Newline",    // \n
+                "Chapter",    // \c
+                "Whitespace", // " "
+                "Text",       // 1
+                "Newline",    // \n
+                "Marker",     // \p
+                "Newline",    // \n
+                "Verse",      // \v
+                "Whitespace", // " "
+                "Text",       // 1 In the beginning
             ]
         );
 
         // Verify specific token contents
         assert_eq!(tokens[0].0, Token::Marker("\\id"));
-        assert_eq!(tokens[1].0, Token::Text("GEN"));
-        assert_eq!(tokens[3].0, Token::Chapter);
-        assert_eq!(tokens[4].0, Token::Text("1"));
-        assert_eq!(tokens[6].0, Token::Marker("\\p"));
-        assert_eq!(tokens[8].0, Token::Verse);
-        assert_eq!(tokens[9].0, Token::Text("1 In the beginning"));
+        assert_eq!(tokens[2].0, Token::Text("GEN"));
+        assert_eq!(tokens[4].0, Token::Chapter);
+        assert_eq!(tokens[6].0, Token::Text("1"));
+        assert_eq!(tokens[8].0, Token::Marker("\\p"));
+        assert_eq!(tokens[10].0, Token::Verse);
+        assert_eq!(tokens[12].0, Token::Text("1 In the beginning"));
     }
 
     // ── Error recovery ──────────────────────────────────────────────────
@@ -359,12 +348,13 @@ mod tests {
     // ── Whitespace handling ─────────────────────────────────────────────
 
     #[test]
-    fn test_spaces_and_tabs_are_skipped() {
-        // Spaces and tabs between tokens should be consumed silently.
+    fn test_spaces_and_tabs_are_whitespace_tokens() {
+        // Spaces and tabs between tokens are now explicit Whitespace tokens.
         let tokens = tokenize("\\p \t \\v");
-        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens.len(), 3);
         assert_eq!(tokens[0].0, Token::Marker("\\p"));
-        assert_eq!(tokens[1].0, Token::Verse);
+        assert_eq!(tokens[1].0, Token::Whitespace(" \t "));
+        assert_eq!(tokens[2].0, Token::Verse);
     }
 
     #[test]

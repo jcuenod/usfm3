@@ -90,7 +90,8 @@ pub fn default_attribute(marker: &str) -> Option<&'static str> {
         "w" => Some("lemma"),
         "rb" => Some("gloss"),
         "jmp" => Some("link-href"),
-        "xt" => Some("href"),
+        "xt" => Some("link-href"),
+        "ref" => Some("loc"),
         "fig" => Some("src"),
         _ => {
             // Milestone markers: \qt-s, \qt1-s, \qt-e, etc. use "who".
@@ -209,6 +210,9 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
 
         // -- introduction end --
         | "ie"
+        
+        // -- liturgical note marker --
+        | "lit"
         => MarkerInfo::new(MarkerKind::Paragraph),
 
         // =============================================================
@@ -258,8 +262,8 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
         // -- references / annotations --
         | "rq" | "ca" | "va" | "vp"
 
-        // -- linking --
-        | "jmp"
+        // -- linking / references --
+        | "jmp" | "ref"
 
         // -- acrostic / liturgical --
         | "qac" | "lik" | "liv"
@@ -273,6 +277,8 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
         | "tc" | "tc1" | "tc2" | "tc3"
         | "thr" | "thr1" | "thr2" | "thr3"
         | "tcr" | "tcr1" | "tcr2" | "tcr3"
+        | "thc" | "thc1" | "thc2" | "thc3"
+        | "tcc" | "tcc1" | "tcc2" | "tcc3"
         => MarkerInfo::new(MarkerKind::TableCell),
 
         // =============================================================
@@ -299,7 +305,7 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
         // =============================================================
         // Meta markers
         // =============================================================
-        "rem" | "sts" | "restore" | "lit" | "cat"
+        "rem" | "sts" | "restore" | "cat"
         => MarkerInfo::new(MarkerKind::Meta),
 
         // =============================================================
@@ -311,9 +317,19 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
         // Unknown / unrecognized — with dynamic numbered-variant fallback
         // =============================================================
         _ => {
-            // Strip trailing digits and re-check the base name.
-            // e.g., "ms5" -> "ms" (Paragraph), "tc4" -> "tc" (TableCell)
-            let base = name.trim_end_matches(|c: char| c.is_ascii_digit());
+            // Strip column-spanning suffix first (e.g., "tcr1-2" -> "tcr1")
+            // then strip trailing digits (e.g., "tcr1" -> "tcr").
+            let without_span = if let Some(dash_pos) = name.rfind('-') {
+                let after_dash = &name[dash_pos + 1..];
+                if !after_dash.is_empty() && after_dash.chars().all(|c| c.is_ascii_digit()) {
+                    &name[..dash_pos]
+                } else {
+                    name
+                }
+            } else {
+                name
+            };
+            let base = without_span.trim_end_matches(|c: char| c.is_ascii_digit());
             if !base.is_empty() && base != name {
                 let base_info = lookup_marker(base);
                 if base_info.kind != MarkerKind::Unknown {
@@ -463,7 +479,8 @@ mod tests {
     fn table_cell_markers() {
         let cells = [
             "th", "th1", "th2", "th3", "tc", "tc1", "tc2", "tc3", "thr", "thr1", "thr2", "thr3",
-            "tcr", "tcr1", "tcr2", "tcr3",
+            "tcr", "tcr1", "tcr2", "tcr3", "thc", "thc1", "thc2", "thc3", "tcc", "tcc1", "tcc2",
+            "tcc3",
         ];
         for marker in &cells {
             let info = lookup_marker(marker);
@@ -495,6 +512,8 @@ mod tests {
         assert_eq!(lookup_marker("tc5").kind, MarkerKind::TableCell);
         assert_eq!(lookup_marker("thr4").kind, MarkerKind::TableCell);
         assert_eq!(lookup_marker("tcr4").kind, MarkerKind::TableCell);
+        assert_eq!(lookup_marker("thc4").kind, MarkerKind::TableCell);
+        assert_eq!(lookup_marker("tcc4").kind, MarkerKind::TableCell);
 
         // Genuinely unknown should stay unknown
         assert_eq!(lookup_marker("notamarker").kind, MarkerKind::Unknown);

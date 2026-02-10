@@ -58,6 +58,11 @@ pub enum DiagnosticCode {
     UnquotedAttributeValue,
     MissingRequiredAttribute,
     DefaultAttributeNotDefined,
+    BodyParagraphBeforeChapter,
+    NonEmptyBlankLine,
+    LeadingZeros,
+    EmptyWordMarker,
+    MissingMilestoneSelfClose,
 }
 
 /// A diagnostic message with source location.
@@ -135,6 +140,26 @@ impl Diagnostic {
                 "\\{marker} is nested inside another character marker without \\+ prefix"
             ),
             code: DiagnosticCode::MissingNestingPrefix,
+        }
+    }
+
+    /// Malformed attribute string (e.g. unquoted values, missing `=`).
+    pub fn malformed_attributes(span: Span) -> Self {
+        Diagnostic {
+            severity: Severity::Error,
+            span,
+            message: "malformed attribute string (values must be quoted)".to_string(),
+            code: DiagnosticCode::InvalidAttributes,
+        }
+    }
+
+    /// Leading zeros in a chapter or verse number (e.g. `\c 091`, `\v 01`).
+    pub fn leading_zeros(number: &str, span: Span) -> Self {
+        Diagnostic {
+            severity: Severity::Error,
+            span,
+            message: format!("leading zeros in number '{number}'"),
+            code: DiagnosticCode::LeadingZeros,
         }
     }
 
@@ -339,6 +364,48 @@ impl Diagnostic {
                 "\\{marker} does not define a default attribute; value after | is invalid"
             ),
             code: DiagnosticCode::DefaultAttributeNotDefined,
+        }
+    }
+
+    /// A `\b` blank line marker contains content when it should be empty.
+    pub fn non_empty_blank_line(span: Span) -> Self {
+        Diagnostic {
+            severity: Severity::Error,
+            span,
+            message: "\\b marker should not contain content".to_string(),
+            code: DiagnosticCode::NonEmptyBlankLine,
+        }
+    }
+
+    /// A body paragraph marker appears before the first chapter.
+    pub fn body_paragraph_before_chapter(marker: &str, span: Span) -> Self {
+        Diagnostic {
+            severity: Severity::Error,
+            span,
+            message: format!(
+                "body paragraph \\{marker} is not allowed before the first \\c marker"
+            ),
+            code: DiagnosticCode::BodyParagraphBeforeChapter,
+        }
+    }
+
+    /// A `\w` word marker with no content and no attributes.
+    pub fn empty_word_marker(span: Span) -> Self {
+        Diagnostic {
+            severity: Severity::Error,
+            span,
+            message: "\\w marker has no content or attributes".to_string(),
+            code: DiagnosticCode::EmptyWordMarker,
+        }
+    }
+
+    /// A milestone marker (e.g., `\k-s`) is missing its self-closing `\*`.
+    pub fn missing_milestone_self_close(marker: &str, span: Span) -> Self {
+        Diagnostic {
+            severity: Severity::Error,
+            span,
+            message: format!("milestone \\{marker} is missing closing \\*"),
+            code: DiagnosticCode::MissingMilestoneSelfClose,
         }
     }
 }

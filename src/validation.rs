@@ -93,6 +93,9 @@ impl<'a> Validator<'a> {
         self.check_char_crosses_verse(doc);
         self.check_empty_figure(doc);
         self.check_attribute_rules(doc);
+        self.check_body_paragraph_before_chapter(doc);
+        self.check_non_empty_blank_line(doc);
+        self.check_empty_word_marker(doc);
     }
 
     // ── 1. \id must be the first marker ─────────────────────────────────
@@ -443,6 +446,15 @@ impl<'a> Validator<'a> {
                             ));
                     }
                 }
+
+                // Check for whitespace-only attribute values.
+                for attr in attributes {
+                    if !attr.value.is_empty() && attr.value.trim().is_empty() {
+                        self.diagnostics
+                            .push(Diagnostic::malformed_attributes(span.clone()));
+                        break;
+                    }
+                }
             }
             Node::Figure {
                 marker,
@@ -467,6 +479,89 @@ impl<'a> Validator<'a> {
             self.walk_attribute_rules(child);
         }
     }
+
+    // ── 13. Non-empty blank line ────────────────────────────────────
+
+    fn check_non_empty_blank_line(&mut self, doc: &Document) {
+        for node in &doc.content {
+            self.walk_non_empty_blank_line(node);
+        }
+    }
+
+    fn walk_non_empty_blank_line(&mut self, node: &Node) {
+        if let Node::Para {
+            marker,
+            content,
+            span,
+        } = node
+        {
+            if marker == "b" && !content.is_empty() {
+                self.diagnostics
+                    .push(Diagnostic::non_empty_blank_line(span.clone()));
+            }
+        }
+        for child in node.children() {
+            self.walk_non_empty_blank_line(child);
+        }
+    }
+
+    // ── 15. Empty \w word marker ─────────────────────────────────────
+
+    fn check_empty_word_marker(&mut self, doc: &Document) {
+        for node in &doc.content {
+            self.walk_empty_word_marker(node);
+        }
+    }
+
+    fn walk_empty_word_marker(&mut self, node: &Node) {
+        if let Node::Char {
+            marker,
+            content,
+            attributes,
+            span,
+        } = node
+        {
+            let clean_marker = marker.strip_prefix('+').unwrap_or(marker);
+            if clean_marker == "w" {
+                let has_text = content.iter().any(|n| {
+                    if let Node::Text(s) = n {
+                        !s.trim().is_empty()
+                    } else {
+                        true // non-text children count as content
+                    }
+                });
+                if !has_text && attributes.is_empty() {
+                    self.diagnostics
+                        .push(Diagnostic::empty_word_marker(span.clone()));
+                }
+            }
+        }
+        for child in node.children() {
+            self.walk_empty_word_marker(child);
+        }
+    }
+
+    // ── 14. Body paragraph before first chapter ──────────────────────
+
+    fn check_body_paragraph_before_chapter(&mut self, doc: &Document) {
+        for node in &doc.content {
+            match node {
+                Node::Chapter { .. } => {
+                    // Reached the first chapter — stop checking.
+                    return;
+                }
+                Node::Para { marker, span, .. } => {
+                    let info = markers::lookup_marker(marker);
+                    if info.kind == MarkerKind::Paragraph && !is_introduction_marker(marker) {
+                        self.diagnostics.push(
+                            Diagnostic::body_paragraph_before_chapter(marker, span.clone()),
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -484,6 +579,12 @@ fn is_note_only_marker(marker: &str) -> bool {
 /// header-after-body check.
 fn is_body_header_marker(marker: &str) -> bool {
     matches!(marker, "cl" | "cd" | "cp" | "mte" | "mte1" | "mte2")
+}
+
+/// Introduction paragraph markers that are allowed before the first `\c`.
+/// All USFM introduction markers start with 'i'.
+fn is_introduction_marker(marker: &str) -> bool {
+    marker.starts_with('i')
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

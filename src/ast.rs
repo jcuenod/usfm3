@@ -192,6 +192,17 @@ pub enum Node {
         span: Span,
     },
 
+    /// `\ref` -- scripture reference with target location.
+    #[serde(rename = "ref")]
+    Ref {
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        content: Vec<Node>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        attributes: Vec<Attribute>,
+        #[serde(skip)]
+        span: Span,
+    },
+
     /// Unrecognized marker (from `\z` namespace or genuinely unknown).
     /// Preserved so no data is lost.
     #[serde(rename = "unknown")]
@@ -202,6 +213,10 @@ pub enum Node {
         #[serde(skip)]
         span: Span,
     },
+
+    /// `//` -- optional line break.
+    #[serde(rename = "optbreak")]
+    OptBreak,
 
     /// Plain text content -- serialized as a bare string in USJ.
     /// Must be the last variant because of `#[serde(untagged)]`.
@@ -246,10 +261,13 @@ impl Node {
             | Node::Table { content, .. }
             | Node::TableRow { content, .. }
             | Node::TableCell { content, .. }
+            | Node::Ref { content, .. }
             | Node::Unknown { content, .. } => content,
-            Node::Chapter { .. } | Node::Verse { .. } | Node::Milestone { .. } | Node::Text(_) => {
-                &[]
-            }
+            Node::Chapter { .. }
+            | Node::Verse { .. }
+            | Node::Milestone { .. }
+            | Node::OptBreak
+            | Node::Text(_) => &[],
         }
     }
 
@@ -269,10 +287,13 @@ impl Node {
             | Node::Table { content, .. }
             | Node::TableRow { content, .. }
             | Node::TableCell { content, .. }
+            | Node::Ref { content, .. }
             | Node::Unknown { content, .. } => Some(content),
-            Node::Chapter { .. } | Node::Verse { .. } | Node::Milestone { .. } | Node::Text(_) => {
-                None
-            }
+            Node::Chapter { .. }
+            | Node::Verse { .. }
+            | Node::Milestone { .. }
+            | Node::OptBreak
+            | Node::Text(_) => None,
         }
     }
 
@@ -293,7 +314,11 @@ impl Node {
             | Node::TableRow { marker, .. }
             | Node::TableCell { marker, .. }
             | Node::Unknown { marker, .. } => Some(marker),
-            Node::Table { .. } | Node::Periph { .. } | Node::Text(_) => None,
+            Node::Table { .. }
+            | Node::Periph { .. }
+            | Node::Ref { .. }
+            | Node::OptBreak
+            | Node::Text(_) => None,
         }
     }
 
@@ -315,8 +340,9 @@ impl Node {
             | Node::Table { span, .. }
             | Node::TableRow { span, .. }
             | Node::TableCell { span, .. }
+            | Node::Ref { span, .. }
             | Node::Unknown { span, .. } => Some(span),
-            Node::Text(_) => None,
+            Node::OptBreak | Node::Text(_) => None,
         }
     }
 }
