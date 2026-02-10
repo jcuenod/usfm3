@@ -12,6 +12,7 @@ jobs:
   publish:
     name: Publish usfm3 crate
     runs-on: ubuntu-latest
+    environment: Publishing
     steps:
       - uses: actions/checkout@v4
 

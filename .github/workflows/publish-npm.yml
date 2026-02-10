@@ -9,6 +9,7 @@ jobs:
   publish:
     name: Build and publish WASM package
     runs-on: ubuntu-latest
+    environment: Publishing
     steps:
       - uses: actions/checkout@v4
 
