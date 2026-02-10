@@ -16,8 +16,6 @@ const EXPECTED_FAILURES_FILE: &str = "tests/bridgeconn_expected_failures.txt";
 struct TestCase {
     /// Relative path from FIXTURE_ROOT, e.g. "basic/minimal"
     name: String,
-    /// Top-level category, e.g. "basic"
-    category: String,
     /// Whether BridgeConn marks this as "pass" or "fail"
     validated_pass: bool,
     /// Full path to origin.usfm
@@ -56,18 +54,11 @@ fn walk_dir(dir: &Path, root: &Path, cases: &mut Vec<TestCase>) {
             if usfm_path.exists() && json_path.exists() {
                 let rel = path.strip_prefix(root).unwrap();
                 let name = rel.to_string_lossy().to_string();
-                let category = rel
-                    .components()
-                    .next()
-                    .map(|c| c.as_os_str().to_string_lossy().to_string())
-                    .unwrap_or_default();
-
                 let metadata_path = path.join("metadata.xml");
                 let validated_pass = parse_metadata(&metadata_path);
 
                 cases.push(TestCase {
                     name,
-                    category,
                     validated_pass,
                     usfm_path,
                     json_path,
@@ -207,22 +198,20 @@ fn normalize_for_comparison(value: &mut Value) {
                 // different fixtures. Canonicalize to "link-href".
                 if let Some(Value::Array(attrs)) = map.get_mut("attributes") {
                     for attr in attrs.iter_mut() {
-                        if let Value::Object(attr_map) = attr {
-                            if attr_map.get("key").and_then(|v| v.as_str()) == Some("href") {
-                                attr_map.insert(
-                                    "key".to_string(),
-                                    Value::String("link-href".to_string()),
-                                );
-                            }
+                        if let Value::Object(attr_map) = attr
+                            && attr_map.get("key").and_then(|v| v.as_str()) == Some("href")
+                        {
+                            attr_map
+                                .insert("key".to_string(), Value::String("link-href".to_string()));
                         }
                     }
                 }
 
                 // Remove empty content arrays (we omit them, BridgeConn includes them)
-                if let Some(Value::Array(arr)) = map.get("content") {
-                    if arr.is_empty() {
-                        map.remove("content");
-                    }
+                if let Some(Value::Array(arr)) = map.get("content")
+                    && arr.is_empty()
+                {
+                    map.remove("content");
                 }
             }
 
@@ -242,22 +231,22 @@ fn normalize_for_comparison(value: &mut Value) {
                 // within a note.
                 if node_type.as_deref() == Some("note") {
                     for item in arr.iter_mut() {
-                        if let Value::Object(child_map) = item {
-                            if child_map.get("type").and_then(|v| v.as_str()) == Some("char") {
-                                if let Some(Value::Array(cc)) = child_map.get_mut("content") {
-                                    if let Some(Value::String(s)) = cc.first_mut() {
-                                        *s = s.trim_start().to_string();
-                                    }
-                                    // Remove empty strings left over from trimming
-                                    cc.retain(|v| !matches!(v, Value::String(s) if s.is_empty()));
+                        if let Value::Object(child_map) = item
+                            && child_map.get("type").and_then(|v| v.as_str()) == Some("char")
+                        {
+                            if let Some(Value::Array(cc)) = child_map.get_mut("content") {
+                                if let Some(Value::String(s)) = cc.first_mut() {
+                                    *s = s.trim_start().to_string();
                                 }
-                                // Remove empty content arrays
-                                if child_map
-                                    .get("content")
-                                    .is_some_and(|v| matches!(v, Value::Array(a) if a.is_empty()))
-                                {
-                                    child_map.remove("content");
-                                }
+                                // Remove empty strings left over from trimming
+                                cc.retain(|v| !matches!(v, Value::String(s) if s.is_empty()));
+                            }
+                            // Remove empty content arrays
+                            if child_map
+                                .get("content")
+                                .is_some_and(|v| matches!(v, Value::Array(a) if a.is_empty()))
+                            {
+                                child_map.remove("content");
                             }
                         }
                     }

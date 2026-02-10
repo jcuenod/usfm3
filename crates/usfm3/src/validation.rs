@@ -146,23 +146,23 @@ impl<'a> Validator<'a> {
         let mut seen = HashSet::new();
 
         for node in &doc.content {
-            if let Node::Chapter { number, span, .. } = node {
-                if let Ok(num) = number.parse::<u32>() {
-                    // Duplicate check.
-                    if !seen.insert(num) {
-                        self.diagnostics
-                            .push(Diagnostic::duplicate_chapter(num, span.clone()));
-                    }
-                    // Sequence check.
-                    if num != expected {
-                        self.diagnostics.push(Diagnostic::invalid_chapter_sequence(
-                            expected,
-                            num,
-                            span.clone(),
-                        ));
-                    }
-                    expected = num + 1;
+            if let Node::Chapter { number, span, .. } = node
+                && let Ok(num) = number.parse::<u32>()
+            {
+                // Duplicate check.
+                if !seen.insert(num) {
+                    self.diagnostics
+                        .push(Diagnostic::duplicate_chapter(num, span.clone()));
                 }
+                // Sequence check.
+                if num != expected {
+                    self.diagnostics.push(Diagnostic::invalid_chapter_sequence(
+                        expected,
+                        num,
+                        span.clone(),
+                    ));
+                }
+                expected = num + 1;
             }
         }
     }
@@ -214,10 +214,10 @@ impl<'a> Validator<'a> {
     // ── 5. Text before \id ──────────────────────────────────────────────
 
     fn check_text_before_id(&mut self, doc: &Document) {
-        if let Some(first) = doc.content.first() {
-            if matches!(first, Node::Text(_)) {
-                self.diagnostics.push(Diagnostic::text_before_id(0..0));
-            }
+        if let Some(first) = doc.content.first()
+            && matches!(first, Node::Text(_))
+        {
+            self.diagnostics.push(Diagnostic::text_before_id(0..0));
         }
     }
 
@@ -255,14 +255,15 @@ impl<'a> Validator<'a> {
     }
 
     fn walk_note_submarkers(&mut self, node: &Node, inside_note: bool) {
-        if let Node::Char { marker, span, .. } = node {
-            if !inside_note && is_note_only_marker(marker) {
-                self.diagnostics
-                    .push(Diagnostic::note_submarker_outside_note(
-                        marker,
-                        span.clone(),
-                    ));
-            }
+        if let Node::Char { marker, span, .. } = node
+            && !inside_note
+            && is_note_only_marker(marker)
+        {
+            self.diagnostics
+                .push(Diagnostic::note_submarker_outside_note(
+                    marker,
+                    span.clone(),
+                ));
         }
 
         let is_note = matches!(node, Node::Note { .. });
@@ -437,14 +438,14 @@ impl<'a> Validator<'a> {
                 }
 
                 // Check for unresolved "default" key (marker has no default attribute).
-                if attributes.iter().any(|a| a.key == "default") {
-                    if markers::default_attribute(clean_marker).is_none() {
-                        self.diagnostics
-                            .push(Diagnostic::default_attribute_not_defined(
-                                clean_marker,
-                                span.clone(),
-                            ));
-                    }
+                if attributes.iter().any(|a| a.key == "default")
+                    && markers::default_attribute(clean_marker).is_none()
+                {
+                    self.diagnostics
+                        .push(Diagnostic::default_attribute_not_defined(
+                            clean_marker,
+                            span.clone(),
+                        ));
                 }
 
                 // Check for whitespace-only attribute values.
@@ -463,14 +464,14 @@ impl<'a> Validator<'a> {
                 ..
             } => {
                 let clean_marker = marker.strip_prefix('+').unwrap_or(marker);
-                if attributes.iter().any(|a| a.key == "default") {
-                    if markers::default_attribute(clean_marker).is_none() {
-                        self.diagnostics
-                            .push(Diagnostic::default_attribute_not_defined(
-                                clean_marker,
-                                span.clone(),
-                            ));
-                    }
+                if attributes.iter().any(|a| a.key == "default")
+                    && markers::default_attribute(clean_marker).is_none()
+                {
+                    self.diagnostics
+                        .push(Diagnostic::default_attribute_not_defined(
+                            clean_marker,
+                            span.clone(),
+                        ));
                 }
             }
             _ => {}
@@ -494,11 +495,11 @@ impl<'a> Validator<'a> {
             content,
             span,
         } = node
+            && marker == "b"
+            && !content.is_empty()
         {
-            if marker == "b" && !content.is_empty() {
-                self.diagnostics
-                    .push(Diagnostic::non_empty_blank_line(span.clone()));
-            }
+            self.diagnostics
+                .push(Diagnostic::non_empty_blank_line(span.clone()));
         }
         for child in node.children() {
             self.walk_non_empty_blank_line(child);

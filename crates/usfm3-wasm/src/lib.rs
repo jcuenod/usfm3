@@ -145,7 +145,7 @@ impl ParseResult {
 
 #[wasm_bindgen(skip_typescript)]
 pub fn parse(usfm: &str, options: Option<ParseOptions>) -> Result<ParseResult, JsError> {
-    let validate = options.map_or(true, |o| o.validate);
+    let validate = options.is_none_or(|o| o.validate);
 
     let result = usfm3_lib::builder::parse(usfm);
 

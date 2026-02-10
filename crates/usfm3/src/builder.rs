@@ -454,16 +454,17 @@ impl TreeBuilder {
         // The `\*` was found — milestone is properly closed.
         self.pending_milestone_close = None;
         self.consume_pending_newline();
-        if let Some(top) = self.stack.last() {
-            if top.children.is_empty() && top.caller.is_none() {
-                let open = self.stack.pop().unwrap();
-                let node = Node::Milestone {
-                    marker: open.marker,
-                    attributes: open.attributes,
-                    span: open.span,
-                };
-                self.append_node(node);
-            }
+        if let Some(top) = self.stack.last()
+            && top.children.is_empty()
+            && top.caller.is_none()
+        {
+            let open = self.stack.pop().unwrap();
+            let node = Node::Milestone {
+                marker: open.marker,
+                attributes: open.attributes,
+                span: open.span,
+            };
+            self.append_node(node);
         }
         self.after_close_marker = true;
     }
@@ -601,14 +602,13 @@ impl TreeBuilder {
             &mut self.root_children
         };
 
-        if let Some(last) = children.last_mut() {
-            if let Node::Milestone {
+        if let Some(last) = children.last_mut()
+            && let Node::Milestone {
                 marker, attributes, ..
             } = last
-            {
-                let resolved = resolve_default_attr_keys(marker, attrs);
-                attributes.extend(resolved);
-            }
+        {
+            let resolved = resolve_default_attr_keys(marker, attrs);
+            attributes.extend(resolved);
         }
     }
 
@@ -696,48 +696,52 @@ impl TreeBuilder {
 
         // 3. If the top of stack is an \id header that hasn't received its
         //    book code yet, extract it.
-        if let Some(top) = self.stack.last_mut() {
-            if top.kind == MarkerKind::Header && top.marker == "id" && top.children.is_empty() {
-                let (code, rest) = split_first_word(text);
-                self.current_book_code = Some(code.to_string());
-                // Store the book code in a special way -- we'll use it in
-                // finalize_open_node to create a Node::Book.
-                // For now, record it as caller (ab)using that field.
-                top.caller = Some(code.to_string());
-                if !rest.is_empty() {
-                    let rest = rest.replace('~', "\u{00a0}");
-                    top.children.push(Node::text(&rest));
-                }
-                return;
+        if let Some(top) = self.stack.last_mut()
+            && top.kind == MarkerKind::Header
+            && top.marker == "id"
+            && top.children.is_empty()
+        {
+            let (code, rest) = split_first_word(text);
+            self.current_book_code = Some(code.to_string());
+            // Store the book code in a special way -- we'll use it in
+            // finalize_open_node to create a Node::Book.
+            // For now, record it as caller (ab)using that field.
+            top.caller = Some(code.to_string());
+            if !rest.is_empty() {
+                let rest = rest.replace('~', "\u{00a0}");
+                top.children.push(Node::text(&rest));
             }
+            return;
         }
 
         // 3b. If the top of stack is a \periph that hasn't received its alt text
         //     yet, extract the entire text as alt.
-        if let Some(top) = self.stack.last_mut() {
-            if top.kind == MarkerKind::Periph && top.caller.is_none() {
-                let trimmed = text.trim();
-                if !trimmed.is_empty() {
-                    top.caller = Some(trimmed.to_string());
-                }
-                return;
+        if let Some(top) = self.stack.last_mut()
+            && top.kind == MarkerKind::Periph
+            && top.caller.is_none()
+        {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                top.caller = Some(trimmed.to_string());
             }
+            return;
         }
 
         // 4. If the top of stack is a Note that hasn't received its caller yet,
         //    extract the first word as the caller.
-        if let Some(top) = self.stack.last_mut() {
-            if top.kind == MarkerKind::Note && top.caller.is_none() {
-                let trimmed = text.trim_start();
-                if !trimmed.is_empty() {
-                    let (caller, remainder) = split_first_word(trimmed);
-                    top.caller = Some(caller.to_string());
-                    if !remainder.is_empty() {
-                        let remainder = remainder.replace('~', "\u{00a0}");
-                        top.children.push(Node::text(&remainder));
-                    }
-                    return;
+        if let Some(top) = self.stack.last_mut()
+            && top.kind == MarkerKind::Note
+            && top.caller.is_none()
+        {
+            let trimmed = text.trim_start();
+            if !trimmed.is_empty() {
+                let (caller, remainder) = split_first_word(trimmed);
+                top.caller = Some(caller.to_string());
+                if !remainder.is_empty() {
+                    let remainder = remainder.replace('~', "\u{00a0}");
+                    top.children.push(Node::text(&remainder));
                 }
+                return;
             }
         }
 
@@ -781,10 +785,11 @@ impl TreeBuilder {
             } else {
                 &mut self.root_children
             };
-            if let Some(Node::Text(prev)) = children.last_mut() {
-                if !prev.ends_with(' ') && !prev.ends_with('\u{00a0}') {
-                    prev.push(' ');
-                }
+            if let Some(Node::Text(prev)) = children.last_mut()
+                && !prev.ends_with(' ')
+                && !prev.ends_with('\u{00a0}')
+            {
+                prev.push(' ');
             }
         }
     }
@@ -968,45 +973,44 @@ impl TreeBuilder {
                 Node::Char { marker, .. } | Node::Para { marker, .. } => Some(marker.as_str()),
                 _ => None,
             };
-            if let Some(m) = maybe_marker {
-                if matches!(m, "ca" | "cp" | "va" | "vp") {
-                    if let Some(text) = extract_plain_text(node.children()) {
-                        // Remove preceding whitespace-only text node (the gap
-                        // after the previous closing marker, e.g. `\va*`).
-                        let children = if let Some(top) = self.stack.last_mut() {
-                            &mut top.children
-                        } else {
-                            &mut self.root_children
-                        };
-                        if let Some(Node::Text(t)) = children.last() {
-                            if t.trim().is_empty() {
-                                children.pop();
-                            }
-                        }
-                        match m {
-                            "ca" => {
-                                self.set_last_chapter_altnumber(text);
-                                self.consumed_metadata = true;
-                                return;
-                            }
-                            "cp" => {
-                                self.set_last_chapter_pubnumber(text);
-                                self.consumed_metadata = true;
-                                return;
-                            }
-                            "va" => {
-                                self.set_last_verse_altnumber(text);
-                                self.consumed_metadata = true;
-                                return;
-                            }
-                            "vp" => {
-                                self.set_last_verse_pubnumber(text);
-                                self.consumed_metadata = true;
-                                return;
-                            }
-                            _ => unreachable!(),
-                        }
+            if let Some(m) = maybe_marker
+                && matches!(m, "ca" | "cp" | "va" | "vp")
+                && let Some(text) = extract_plain_text(node.children())
+            {
+                // Remove preceding whitespace-only text node (the gap
+                // after the previous closing marker, e.g. `\va*`).
+                let children = if let Some(top) = self.stack.last_mut() {
+                    &mut top.children
+                } else {
+                    &mut self.root_children
+                };
+                if let Some(Node::Text(t)) = children.last()
+                    && t.trim().is_empty()
+                {
+                    children.pop();
+                }
+                match m {
+                    "ca" => {
+                        self.set_last_chapter_altnumber(text);
+                        self.consumed_metadata = true;
+                        return;
                     }
+                    "cp" => {
+                        self.set_last_chapter_pubnumber(text);
+                        self.consumed_metadata = true;
+                        return;
+                    }
+                    "va" => {
+                        self.set_last_verse_altnumber(text);
+                        self.consumed_metadata = true;
+                        return;
+                    }
+                    "vp" => {
+                        self.set_last_verse_pubnumber(text);
+                        self.consumed_metadata = true;
+                        return;
+                    }
+                    _ => unreachable!(),
                 }
             }
         }
@@ -1080,12 +1084,12 @@ impl TreeBuilder {
 
     /// Close the current table row (if one is open on the stack).
     fn close_table_row(&mut self) {
-        if let Some(top_kind) = self.stack.last().map(|o| o.kind) {
-            if top_kind == MarkerKind::TableRow {
-                let top = self.stack.pop().unwrap();
-                let node = self.finalize_open_node(top);
-                self.append_node(node);
-            }
+        if let Some(top_kind) = self.stack.last().map(|o| o.kind)
+            && top_kind == MarkerKind::TableRow
+        {
+            let top = self.stack.pop().unwrap();
+            let node = self.finalize_open_node(top);
+            self.append_node(node);
         }
     }
 
@@ -1249,17 +1253,12 @@ impl TreeBuilder {
     /// stopping at a Paragraph (or any other block-level) boundary.
     /// Used when `\rem` nests inside a paragraph without closing it.
     fn close_inline_above_paragraph(&mut self) {
-        loop {
-            match self.stack.last().map(|o| o.kind) {
-                Some(MarkerKind::Character)
-                | Some(MarkerKind::Unknown)
-                | Some(MarkerKind::Meta) => {
-                    let top = self.stack.pop().unwrap();
-                    let node = self.finalize_open_node(top);
-                    self.append_node(node);
-                }
-                _ => break,
-            }
+        while let Some(MarkerKind::Character) | Some(MarkerKind::Unknown) | Some(MarkerKind::Meta) =
+            self.stack.last().map(|o| o.kind)
+        {
+            let top = self.stack.pop().unwrap();
+            let node = self.finalize_open_node(top);
+            self.append_node(node);
         }
     }
 
@@ -1485,17 +1484,15 @@ impl TreeBuilder {
             if open.kind == MarkerKind::Note {
                 self.diagnostics
                     .push(Diagnostic::unclosed_note(&open.marker, open.span.clone()));
-            } else if open.kind == MarkerKind::SidebarStart || open.kind == MarkerKind::Figure {
+            } else if open.kind == MarkerKind::SidebarStart
+                || open.kind == MarkerKind::Figure
+                || ((open.kind == MarkerKind::Character
+                    || open.kind == MarkerKind::Unknown
+                    || open.kind == MarkerKind::TableCell)
+                    && !open.marker.starts_with('z'))
+            {
                 self.diagnostics
                     .push(Diagnostic::unclosed_at_eof(&open.marker, open.span.clone()));
-            } else if open.kind == MarkerKind::Character
-                || open.kind == MarkerKind::Unknown
-                || open.kind == MarkerKind::TableCell
-            {
-                if !open.marker.starts_with('z') {
-                    self.diagnostics
-                        .push(Diagnostic::unclosed_at_eof(&open.marker, open.span.clone()));
-                }
             }
             // Paragraphs, headers, etc. are implicitly closed at EOF -- no
             // diagnostic needed for those.
@@ -1597,12 +1594,7 @@ pub fn parse_attributes(attr_str: &str) -> Option<Vec<Attribute>> {
 /// A quote preceded by `\` is considered escaped and skipped.
 fn find_unescaped_quote(s: &str) -> Option<usize> {
     let bytes = s.as_bytes();
-    for i in 0..bytes.len() {
-        if bytes[i] == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
-            return Some(i);
-        }
-    }
-    None
+    (0..bytes.len()).find(|&i| bytes[i] == b'"' && (i == 0 || bytes[i - 1] != b'\\'))
 }
 
 /// Replace any `"default"` attribute keys with the marker-specific default
@@ -1614,13 +1606,13 @@ fn resolve_default_attr_keys(marker: &str, attrs: Vec<Attribute>) -> Vec<Attribu
         .into_iter()
         .map(|a| {
             // Resolve bare "default" key to marker-specific name.
-            if a.key == "default" {
-                if let Some(key_name) = default_key {
-                    return Attribute {
-                        key: key_name.to_string(),
-                        value: a.value,
-                    };
-                }
+            if a.key == "default"
+                && let Some(key_name) = default_key
+            {
+                return Attribute {
+                    key: key_name.to_string(),
+                    value: a.value,
+                };
             }
             // Rename \fig's "src" attribute to "file" per USJ spec.
             if marker == "fig" && a.key == "src" {
@@ -1666,12 +1658,11 @@ fn extract_category(mut children: Vec<Node>) -> (Option<String>, Vec<Node>) {
         let cat_node = children.remove(idx);
         let text = extract_plain_text(cat_node.children());
         // Also remove a preceding whitespace-only text node if present.
-        if idx > 0 {
-            if let Some(Node::Text(t)) = children.get(idx - 1) {
-                if t.trim().is_empty() {
-                    children.remove(idx - 1);
-                }
-            }
+        if idx > 0
+            && let Some(Node::Text(t)) = children.get(idx - 1)
+            && t.trim().is_empty()
+        {
+            children.remove(idx - 1);
         }
         (text, children)
     } else {

@@ -3,7 +3,7 @@
 /// This module provides structured diagnostic messages with source locations,
 /// severity levels, and machine-readable codes. Diagnostics are generated both
 /// during parsing (structural issues) and during validation (semantic issues).
-
+///
 /// A byte-offset range into the source text.
 pub type Span = std::ops::Range<usize>;
 
