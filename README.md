@@ -45,6 +45,8 @@ Diagnostics are printed to stderr; document output goes to stdout.
 
 ### Rust
 
+Crate available on [crates.io](https://crates.io/crates/usfm3):
+
 ```rust
 let result = usfm3::builder::parse(r#"\id GEN
 \c 1
@@ -72,6 +74,8 @@ let validation_diags = usfm3::validation::validate(&result.document);
 ```
 
 ### Python
+
+Python bindings available at: [PyPI](https://pypi.org/project/usfm3/)
 
 ```python
 import usfm3
@@ -104,10 +108,10 @@ maturin develop  # install into current venv
 
 ### JavaScript / TypeScript (WebAssembly)
 
-Works in browsers, Node.js, Deno, and Bun.
+Works in browsers, Node.js, Deno, and Bun. [NPM](https://www.npmjs.com/package/usfm3)
 
 ```typescript
-import init, { parse } from "usfm3-wasm";
+import init, { parse } from "usfm3";
 
 await init(); // load wasm (browser only)
 
