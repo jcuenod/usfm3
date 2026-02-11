@@ -90,6 +90,7 @@ export class ParseResult {
   toUsj(): any;
   toUsx(): string;
   toUsfm(): string;
+  toVref(): Record<string, string>;
 }
 export function parse(usfm: string, options?: ParseOptions): ParseResult;
 "#;
@@ -124,6 +125,14 @@ impl ParseResult {
     #[wasm_bindgen(js_name = "toUsfm")]
     pub fn to_usfm(&self) -> String {
         usfm3_lib::usfm::to_usfm_string(&self.document)
+    }
+
+    /// Returns a verse reference map: `{ "GEN 1:1": "In the beginning ...", ... }`.
+    #[wasm_bindgen(js_name = "toVref")]
+    pub fn to_vref(&self) -> Result<JsValue, JsError> {
+        let map = usfm3_lib::vref::to_vref_map(&self.document);
+        let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+        serde::Serialize::serialize(&map, &serializer).map_err(|e| JsError::new(&e.to_string()))
     }
 
     /// Get the diagnostics array.

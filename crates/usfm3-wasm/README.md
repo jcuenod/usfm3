@@ -1,6 +1,6 @@
 # usfm3
 
-An error-tolerant [USFM 3.x](https://docs.usfm.bible/usfm/3.1.1/index.html) parser for JavaScript and TypeScript. Outputs [USJ](https://docs.usfm.bible/usfm/3.1.1/usj/index.html) (JSON), [USX](https://docs.usfm.bible/usfm/3.1.1/usx/index.html) (XML), and normalized USFM.
+An error-tolerant [USFM 3.x](https://docs.usfm.bible/usfm/3.1.1/index.html) parser for JavaScript and TypeScript. Outputs [USJ](https://docs.usfm.bible/usfm/3.1.1/usj/index.html) (JSON), [USX](https://docs.usfm.bible/usfm/3.1.1/usx/index.html) (XML), normalized USFM, and vref format (a key-value map of verse references to text).
 
 Built in Rust and compiled to WebAssembly. Works in browsers, Node.js, Deno, and Bun.
 
@@ -14,10 +14,17 @@ npm install usfm3
 
 ## Usage
 
-```typescript
-import init, { parse } from "usfm3";
+WASM is automatically initialized in Node.js, Deno, and Bun. In a browser, call `init()` first:
 
-await init(); // load WASM (browser only — not needed in Node.js)
+```typescript
+import init from "usfm3";
+await init(); // browser only
+```
+
+Then parse USFM text:
+
+```typescript
+import { parse } from "usfm3";
 
 const result = parse(usfmText);
 
@@ -26,9 +33,10 @@ if (result.hasErrors()) {
 }
 
 // Output formats (lazy — only serialized when called)
-const usj = result.toUsj();    // plain JS object
-const usx = result.toUsx();    // XML string
-const usfm = result.toUsfm();  // USFM string
+const usj = result.toUsj();    // USJ object
+const usx = result.toUsx();    // USX XML string
+const usfm = result.toUsfm();  // Normalized USFM string
+const vref = result.toVref();  // Vref pairs like { "GEN 1:1": "In the beginning...", ... }
 
 // Diagnostics
 for (const d of result.diagnostics) {
@@ -62,6 +70,7 @@ Parse a USFM string. Returns a `ParseResult` with lazy output methods and diagno
 | `toUsj()` | `object` | USJ (Unified Scripture JSON) |
 | `toUsx()` | `string` | USX (Unified Scripture XML) |
 | `toUsfm()` | `string` | Normalized USFM |
+| `toVref()` | `Record<string, string>` | Verse reference to plain text map |
 | `hasErrors()` | `boolean` | True if any error-severity diagnostics |
 | `diagnostics` | `Diagnostic[]` | Parser and validation diagnostics |
 | `free()` | `void` | Free WASM memory |

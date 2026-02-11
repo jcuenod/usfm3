@@ -110,17 +110,23 @@ maturin develop  # install into current venv
 
 Works in browsers, Node.js, Deno, and Bun. [NPM](https://www.npmjs.com/package/usfm3)
 
-```typescript
-import init, { parse } from "usfm3";
+WASM is automatically initialized in Node.js, Deno, and Bun. In a browser, call `init()` first:
 
-await init(); // load wasm (browser only)
+```typescript
+import init from "usfm3";
+await init(); // browser only
+```
+
+```typescript
+import { parse } from "usfm3";
 
 const result = parse(usfmText);
 
 // Output formats (lazy -- only serialized when called)
-const usj = result.toUsj();   // plain JS object
-const usx = result.toUsx();   // XML string
-const usfm = result.toUsfm(); // USFM string
+const usj = result.toUsj();    // USJ object
+const usx = result.toUsx();    // USX XML string
+const usfm = result.toUsfm();  // Normalized USFM string
+const vref = result.toVref();  // Vref pairs like { "GEN 1:1": "In the beginning...", ... }
 
 // Diagnostics
 for (const d of result.diagnostics) {

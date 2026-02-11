@@ -36,12 +36,20 @@ jobs:
       - name: Set package name and version
         run: |
           TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          cp crates/usfm3-wasm/node.js crates/usfm3-wasm/pkg/node.js
           cd crates/usfm3-wasm/pkg
           node -e "
             const fs = require('fs');
             const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
             pkg.name = 'usfm3';
             pkg.version = '${TAG_VERSION}';
+            pkg.files = ['usfm3_wasm_bg.wasm', 'usfm3_wasm.js', 'usfm3_wasm.d.ts', 'node.js'];
+            pkg.exports = {
+              '.': {
+                node: { import: './node.js' },
+                default: './usfm3_wasm.js'
+              }
+            };
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
 
