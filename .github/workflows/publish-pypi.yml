@@ -18,22 +18,32 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64
+            interpreter: --find-interpreter
           - os: ubuntu-latest
             target: aarch64
+            interpreter: --find-interpreter
           - os: macos-13
             target: x86_64
+            interpreter: -i python3.13
           - os: macos-14
             target: aarch64
+            interpreter: -i python3.13
           - os: windows-latest
             target: x86_64
+            interpreter: -i python3.13
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        if: ${{ !startsWith(matrix.os, 'ubuntu') }}
+        with:
+          python-version: "3.13"
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist --find-interpreter -m crates/usfm3-python/Cargo.toml
+          args: --release --out dist ${{ matrix.interpreter }} -m crates/usfm3-python/Cargo.toml
           manylinux: auto
 
       - name: Upload wheels
