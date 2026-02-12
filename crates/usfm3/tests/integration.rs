@@ -115,7 +115,10 @@ fn implicit_paragraph_and_verses() {
 
     // Plain verse text via vref.
     let vref = parse_to_vref(usfm);
-    assert_eq!(vref.get("GEN 1:1").and_then(|v| v.as_str()), Some("In the beginning"));
+    assert_eq!(
+        vref.get("GEN 1:1").and_then(|v| v.as_str()),
+        Some("In the beginning")
+    );
     assert_eq!(
         vref.get("GEN 1:2").and_then(|v| v.as_str()),
         Some("The earth was formless")
@@ -172,7 +175,10 @@ fn milestone_markers() {
     let usj = parse_to_usj(usfm);
 
     let milestones = collect_by_type(&usj, "ms");
-    assert!(milestones.len() >= 2, "should have qt-s and qt-e milestones");
+    assert!(
+        milestones.len() >= 2,
+        "should have qt-s and qt-e milestones"
+    );
 
     let qt_s = milestones
         .iter()
@@ -226,7 +232,10 @@ fn footnote_with_content_markers() {
     let v1 = vref.get("GEN 1:1").and_then(|v| v.as_str()).unwrap();
     assert!(v1.contains("Text"), "verse text should contain 'Text'");
     assert!(v1.contains("rest."), "verse text should contain 'rest.'");
-    assert!(!v1.contains("note text"), "verse text should NOT contain footnote content");
+    assert!(
+        !v1.contains("note text"),
+        "verse text should NOT contain footnote content"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -404,8 +413,14 @@ fn usx_output_is_xml() {
 
     let doc = parse(usfm);
     let xml = usfm3::usx::to_usx_string(&doc).expect("USX serialization failed");
-    assert!(xml.contains("<?xml"), "USX should start with XML declaration");
-    assert!(xml.contains("<usx"), "USX should contain <usx> root element");
+    assert!(
+        xml.contains("<?xml"),
+        "USX should start with XML declaration"
+    );
+    assert!(
+        xml.contains("<usx"),
+        "USX should contain <usx> root element"
+    );
     assert!(xml.contains("</usx>"), "USX should contain closing </usx>");
 }
 
@@ -424,9 +439,11 @@ fn ast_book_node_is_first() {
 
 #[test]
 fn ast_chapter_produces_chapter_node() {
-    let doc = parse(r#"\id GEN
+    let doc = parse(
+        r#"\id GEN
 \c 1
-\c 2"#);
+\c 2"#,
+    );
 
     let chapters: Vec<_> = doc
         .content
@@ -438,10 +455,12 @@ fn ast_chapter_produces_chapter_node() {
 
 #[test]
 fn ast_verse_inside_para() {
-    let doc = parse(r#"\id GEN
+    let doc = parse(
+        r#"\id GEN
 \c 1
 \p
-\v 1 Text"#);
+\v 1 Text"#,
+    );
 
     let para = doc
         .content
@@ -458,10 +477,12 @@ fn ast_verse_inside_para() {
 
 #[test]
 fn ast_note_node_structure() {
-    let doc = parse(r#"\id GEN
+    let doc = parse(
+        r#"\id GEN
 \c 1
 \p
-\v 1 Word \f + \fr 1:1 \ft A note.\f* more."#);
+\v 1 Word \f + \fr 1:1 \ft A note.\f* more."#,
+    );
 
     let notes: Vec<_> = doc
         .content
@@ -486,22 +507,31 @@ fn ast_note_node_structure() {
 
 #[test]
 fn ast_table_grouping() {
-    let doc = parse(r#"\id GEN
+    let doc = parse(
+        r#"\id GEN
 \c 1
 \tr \th1 A \th2 B
 \tr \tc1 1 \tc2 2
-"#);
+"#,
+    );
 
     let tables: Vec<_> = doc
         .content
         .iter()
         .filter(|n| matches!(n, Node::Table { .. }))
         .collect();
-    assert_eq!(tables.len(), 1, "consecutive \\tr rows should be grouped into one Table");
+    assert_eq!(
+        tables.len(),
+        1,
+        "consecutive \\tr rows should be grouped into one Table"
+    );
 
     let rows = tables[0].children();
     assert_eq!(rows.len(), 2, "table should have two rows");
     for row in rows {
-        assert!(matches!(row, Node::TableRow { .. }), "table children should be TableRow");
+        assert!(
+            matches!(row, Node::TableRow { .. }),
+            "table children should be TableRow"
+        );
     }
 }
