@@ -44,6 +44,7 @@ jobs:
             pkg.name = 'usfm3';
             pkg.version = '${TAG_VERSION}';
             pkg.files = ['usfm3_wasm_bg.wasm', 'usfm3_wasm.js', 'usfm3_wasm.d.ts', 'node.js'];
+            pkg.keywords = ['usfm', 'usj', 'usx', 'vref', 'parser', 'bible', 'scripture'];
             pkg.exports = {
               '.': {
                 node: { import: './node.js' },

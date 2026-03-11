@@ -2,7 +2,11 @@
 name = "usfm3-wasm"
 version = "0.1.6"
 edition = "2024"
-repository = "https://github.com/jcuenod/usfm3" 
+license = "MIT"
+description = "Error-tolerant USFM 3.x parser with USJ, USX, and USFM output"
+readme = "README.md"
+repository = "https://github.com/jcuenod/usfm3"
+keywords = ['usfm', 'usj', 'usx', 'vref', 'parser', 'bible', 'scripture']
 
 [lib]
 crate-type = ["cdylib", "rlib"]
