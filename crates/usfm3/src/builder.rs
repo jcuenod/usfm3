@@ -266,12 +266,8 @@ impl TreeBuilder {
                     // them.
                     self.close_character_in_note(&span)
                 } else {
-                    if self.in_character_context() {
-                        // Non-note char marker inside a note sub-marker, or any
-                        // char marker inside another char: treat as nesting.
-                        self.diagnostics
-                            .push(Diagnostic::missing_nesting_prefix(name, span.clone()));
-                    }
+                    // Outside note sub-marker sibling handling, incoming
+                    // character markers naturally nest by stack order.
                     false
                 };
                 self.push_open(name.to_string(), MarkerKind::Character, span);
@@ -1199,15 +1195,6 @@ impl TreeBuilder {
     // Context queries
     // -----------------------------------------------------------------
 
-    /// Returns `true` if there is a Character-kind marker on the stack
-    /// (not counting note sub-markers).
-    fn in_character_context(&self) -> bool {
-        self.stack
-            .iter()
-            .rev()
-            .any(|o| o.kind == MarkerKind::Character || o.kind == MarkerKind::TableCell)
-    }
-
     /// Returns `true` if there is a Note-kind marker on the stack.
     fn in_note_context(&self) -> bool {
         self.stack.iter().rev().any(|o| o.kind == MarkerKind::Note)
@@ -1783,8 +1770,27 @@ mod tests {
     #[test]
     fn test_unclosed_at_eof() {
         let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 \\nd Lord");
-        // \nd not closed - should have diagnostic
-        assert!(!result.diagnostics.is_empty());
+        let has_unclosed_nd = result.diagnostics.iter().any(|d| {
+            d.code == crate::diagnostics::DiagnosticCode::UnclosedAtEof
+                && d.message.contains("\\nd")
+        });
+        assert!(
+            has_unclosed_nd,
+            "\\nd left open at EOF should produce UnclosedAtEof"
+        );
+    }
+
+    #[test]
+    fn test_implicit_close_when_character_crosses_paragraph_boundary() {
+        let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 \\add text\n\\p next");
+        let has_implicit_close_add = result.diagnostics.iter().any(|d| {
+            d.code == crate::diagnostics::DiagnosticCode::ImplicitClose
+                && d.message.contains("\\add")
+        });
+        assert!(
+            has_implicit_close_add,
+            "\\add crossing a paragraph boundary should produce ImplicitClose"
+        );
     }
 
     #[test]
@@ -2059,15 +2065,29 @@ mod tests {
     }
 
     #[test]
-    fn test_missing_nesting_prefix_warning() {
-        let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 \\add text \\nd Lord\\nd*\\add*");
-        // \nd inside \add without \+ prefix should emit a warning.
+    fn test_unprefixed_nested_character_marker_no_warning() {
+        let result = parse(
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 That is why \\bk The Book of the \\nd Lord\\nd*'s Battles\\bk* speaks",
+        );
         let nesting_warnings = result
             .diagnostics
             .iter()
             .filter(|d| d.code == crate::diagnostics::DiagnosticCode::MissingNestingPrefix)
             .count();
-        assert_eq!(nesting_warnings, 1);
+        assert_eq!(nesting_warnings, 0);
+    }
+
+    #[test]
+    fn test_unprefixed_nested_marker_still_requires_proper_closing_order() {
+        let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 \\add text \\nd Lord\\add*");
+        let has_misnested = result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == crate::diagnostics::DiagnosticCode::MisnestedMarker);
+        assert!(
+            has_misnested,
+            "closing parent before nested child should produce MisnestedMarker"
+        );
     }
 
     #[test]
