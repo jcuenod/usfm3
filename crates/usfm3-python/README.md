@@ -1,69 +1,101 @@
 # usfm3
 
-An error-tolerant [USFM 3.x](https://docs.usfm.bible/usfm/3.1.1/index.html) parser for Python. Outputs [USJ](https://docs.usfm.bible/usfm/3.1.1/usj/index.html) (JSON), [USX](https://docs.usfm.bible/usfm/3.1.1/usx/index.html) (XML), normalized USFM, and verse-reference maps.
+`usfm3` is a Python parser for [USFM 3.x](https://docs.usfm.bible/usfm/3.1.1/index.html).
+It turns USFM into Python-friendly outputs:
+
+- `to_usj()`: [USJ](https://docs.usfm.bible/usfm/3.1.1/usj/index.html) as a `dict`
+- `to_usx()`: [USX](https://docs.usfm.bible/usfm/3.1.1/usx/index.html) as an XML `str`
+- `to_usfm()`: normalized USFM as a `str`
+- `to_vref()`: a verse-text map like `{"GEN 1:1": "In the beginning..."}`
+
+The parser is error-tolerant, so malformed input still produces a parse result with
+structured diagnostics.
 
 Built in Rust for speed, with native Python bindings via [PyO3](https://pyo3.rs).
 
-Also available as a [Rust crate](https://crates.io/crates/usfm3) and [npm package](https://www.npmjs.com/package/usfm3) (WebAssembly).
-
 ## Installation
 
-```sh
+```bash
 pip install usfm3
 ```
 
 Requires Python 3.9+.
 
-## Usage
+## Quick Start
 
 ```python
 import usfm3
 
-result = usfm3.parse(open("GEN.usfm").read())
+text = r"""\id GEN
+\c 1
+\p
+\v 1 In the beginning God created the heavens and the earth.
+"""
 
-# Output formats
-usj = result.to_usj()       # dict
-usx = result.to_usx()       # XML string
-usfm = result.to_usfm()     # USFM string
-vref = result.to_vref()     # {"GEN 1:1": "In the beginning...", ...}
+result = usfm3.parse(text)
 
-# Diagnostics
-for d in result.diagnostics:
-    print(f"[{d.severity}] {d.message} ({d.start}..{d.end})")
+print(result.to_vref()["GEN 1:1"])
 
-if result.has_errors():
-    print("Document has errors")
+for diagnostic in result.diagnostics:
+    print(
+        f"[{diagnostic.severity}] {diagnostic.code}: "
+        f"{diagnostic.message} ({diagnostic.start}..{diagnostic.end})"
+    )
 
-# Skip semantic validation
+usj = result.to_usj()
+usx = result.to_usx()
+normalized_usfm = result.to_usfm()
+```
+
+## Validation
+
+`parse()` runs semantic validation by default, so diagnostics can include issues such as
+chapter and verse sequencing, invalid attributes, or mismatched milestones.
+
+If you only want parsing, disable validation:
+
+```python
 result = usfm3.parse(text, validate=False)
 ```
 
-## API
+## API Summary
 
 ### `usfm3.parse(usfm: str, validate: bool = True) -> ParseResult`
 
-Parse a USFM string. Returns a `ParseResult` with lazy output methods and diagnostics.
+Parses a USFM string and returns a `ParseResult`.
 
 ### `ParseResult`
 
-| Method / Property | Returns | Description |
-|---|---|---|
-| `to_usj()` | `dict` | USJ (Unified Scripture JSON) |
-| `to_usx()` | `str` | USX (Unified Scripture XML) |
-| `to_usfm()` | `str` | Normalized USFM |
-| `to_vref()` | `dict` | Verse reference to plain text map |
-| `has_errors()` | `bool` | True if any error-severity diagnostics |
-| `diagnostics` | `list[Diagnostic]` | Parser and validation diagnostics |
+- `to_usj() -> dict`
+- `to_usx() -> str`
+- `to_usfm() -> str`
+- `to_vref() -> dict[str, str]`
+- `has_errors() -> bool`
+- `diagnostics -> list[Diagnostic]`
 
 ### `Diagnostic`
 
-| Property | Type | Description |
-|---|---|---|
-| `severity` | `str` | `"error"`, `"warning"`, or `"info"` |
-| `code` | `str` | Machine-readable code (e.g. `"UnknownMarker"`) |
-| `message` | `str` | Human-readable message |
-| `start` | `int` | Start byte offset in source |
-| `end` | `int` | End byte offset in source |
+Each diagnostic has:
+
+- `severity`: `"error"`, `"warning"`, or `"info"`
+- `code`: machine-readable code such as `"UnknownMarker"`
+- `message`: human-readable message
+- `start`
+- `end`
+
+`start` and `end` are byte offsets into the original source.
+
+## Notes
+
+- `to_vref()` returns plain verse text keyed by references such as `"GEN 1:1"`.
+- `to_usfm()` returns normalized USFM, so whitespace may be regularized.
+- Invalid USFM is reported through `diagnostics`; `parse()` still returns a result.
+
+## Related Packages
+
+- Rust crate: [crates.io/crates/usfm3](https://crates.io/crates/usfm3)
+- JavaScript/TypeScript package: [npmjs.com/package/usfm3](https://www.npmjs.com/package/usfm3)
+- Source code: [github.com/jcuenod/usfm3](https://github.com/jcuenod/usfm3)
 
 ## License
 

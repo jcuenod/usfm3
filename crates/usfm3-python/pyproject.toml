@@ -8,6 +8,29 @@ version = "0.1.6"
 description = "Error-tolerant USFM 3.x parser"
 readme = "README.md"
 requires-python = ">=3.9"
+license = { text = "MIT" }
+keywords = ["usfm", "usj", "usx", "vref", "parser", "bible", "scripture"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: Markup",
+]
+
+[project.urls]
+Homepage = "https://github.com/jcuenod/usfm3"
+Repository = "https://github.com/jcuenod/usfm3"
+Issues = "https://github.com/jcuenod/usfm3/issues"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
