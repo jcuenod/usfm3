@@ -5,6 +5,7 @@
 use serde_json::Value;
 use usfm3::ast::Node;
 use usfm3::builder;
+use usfm3::diagnostics::{DiagnosticCode, Severity};
 use usfm3::usj;
 use usfm3::vref;
 
@@ -101,9 +102,44 @@ fn implicit_paragraph_and_verses() {
 \v 1 In the beginning
 \v 2 The earth was formless"#;
 
-    let usj = parse_to_usj(usfm);
+    let result = builder::parse(usfm);
+    let doc = result.document;
+    let warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::VerseOutsideParagraph)
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "should warn once for the first bare verse"
+    );
+    assert_eq!(warnings[0].severity, Severity::Warning);
 
-    // Verses should appear inside a para.
+    let para = doc
+        .content
+        .iter()
+        .find(|n| matches!(n, Node::Para { marker, .. } if marker == "p"))
+        .expect("bare verses should be recovered into an implicit \\p");
+
+    let para_children = para.children();
+    assert!(
+        matches!(para_children.first(), Some(Node::Verse { number, .. }) if number == "1"),
+        "implicit paragraph should start with verse 1"
+    );
+    assert!(
+        para_children
+            .iter()
+            .any(|n| matches!(n, Node::Verse { number, .. } if number == "2")),
+        "implicit paragraph should also contain verse 2"
+    );
+
+    let usj = usj::to_usj_value(&doc).expect("USJ serialization failed");
+
+    let content = usj["content"].as_array().unwrap();
+    assert_eq!(content[2]["type"], "para");
+    assert_eq!(content[2]["marker"], "p");
+
     let verses = collect_by_type(&usj, "verse");
     assert!(verses.len() >= 2, "should have at least two verse markers");
 
@@ -123,6 +159,20 @@ fn implicit_paragraph_and_verses() {
         vref.get("GEN 1:2").and_then(|v| v.as_str()),
         Some("The earth was formless")
     );
+}
+
+#[test]
+fn bare_verse_recovery_serializes_with_implicit_paragraph() {
+    let usfm = r#"\id GEN Genesis
+\c 1
+\v 1 In the beginning
+\v 2 The earth was formless"#;
+
+    let doc = parse(usfm);
+    let normalized = usfm3::usfm::to_usfm_string(&doc);
+
+    assert!(normalized.contains("\\c 1\n\\p \\v 1 In the beginning"));
+    assert!(normalized.contains("\\v 2 The earth was formless"));
 }
 
 // ---------------------------------------------------------------------------

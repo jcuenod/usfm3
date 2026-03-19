@@ -379,6 +379,12 @@ impl TreeBuilder {
         // Close any open Meta markers (e.g. \rem nested inside a paragraph)
         // so verse content becomes a sibling, not a child of the remark.
         self.close_open_meta();
+        // If there's no open paragraph, this verse is outside of one — emit a diagnostic and open an implicit one to contain it.
+        if self.stack.is_empty() {
+            self.diagnostics
+                .push(Diagnostic::verse_outside_paragraph(span.clone()));
+            self.push_open("p".to_string(), MarkerKind::Paragraph, span.clone());
+        }
         self.pending_verse = Some(span);
     }
 
@@ -1791,6 +1797,37 @@ mod tests {
             has_implicit_close_add,
             "\\add crossing a paragraph boundary should produce ImplicitClose"
         );
+    }
+
+    #[test]
+    fn test_root_level_verse_recovers_into_implicit_paragraph() {
+        let result = parse("\\id GEN\n\\c 1\n\\v 1 text\n\\v 2 more");
+
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == crate::diagnostics::DiagnosticCode::VerseOutsideParagraph)
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "only the first offending root-level verse should warn"
+        );
+        assert_eq!(warnings[0].severity, crate::diagnostics::Severity::Warning);
+
+        let para = result
+            .document
+            .content
+            .iter()
+            .find(|n| matches!(n, Node::Para { marker, .. } if marker == "p"))
+            .expect("root-level verse recovery should synthesize a \\p paragraph");
+
+        let verses = para
+            .children()
+            .iter()
+            .filter(|n| matches!(n, Node::Verse { .. }))
+            .count();
+        assert_eq!(verses, 2, "implicit paragraph should contain both verses");
     }
 
     #[test]

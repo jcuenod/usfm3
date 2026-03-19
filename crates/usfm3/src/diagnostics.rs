@@ -52,6 +52,7 @@ pub enum DiagnosticCode {
     InvalidAttributes,
     MissingChapterNumber,
     MissingVerseNumber,
+    VerseOutsideParagraph,
     MissingChapterMarker,
     CharCrossesVerseBoundary,
     EmptyFigure,
@@ -302,6 +303,17 @@ impl Diagnostic {
             span,
             message: "\\v marker is missing a verse number".to_string(),
             code: DiagnosticCode::MissingVerseNumber,
+        }
+    }
+
+    /// A `\v` marker appeared at document root instead of inside a paragraph.
+    pub fn verse_outside_paragraph(span: Span) -> Self {
+        Diagnostic {
+            severity: Severity::Warning,
+            span,
+            message: "\\v must appear inside a paragraph; inserted implicit \\p for recovery"
+                .to_string(),
+            code: DiagnosticCode::VerseOutsideParagraph,
         }
     }
 
@@ -650,6 +662,16 @@ mod tests {
         assert_eq!(d.code, DiagnosticCode::MissingVerseNumber);
         assert_eq!(d.span, 14..16);
         assert!(d.message.contains("\\v"));
+    }
+
+    #[test]
+    fn test_verse_outside_paragraph() {
+        let d = Diagnostic::verse_outside_paragraph(16..18);
+        assert_eq!(d.severity, Severity::Warning);
+        assert_eq!(d.code, DiagnosticCode::VerseOutsideParagraph);
+        assert_eq!(d.span, 16..18);
+        assert!(d.message.contains("\\v"));
+        assert!(d.message.contains("\\p"));
     }
 
     // ── Display tests ───────────────────────────────────────────────────
