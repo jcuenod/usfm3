@@ -407,7 +407,7 @@ checksum = "7264e107f553ccae879d21fbea1d6724ac785e8c3bfc762137959b5802826ef3"
 
 [[package]]
 name = "usfm3"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "logos",
  "quick-xml",
@@ -417,14 +417,14 @@ dependencies = [
 
 [[package]]
 name = "usfm3-cli"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "usfm3",
 ]
 
 [[package]]
 name = "usfm3-python"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "pyo3",
  "pythonize",
@@ -434,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "usfm3-wasm"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "serde",
  "serde-wasm-bindgen",
