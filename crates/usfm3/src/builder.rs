@@ -7,6 +7,7 @@ use crate::ast::{Attribute, Document, Node, Span};
 use crate::diagnostics::{Diagnostic, DiagnosticList};
 use crate::lexer::{self, Token};
 use crate::markers::{self, MarkerKind};
+use crate::metadata::{MetadataMarker, MetadataWindow};
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -78,6 +79,9 @@ struct TreeBuilder {
     // Whitespace after va/vp/ca/cp metadata consumption is structural (skip).
     consumed_metadata: bool,
 
+    // Canonical metadata attachment window for chapter/verse metadata.
+    metadata_window: Option<MetadataWindow>,
+
     // Set after a closing marker (\em*, \+nd*, \f*, \*) is processed.
     // Whitespace and newlines after close markers are deferred via
     // pending_close_space — emitted only when followed by text.
@@ -108,6 +112,7 @@ impl TreeBuilder {
             after_open_marker: false,
             pending_newline: false,
             consumed_metadata: false,
+            metadata_window: None,
             after_close_marker: false,
             pending_close_space: false,
             pending_milestone_close: None,
@@ -115,6 +120,9 @@ impl TreeBuilder {
     }
 
     fn handle_token(&mut self, token: Token, span: Span) {
+        if self.should_close_verse_metadata_window(&token) {
+            self.metadata_window = None;
+        }
         // Clear after_open_marker for any non-Whitespace, non-Newline token.
         // Newlines right after an opening marker are structural (not content).
         if !matches!(token, Token::Whitespace(_) | Token::Newline) {
@@ -369,6 +377,7 @@ impl TreeBuilder {
 
         self.force_close_notes();
         self.close_paragraph(&span);
+        self.metadata_window = None;
         self.pending_chapter = Some(span);
     }
 
@@ -385,6 +394,7 @@ impl TreeBuilder {
                 .push(Diagnostic::verse_outside_paragraph(span.clone()));
             self.push_open("p".to_string(), MarkerKind::Paragraph, span.clone());
         }
+        self.metadata_window = None;
         self.pending_verse = Some(span);
     }
 
@@ -657,6 +667,7 @@ impl TreeBuilder {
             self.append_node(node);
             if !rest.is_empty() {
                 self.append_text_raw(rest);
+                self.metadata_window = None;
             } else {
                 self.after_open_marker = true;
             }
@@ -838,6 +849,9 @@ impl TreeBuilder {
         } else {
             collapsed.into_owned()
         };
+        let closes_verse_metadata_window = self.metadata_window == Some(MetadataWindow::Verse)
+            && self.open_metadata_marker().is_none()
+            && !final_text.trim().is_empty();
 
         // Split at `//` (optional line break) and interleave OptBreak nodes.
         if final_text.contains("//") {
@@ -852,6 +866,10 @@ impl TreeBuilder {
             }
         } else {
             self.append_text_fragment(&final_text);
+        }
+
+        if closes_verse_metadata_window {
+            self.metadata_window = None;
         }
     }
 
@@ -874,73 +892,101 @@ impl TreeBuilder {
     // Alt/pub number helpers
     // -----------------------------------------------------------------
 
-    fn set_last_chapter_altnumber(&mut self, value: String) {
+    fn set_last_chapter_altnumber(&mut self, value: String) -> bool {
         for node in self.root_children.iter_mut().rev() {
             if let Node::Chapter { altnumber, .. } = node {
-                *altnumber = Some(value);
-                return;
+                if altnumber.is_none() {
+                    *altnumber = Some(value);
+                    return true;
+                }
+                return false;
             }
         }
         for open in self.stack.iter_mut().rev() {
             for node in open.children.iter_mut().rev() {
                 if let Node::Chapter { altnumber, .. } = node {
-                    *altnumber = Some(value);
-                    return;
+                    if altnumber.is_none() {
+                        *altnumber = Some(value);
+                        return true;
+                    }
+                    return false;
                 }
             }
         }
+        false
     }
 
-    fn set_last_chapter_pubnumber(&mut self, value: String) {
+    fn set_last_chapter_pubnumber(&mut self, value: String) -> bool {
         for node in self.root_children.iter_mut().rev() {
             if let Node::Chapter { pubnumber, .. } = node {
-                *pubnumber = Some(value);
-                return;
+                if pubnumber.is_none() {
+                    *pubnumber = Some(value);
+                    return true;
+                }
+                return false;
             }
         }
         for open in self.stack.iter_mut().rev() {
             for node in open.children.iter_mut().rev() {
                 if let Node::Chapter { pubnumber, .. } = node {
-                    *pubnumber = Some(value);
-                    return;
+                    if pubnumber.is_none() {
+                        *pubnumber = Some(value);
+                        return true;
+                    }
+                    return false;
                 }
             }
         }
+        false
     }
 
-    fn set_last_verse_altnumber(&mut self, value: String) {
+    fn set_last_verse_altnumber(&mut self, value: String) -> bool {
         // Verse is typically inside a paragraph (stack), check there first.
         for open in self.stack.iter_mut().rev() {
             for node in open.children.iter_mut().rev() {
                 if let Node::Verse { altnumber, .. } = node {
-                    *altnumber = Some(value);
-                    return;
+                    if altnumber.is_none() {
+                        *altnumber = Some(value);
+                        return true;
+                    }
+                    return false;
                 }
             }
         }
         for node in self.root_children.iter_mut().rev() {
             if let Node::Verse { altnumber, .. } = node {
-                *altnumber = Some(value);
-                return;
+                if altnumber.is_none() {
+                    *altnumber = Some(value);
+                    return true;
+                }
+                return false;
             }
         }
+        false
     }
 
-    fn set_last_verse_pubnumber(&mut self, value: String) {
+    fn set_last_verse_pubnumber(&mut self, value: String) -> bool {
         for open in self.stack.iter_mut().rev() {
             for node in open.children.iter_mut().rev() {
                 if let Node::Verse { pubnumber, .. } = node {
-                    *pubnumber = Some(value);
-                    return;
+                    if pubnumber.is_none() {
+                        *pubnumber = Some(value);
+                        return true;
+                    }
+                    return false;
                 }
             }
         }
         for node in self.root_children.iter_mut().rev() {
             if let Node::Verse { pubnumber, .. } = node {
-                *pubnumber = Some(value);
-                return;
+                if pubnumber.is_none() {
+                    *pubnumber = Some(value);
+                    return true;
+                }
+                return false;
             }
         }
+        false
     }
 
     // -----------------------------------------------------------------
@@ -966,55 +1012,9 @@ impl TreeBuilder {
     /// Special handling: when appending a `TableRow` node, wrap it in a `Table`
     /// container (or append to an existing one) so consecutive rows are grouped.
     fn append_node(&mut self, node: Node) {
-        // Smart finalization: when a \ca/\cp/\va/\vp node contains only
-        // plain text, extract the text and set altnumber/pubnumber on the
-        // nearest Chapter/Verse instead of appending the node.
-        // If it contains nested markers (complex content), keep it as-is.
-        {
-            let maybe_marker = match &node {
-                Node::Char { marker, .. } | Node::Para { marker, .. } => Some(marker.as_str()),
-                _ => None,
-            };
-            if let Some(m) = maybe_marker
-                && matches!(m, "ca" | "cp" | "va" | "vp")
-                && let Some(text) = extract_plain_text(node.children())
-            {
-                // Remove preceding whitespace-only text node (the gap
-                // after the previous closing marker, e.g. `\va*`).
-                let children = if let Some(top) = self.stack.last_mut() {
-                    &mut top.children
-                } else {
-                    &mut self.root_children
-                };
-                if let Some(Node::Text(t)) = children.last()
-                    && t.trim().is_empty()
-                {
-                    children.pop();
-                }
-                match m {
-                    "ca" => {
-                        self.set_last_chapter_altnumber(text);
-                        self.consumed_metadata = true;
-                        return;
-                    }
-                    "cp" => {
-                        self.set_last_chapter_pubnumber(text);
-                        self.consumed_metadata = true;
-                        return;
-                    }
-                    "va" => {
-                        self.set_last_verse_altnumber(text);
-                        self.consumed_metadata = true;
-                        return;
-                    }
-                    "vp" => {
-                        self.set_last_verse_pubnumber(text);
-                        self.consumed_metadata = true;
-                        return;
-                    }
-                    _ => unreachable!(),
-                }
-            }
+        if self.try_attach_metadata(&node) {
+            self.consumed_metadata = true;
+            return;
         }
 
         let children = if let Some(top) = self.stack.last_mut() {
@@ -1038,6 +1038,12 @@ impl TreeBuilder {
         }
 
         children.push(node);
+
+        match children.last() {
+            Some(Node::Chapter { .. }) => self.metadata_window = Some(MetadataWindow::Chapter),
+            Some(Node::Verse { .. }) => self.metadata_window = Some(MetadataWindow::Verse),
+            _ => {}
+        }
     }
 
     /// Inside a note, close character markers on top of the stack until we
@@ -1240,6 +1246,72 @@ impl TreeBuilder {
     /// Returns `true` if there is a Paragraph-kind marker on the stack.
     fn has_open_paragraph(&self) -> bool {
         self.stack.iter().any(|o| o.kind == MarkerKind::Paragraph)
+    }
+
+    fn open_metadata_marker(&self) -> Option<MetadataMarker> {
+        self.stack
+            .iter()
+            .rev()
+            .find_map(|open| MetadataMarker::from_marker(open.marker.as_str()))
+    }
+
+    fn should_close_verse_metadata_window(&self, token: &Token) -> bool {
+        if self.metadata_window != Some(MetadataWindow::Verse)
+            || self.open_metadata_marker().is_some()
+        {
+            return false;
+        }
+
+        match token {
+            Token::Whitespace(_) | Token::Newline | Token::Attributes(_) => false,
+            Token::Marker(m) | Token::NestedMarker(m) => {
+                MetadataMarker::from_marker(lexer::strip_marker_backslash(m)).is_none()
+            }
+            Token::ClosingMarker(m) | Token::NestedClosingMarker(m) => {
+                MetadataMarker::from_marker(lexer::strip_closing_star(m)).is_none()
+            }
+            Token::Text(text) => !text.trim().is_empty(),
+            Token::Chapter | Token::Verse | Token::Milestone(_) | Token::MilestoneEnd => true,
+        }
+    }
+
+    fn try_attach_metadata(&mut self, node: &Node) -> bool {
+        let marker = match node {
+            Node::Char { marker, .. } | Node::Para { marker, .. } => marker,
+            _ => return false,
+        };
+        let Some(metadata_marker) = MetadataMarker::from_marker(marker) else {
+            return false;
+        };
+        let Some(window) = self.metadata_window else {
+            return false;
+        };
+        if !metadata_marker.binds_in(window) {
+            return false;
+        }
+        let Some(text) = extract_plain_text(node.children()) else {
+            return false;
+        };
+
+        // Remove preceding whitespace-only text node (the gap after the
+        // previous closing marker, e.g. `\va*`).
+        let children = if let Some(top) = self.stack.last_mut() {
+            &mut top.children
+        } else {
+            &mut self.root_children
+        };
+        if let Some(Node::Text(t)) = children.last()
+            && t.trim().is_empty()
+        {
+            children.pop();
+        }
+
+        match metadata_marker {
+            MetadataMarker::Ca => self.set_last_chapter_altnumber(text),
+            MetadataMarker::Cp => self.set_last_chapter_pubnumber(text),
+            MetadataMarker::Va => self.set_last_verse_altnumber(text),
+            MetadataMarker::Vp => self.set_last_verse_pubnumber(text),
+        }
     }
 
     /// Close Character, Unknown, and Meta markers on top of the stack,
@@ -1962,6 +2034,128 @@ mod tests {
             }
         });
         assert_eq!(verse, Some(("2".into(), Some("GEN 1:2".into()))));
+    }
+
+    #[test]
+    fn test_chapter_metadata_attaches_in_pre_verse_window() {
+        let result = parse("\\id ESG\n\\c 1\n\\cp A\n\\p\n\\v 1 text");
+
+        let chapter = result.document.content.iter().find_map(|node| match node {
+            Node::Chapter { pubnumber, .. } => Some(pubnumber.clone()),
+            _ => None,
+        });
+        assert_eq!(chapter, Some(Some("A".into())));
+
+        let has_literal_cp = result
+            .document
+            .content
+            .iter()
+            .any(|node| matches!(node, Node::Para { marker, .. } if marker == "cp"));
+        assert!(
+            !has_literal_cp,
+            "canonical chapter metadata should not remain as a literal \\cp node"
+        );
+    }
+
+    #[test]
+    fn test_misplaced_vp_is_preserved_literal() {
+        let result = parse("\\id ESG\n\\c 1\n\\p\n\\v 1 text \\vp 1b\\vp*");
+
+        let verse_pubnumber = result.document.content.iter().find_map(|node| {
+            if let Node::Para { content, .. } = node {
+                content.iter().find_map(|child| {
+                    if let Node::Verse { pubnumber, .. } = child {
+                        Some(pubnumber.clone())
+                    } else {
+                        None
+                    }
+                })
+            } else {
+                None
+            }
+        });
+        assert_eq!(verse_pubnumber, Some(None));
+
+        let has_literal_vp = result.document.content.iter().any(|node| {
+            if let Node::Para { content, .. } = node {
+                content
+                    .iter()
+                    .any(|child| matches!(child, Node::Char { marker, .. } if marker == "vp"))
+            } else {
+                false
+            }
+        });
+        assert!(
+            has_literal_vp,
+            "misplaced \\vp should stay in the AST as a literal character node"
+        );
+    }
+
+    #[test]
+    fn test_duplicate_va_does_not_overwrite_first_value() {
+        let result = parse("\\id PSA\n\\c 54\n\\p\n\\v 1 \\va 3\\va* \\va 4\\va* text");
+
+        let (verse_altnumber, literal_va_count) = result
+            .document
+            .content
+            .iter()
+            .find_map(|node| {
+                if let Node::Para { content, .. } = node {
+                    let altnumber = content.iter().find_map(|child| {
+                        if let Node::Verse { altnumber, .. } = child {
+                            Some(altnumber.clone())
+                        } else {
+                            None
+                        }
+                    });
+                    let literal_va_count = content
+                        .iter()
+                        .filter(
+                            |child| matches!(child, Node::Char { marker, .. } if marker == "va"),
+                        )
+                        .count();
+                    Some((altnumber, literal_va_count))
+                } else {
+                    None
+                }
+            })
+            .expect("expected paragraph content");
+
+        assert_eq!(verse_altnumber, Some(Some("3".into())));
+        assert_eq!(
+            literal_va_count, 1,
+            "the duplicate \\va should remain literal instead of overwriting the first one"
+        );
+    }
+
+    #[test]
+    fn test_pre_verse_va_is_preserved_literal() {
+        let result = parse("\\id PSA\n\\c 54\n\\d \\va 1\\va* A Psalm\n\\q1\n\\v 1 text");
+
+        let d_para_has_literal_va = result.document.content.iter().any(|node| {
+            matches!(
+                node,
+                Node::Para { marker, content, .. }
+                    if marker == "d"
+                        && content.iter().any(|child| matches!(child, Node::Char { marker, .. } if marker == "va"))
+            )
+        });
+        assert!(d_para_has_literal_va);
+
+        let verse_altnumber = result.document.content.iter().find_map(|node| {
+            if let Node::Para { content, .. } = node {
+                content.iter().find_map(|child| {
+                    if let Node::Verse { altnumber, .. } = child {
+                        Some(altnumber.clone())
+                    } else {
+                        None
+                    }
+                })
+            } else {
+                None
+            }
+        });
+        assert_eq!(verse_altnumber, Some(None));
     }
 
     #[test]

@@ -3,6 +3,7 @@ pub mod builder;
 pub mod diagnostics;
 pub mod lexer;
 pub mod markers;
+mod metadata;
 pub mod usfm;
 pub mod usj;
 pub mod usx;

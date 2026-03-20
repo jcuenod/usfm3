@@ -64,6 +64,9 @@ pub enum DiagnosticCode {
     LeadingZeros,
     EmptyWordMarker,
     MissingMilestoneSelfClose,
+    MisplacedMetadataMarker,
+    DuplicateMetadataMarker,
+    NonPlainMetadataContent,
 }
 
 /// A diagnostic message with source location.
@@ -420,6 +423,36 @@ impl Diagnostic {
             code: DiagnosticCode::MissingMilestoneSelfClose,
         }
     }
+
+    /// A chapter/verse metadata marker appears in an invalid location.
+    pub fn misplaced_metadata_marker(marker: &str, span: Span) -> Self {
+        Diagnostic {
+            severity: Severity::Error,
+            span,
+            message: format!("\\{marker} is not valid in this location"),
+            code: DiagnosticCode::MisplacedMetadataMarker,
+        }
+    }
+
+    /// A chapter/verse metadata marker duplicates metadata already set for the current target.
+    pub fn duplicate_metadata_marker(marker: &str, span: Span) -> Self {
+        Diagnostic {
+            severity: Severity::Error,
+            span,
+            message: format!("duplicate \\{marker} for the current chapter or verse"),
+            code: DiagnosticCode::DuplicateMetadataMarker,
+        }
+    }
+
+    /// A chapter/verse metadata marker contains nested or non-plain content.
+    pub fn non_plain_metadata_content(marker: &str, span: Span) -> Self {
+        Diagnostic {
+            severity: Severity::Error,
+            span,
+            message: format!("\\{marker} metadata must contain only plain text"),
+            code: DiagnosticCode::NonPlainMetadataContent,
+        }
+    }
 }
 
 /// A collection of diagnostics produced during parsing and validation.
@@ -672,6 +705,33 @@ mod tests {
         assert_eq!(d.span, 16..18);
         assert!(d.message.contains("\\v"));
         assert!(d.message.contains("\\p"));
+    }
+
+    #[test]
+    fn test_misplaced_metadata_marker() {
+        let d = Diagnostic::misplaced_metadata_marker("vp", 20..25);
+        assert_eq!(d.severity, Severity::Error);
+        assert_eq!(d.code, DiagnosticCode::MisplacedMetadataMarker);
+        assert_eq!(d.span, 20..25);
+        assert!(d.message.contains("\\vp"));
+    }
+
+    #[test]
+    fn test_duplicate_metadata_marker() {
+        let d = Diagnostic::duplicate_metadata_marker("ca", 20..25);
+        assert_eq!(d.severity, Severity::Error);
+        assert_eq!(d.code, DiagnosticCode::DuplicateMetadataMarker);
+        assert_eq!(d.span, 20..25);
+        assert!(d.message.contains("\\ca"));
+    }
+
+    #[test]
+    fn test_non_plain_metadata_content() {
+        let d = Diagnostic::non_plain_metadata_content("va", 20..25);
+        assert_eq!(d.severity, Severity::Error);
+        assert_eq!(d.code, DiagnosticCode::NonPlainMetadataContent);
+        assert_eq!(d.span, 20..25);
+        assert!(d.message.contains("\\va"));
     }
 
     // ── Display tests ───────────────────────────────────────────────────

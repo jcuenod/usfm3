@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use crate::ast::{Document, Node, Span};
 use crate::diagnostics::{Diagnostic, DiagnosticList};
 use crate::markers::{self, MarkerKind};
+use crate::metadata::{MetadataMarker, MetadataTarget};
 
 // ── Public entry point ──────────────────────────────────────────────────────
 
@@ -96,6 +97,7 @@ impl<'a> Validator<'a> {
         self.check_body_paragraph_before_chapter(doc);
         self.check_non_empty_blank_line(doc);
         self.check_empty_word_marker(doc);
+        self.check_metadata_markers(doc);
     }
 
     // ── 1. \id must be the first marker ─────────────────────────────────
@@ -542,6 +544,133 @@ impl<'a> Validator<'a> {
         }
     }
 
+    // ── 16. Metadata placement / duplicates ───────────────────────────
+
+    fn check_metadata_markers(&mut self, doc: &Document) {
+        let mut state = MetadataValidationState::default();
+        self.walk_metadata_nodes(&doc.content, &mut state);
+    }
+
+    fn walk_metadata_nodes(&mut self, nodes: &[Node], state: &mut MetadataValidationState) {
+        for node in nodes {
+            self.walk_metadata_node(node, state);
+        }
+    }
+
+    fn walk_metadata_node(&mut self, node: &Node, state: &mut MetadataValidationState) {
+        if let Some(marker) = node.marker().and_then(MetadataMarker::from_marker) {
+            self.check_metadata_node(node, marker, state);
+            return;
+        }
+
+        match node {
+            Node::Book { content, .. } => self.walk_metadata_nodes(content, state),
+            Node::Chapter {
+                altnumber,
+                pubnumber,
+                ..
+            } => {
+                state.chapter_window_open = true;
+                state.verse_window_open = false;
+                state.before_first_verse_in_chapter = true;
+                state.current_chapter = MetadataFieldsPresent {
+                    altnumber: altnumber.is_some(),
+                    pubnumber: pubnumber.is_some(),
+                };
+                state.current_verse = MetadataFieldsPresent::default();
+            }
+            Node::Verse {
+                altnumber,
+                pubnumber,
+                ..
+            } => {
+                state.chapter_window_open = false;
+                state.verse_window_open = true;
+                state.before_first_verse_in_chapter = false;
+                state.current_verse = MetadataFieldsPresent {
+                    altnumber: altnumber.is_some(),
+                    pubnumber: pubnumber.is_some(),
+                };
+            }
+            Node::Para {
+                marker, content, ..
+            } => {
+                state.verse_window_open = false;
+                let previous = state.current_para_marker.replace(marker.clone());
+                self.walk_metadata_nodes(content, state);
+                state.current_para_marker = previous;
+            }
+            Node::Char { content, .. }
+            | Node::Note { content, .. }
+            | Node::Figure { content, .. }
+            | Node::Sidebar { content, .. }
+            | Node::Periph { content, .. }
+            | Node::Table { content, .. }
+            | Node::TableRow { content, .. }
+            | Node::TableCell { content, .. }
+            | Node::Ref { content, .. }
+            | Node::Unknown { content, .. } => {
+                state.verse_window_open = false;
+                self.walk_metadata_nodes(content, state);
+            }
+            Node::Text(text) => {
+                if !text.trim().is_empty() {
+                    state.verse_window_open = false;
+                }
+            }
+            Node::Milestone { .. } | Node::OptBreak => {
+                state.verse_window_open = false;
+            }
+        }
+    }
+
+    fn check_metadata_node(
+        &mut self,
+        node: &Node,
+        marker: MetadataMarker,
+        state: &mut MetadataValidationState,
+    ) {
+        let span = node.span().cloned().unwrap_or(0..0);
+        if self.metadata_literal_exception_allowed(marker, state) {
+            self.walk_metadata_nodes(node.children(), state);
+            return;
+        }
+
+        let plain = extract_plain_text(node.children()).is_some();
+        let in_canonical_window = match marker.target() {
+            MetadataTarget::Chapter => state.chapter_window_open,
+            MetadataTarget::Verse => state.verse_window_open,
+        };
+
+        if !in_canonical_window {
+            self.diagnostics
+                .push(Diagnostic::misplaced_metadata_marker(marker.as_str(), span));
+        } else if !plain {
+            self.diagnostics
+                .push(Diagnostic::non_plain_metadata_content(
+                    marker.as_str(),
+                    span,
+                ));
+        } else if state.is_duplicate(marker) {
+            self.diagnostics
+                .push(Diagnostic::duplicate_metadata_marker(marker.as_str(), span));
+        } else {
+            state.mark_seen(marker);
+        }
+
+        self.walk_metadata_nodes(node.children(), state);
+    }
+
+    fn metadata_literal_exception_allowed(
+        &self,
+        marker: MetadataMarker,
+        state: &MetadataValidationState,
+    ) -> bool {
+        marker.allows_literal_inline()
+            && state.before_first_verse_in_chapter
+            && state.current_para_marker.as_deref() == Some("d")
+    }
+
     // ── 14. Body paragraph before first chapter ──────────────────────
 
     fn check_body_paragraph_before_chapter(&mut self, doc: &Document) {
@@ -590,12 +719,69 @@ fn is_introduction_marker(marker: &str) -> bool {
     marker.starts_with('i')
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct MetadataFieldsPresent {
+    altnumber: bool,
+    pubnumber: bool,
+}
+
+#[derive(Debug, Default)]
+struct MetadataValidationState {
+    chapter_window_open: bool,
+    verse_window_open: bool,
+    before_first_verse_in_chapter: bool,
+    current_para_marker: Option<String>,
+    current_chapter: MetadataFieldsPresent,
+    current_verse: MetadataFieldsPresent,
+}
+
+impl MetadataValidationState {
+    fn is_duplicate(&self, marker: MetadataMarker) -> bool {
+        let fields = match marker.target() {
+            MetadataTarget::Chapter => self.current_chapter,
+            MetadataTarget::Verse => self.current_verse,
+        };
+        match marker {
+            MetadataMarker::Ca | MetadataMarker::Va => fields.altnumber,
+            MetadataMarker::Cp | MetadataMarker::Vp => fields.pubnumber,
+        }
+    }
+
+    fn mark_seen(&mut self, marker: MetadataMarker) {
+        let fields = match marker.target() {
+            MetadataTarget::Chapter => &mut self.current_chapter,
+            MetadataTarget::Verse => &mut self.current_verse,
+        };
+        match marker {
+            MetadataMarker::Ca | MetadataMarker::Va => fields.altnumber = true,
+            MetadataMarker::Cp | MetadataMarker::Vp => fields.pubnumber = true,
+        }
+    }
+}
+
+fn extract_plain_text(content: &[Node]) -> Option<String> {
+    let mut text = String::new();
+    for node in content {
+        match node {
+            Node::Text(s) => text.push_str(s),
+            _ => return None,
+        }
+    }
+    let trimmed = text.trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ast::*;
+    use crate::builder::parse;
     use crate::diagnostics::DiagnosticCode;
 
     fn doc_with(nodes: Vec<Node>) -> Document {
@@ -1468,5 +1654,66 @@ mod tests {
         ]);
         let diags = validate(&doc);
         assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn test_valid_canonical_metadata_has_no_metadata_diagnostics() {
+        let result = parse("\\id ESG\n\\c 1\n\\cp A\n\\p\n\\v 1 \\va 2\\va* \\vp 1a\\vp* text");
+        let diags = validate(&result.document);
+        assert!(
+            !diags.iter().any(|d| {
+                matches!(
+                    d.code,
+                    DiagnosticCode::MisplacedMetadataMarker
+                        | DiagnosticCode::DuplicateMetadataMarker
+                        | DiagnosticCode::NonPlainMetadataContent
+                )
+            }),
+            "canonical metadata should validate cleanly"
+        );
+    }
+
+    #[test]
+    fn test_misplaced_metadata_marker_detected() {
+        let result = parse("\\id ESG\n\\c 1\n\\p\n\\v 1 text \\vp 1b\\vp*");
+        let diags = validate(&result.document);
+        assert!(diags.iter().any(
+            |d| d.code == DiagnosticCode::MisplacedMetadataMarker && d.message.contains("\\vp")
+        ));
+    }
+
+    #[test]
+    fn test_duplicate_metadata_marker_detected() {
+        let result = parse("\\id PSA\n\\c 54\n\\p\n\\v 1 \\va 3\\va* \\va 4\\va* text");
+        let diags = validate(&result.document);
+        assert!(diags.iter().any(
+            |d| d.code == DiagnosticCode::DuplicateMetadataMarker && d.message.contains("\\va")
+        ));
+    }
+
+    #[test]
+    fn test_non_plain_metadata_content_detected() {
+        let result = parse("\\id ESG\n\\c 1\n\\p\n\\v 1 \\vp \\em 1b\\em*\\vp* text");
+        let diags = validate(&result.document);
+        assert!(diags.iter().any(
+            |d| d.code == DiagnosticCode::NonPlainMetadataContent && d.message.contains("\\vp")
+        ));
+    }
+
+    #[test]
+    fn test_psalm_title_va_exception_emits_no_metadata_diagnostic() {
+        let result = parse("\\id PSA\n\\c 54\n\\d \\va 1\\va* A poem by David\n\\q1\n\\v 1 text");
+        let diags = validate(&result.document);
+        assert!(
+            !diags.iter().any(|d| {
+                matches!(
+                    d.code,
+                    DiagnosticCode::MisplacedMetadataMarker
+                        | DiagnosticCode::DuplicateMetadataMarker
+                        | DiagnosticCode::NonPlainMetadataContent
+                )
+            }),
+            "documented pre-verse \\va usage in \\d should validate cleanly"
+        );
     }
 }

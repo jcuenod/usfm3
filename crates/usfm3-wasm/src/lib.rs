@@ -53,6 +53,9 @@ pub enum DiagnosticCode {
     LeadingZeros,
     EmptyWordMarker,
     MissingMilestoneSelfClose,
+    MisplacedMetadataMarker,
+    DuplicateMetadataMarker,
+    NonPlainMetadataContent,
 }
 
 /// A diagnostic message with source location.
@@ -244,5 +247,8 @@ fn convert_code(c: usfm3_lib::diagnostics::DiagnosticCode) -> DiagnosticCode {
         DC::LeadingZeros => DiagnosticCode::LeadingZeros,
         DC::EmptyWordMarker => DiagnosticCode::EmptyWordMarker,
         DC::MissingMilestoneSelfClose => DiagnosticCode::MissingMilestoneSelfClose,
+        DC::MisplacedMetadataMarker => DiagnosticCode::MisplacedMetadataMarker,
+        DC::DuplicateMetadataMarker => DiagnosticCode::DuplicateMetadataMarker,
+        DC::NonPlainMetadataContent => DiagnosticCode::NonPlainMetadataContent,
     }
 }
