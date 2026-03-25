@@ -65,6 +65,7 @@ pub enum DiagnosticCode {
     LeadingZeros,
     EmptyWordMarker,
     MissingMilestoneSelfClose,
+    InvalidTableColumnSequence,
 }
 
 /// A diagnostic message with source location.
@@ -431,6 +432,16 @@ impl Diagnostic {
             code: DiagnosticCode::MissingMilestoneSelfClose,
         }
     }
+
+    /// A table row skips or reorders numbered columns.
+    pub fn invalid_table_column_sequence(expected: u32, found: u32, span: Span) -> Self {
+        Diagnostic {
+            severity: Severity::Error,
+            span,
+            message: format!("expected table column {expected} but found column {found}"),
+            code: DiagnosticCode::InvalidTableColumnSequence,
+        }
+    }
 }
 
 /// A collection of diagnostics produced during parsing and validation.
@@ -699,6 +710,16 @@ mod tests {
         assert_eq!(d.span, 16..18);
         assert!(d.message.contains("\\v"));
         assert!(d.message.contains("\\p"));
+    }
+
+    #[test]
+    fn test_invalid_table_column_sequence() {
+        let d = Diagnostic::invalid_table_column_sequence(2, 3, 20..24);
+        assert_eq!(d.severity, Severity::Error);
+        assert_eq!(d.code, DiagnosticCode::InvalidTableColumnSequence);
+        assert_eq!(d.span, 20..24);
+        assert!(d.message.contains("column 2"));
+        assert!(d.message.contains("column 3"));
     }
 
     // ── Display tests ───────────────────────────────────────────────────

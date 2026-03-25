@@ -30,6 +30,12 @@ fn parse_to_vref(usfm: &str) -> serde_json::Map<String, Value> {
     vref::to_vref_map(&doc)
 }
 
+/// Parse USFM and return the USX XML string.
+fn parse_to_usx(usfm: &str) -> String {
+    let doc = parse(usfm);
+    usfm3::usx::to_usx_string(&doc).expect("USX serialization failed")
+}
+
 /// Collect all nodes of a given USJ `type` from a JSON array, recursively.
 fn collect_by_type<'a>(value: &'a Value, ty: &str) -> Vec<&'a Value> {
     let mut out = Vec::new();
@@ -288,6 +294,38 @@ fn footnote_with_content_markers() {
     );
 }
 
+// https://ubsicap.github.io/usfm/usfm3.0/about/syntax.html
+// "Significant whitespace": "The space after ... the end of the opening marker within a character or note marker pair."
+#[test]
+fn first_note_submarker_opening_whitespace_is_structural() {
+    let usfm = r#"\id GEN
+\c 1
+\p
+\v 1 Text \f + \fr   1:1 \ft   note text \f* rest."#;
+
+    let usj = parse_to_usj(usfm);
+    let notes = collect_by_type(&usj, "note");
+    let note = notes[0];
+    let note_chars = collect_by_type(note, "char");
+
+    let fr = note_chars
+        .iter()
+        .find(|c| c["marker"] == "fr")
+        .expect("note should have \\fr");
+    let ft = note_chars
+        .iter()
+        .find(|c| c["marker"] == "ft")
+        .expect("note should have \\ft");
+
+    assert_eq!(fr["content"][0].as_str(), Some("1:1 "));
+    assert!(
+        ft["content"][0]
+            .as_str()
+            .is_some_and(|s| s.contains("note text")),
+        "\\ft content should retain the note text"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // USJ export: verse SIDs
 // ---------------------------------------------------------------------------
@@ -335,6 +373,179 @@ fn tables_minimal() {
     // Cells inside rows.
     let cells = collect_by_type(&usj, "table:cell");
     assert!(cells.len() >= 4, "should have at least 4 table cells");
+}
+
+#[test]
+fn tables_do_not_emit_close_diagnostics_at_row_or_eof_boundaries() {
+    let usfm = r#"\id GEN
+\c 1
+\tr \th1 Day \th2 Tribe \th3 Leader
+\tr \tcr1 1st \tc2 Judah \tc3 Nahshon son of Amminadab"#;
+
+    let result = builder::parse(usfm);
+
+    assert!(
+        !result
+            .diagnostics
+            .iter()
+            .any(|d| matches!(d.code, DiagnosticCode::ImplicitClose | DiagnosticCode::UnclosedAtEof)),
+        "table rows/cells should close structurally without implicit/unclosed diagnostics: {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|d| format!("{:?}", d.code))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn tables_close_cleanly_before_following_block_markers() {
+    let usfm = r#"\id GEN
+\c 1
+\tr \tc1 A \tc2 B
+\p
+\v 1 After the table.
+\c 2
+\p
+\v 1 Next chapter."#;
+
+    let result = builder::parse(usfm);
+
+    assert!(
+        !result
+            .diagnostics
+            .iter()
+            .any(|d| matches!(d.code, DiagnosticCode::ImplicitClose | DiagnosticCode::UnclosedAtEof)),
+        "table rows/cells should close cleanly before later block markers: {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|d| format!("{:?}", d.code))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn table_cell_whitespace_matches_spec_examples() {
+    let usfm = r#"\id NUM
+\c 7
+\tr \th1 Day \th2 Tribe \th3 Leader
+\tr \tcr1 1st \tc2 Judah \tc3 Nahshon son of Amminadab"#;
+
+    let usj = parse_to_usj(usfm);
+    let cells = collect_by_type(&usj, "table:cell");
+    let cell_text: Vec<&str> = cells
+        .iter()
+        .map(|cell| cell["content"][0].as_str().unwrap())
+        .collect();
+
+    assert_eq!(
+        cell_text,
+        vec![
+            "Day ",
+            "Tribe ",
+            "Leader",
+            "1st ",
+            "Judah ",
+            "Nahshon son of Amminadab",
+        ]
+    );
+
+    let usx = parse_to_usx(usfm);
+    assert!(
+        usx.contains(r#"<cell style="th1" align="start">Day </cell>"#),
+        "first header cell should preserve trailing space in USX: {usx}"
+    );
+    assert!(
+        usx.contains(r#"<cell style="th3" align="start">Leader</cell>"#),
+        "final header cell should not carry a trailing space in USX: {usx}"
+    );
+    assert!(
+        usx.contains(r#"<cell style="tc2" align="start">Judah </cell>"#),
+        "non-final body cell should preserve trailing space in USX: {usx}"
+    );
+    assert!(
+        usx.contains(r#"<cell style="tc3" align="start">Nahshon son of Amminadab</cell>"#),
+        "final body cell should not carry a trailing space in USX: {usx}"
+    );
+}
+
+#[test]
+fn table_row_newlines_do_not_become_trailing_cell_space() {
+    let eof_usj = parse_to_usj(
+        r#"\id GEN
+\c 1
+\tr \tc1 A \tc2 B
+"#,
+    );
+    let eof_cells = collect_by_type(&eof_usj, "table:cell");
+    assert_eq!(eof_cells[0]["content"][0].as_str(), Some("A "));
+    assert_eq!(eof_cells[1]["content"][0].as_str(), Some("B"));
+
+    let boundary_usj = parse_to_usj(
+        r#"\id GEN
+\c 1
+\tr \tc1 A \tc2 B
+\p
+\v 1 After."#,
+    );
+    let boundary_cells = collect_by_type(&boundary_usj, "table:cell");
+    assert_eq!(boundary_cells[0]["content"][0].as_str(), Some("A "));
+    assert_eq!(boundary_cells[1]["content"][0].as_str(), Some("B"));
+}
+
+// https://ubsicap.github.io/usfm/usfm3.0/about/syntax.html
+// "Significant whitespace": "The space after ... the end of the opening marker within a character or note marker pair."
+#[test]
+fn table_cell_opening_whitespace_is_structural() {
+    let usfm = r#"\id GEN
+\c 1
+\tr \tc1   Judah \tc2   Issachar"#;
+
+    let usj = parse_to_usj(usfm);
+    let cells = collect_by_type(&usj, "table:cell");
+
+    assert_eq!(cells[0]["content"][0].as_str(), Some("Judah "));
+    assert_eq!(cells[1]["content"][0].as_str(), Some("Issachar"));
+}
+
+// https://ubsicap.github.io/usfm/usfm3.0/about/syntax.html
+// "Normalized whitespace preceding the closing marker of a character or note marker pair is preserved."
+#[test]
+fn opening_marker_whitespace_is_structural_and_closing_marker_whitespace_restores_word_boundary() {
+    let usfm = r#"\id GEN
+\c 1
+\p
+\v 1 Start \bd   bold\bd*
+tail."#;
+
+    let usj = parse_to_usj(usfm);
+    let chars = collect_by_type(&usj, "char");
+    let bd = chars
+        .iter()
+        .find(|c| c["marker"] == "bd")
+        .expect("should find \\bd char node");
+
+    assert_eq!(bd["content"][0].as_str(), Some("bold"));
+
+    let vref = parse_to_vref(usfm);
+    assert_eq!(
+        vref.get("GEN 1:1").and_then(|v| v.as_str()),
+        Some("Start bold tail.")
+    );
+}
+
+// https://ubsicap.github.io/usfm/usfm3.0/about/syntax.html
+// "Multiple whitespace between words are normalized to a single space (U+0020)."
+#[test]
+fn paragraph_text_whitespace_is_normalized_to_single_spaces() {
+    let usfm = "\\id GEN\n\\c 1\n\\p\n\\v 1 Alpha   beta\n   gamma";
+
+    let vref = parse_to_vref(usfm);
+    assert_eq!(
+        vref.get("GEN 1:1").and_then(|v| v.as_str()),
+        Some("Alpha beta gamma")
+    );
 }
 
 // ---------------------------------------------------------------------------

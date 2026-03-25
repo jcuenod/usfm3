@@ -54,6 +54,7 @@ pub enum DiagnosticCode {
     LeadingZeros,
     EmptyWordMarker,
     MissingMilestoneSelfClose,
+    InvalidTableColumnSequence,
 }
 
 /// A diagnostic message with source location.
@@ -259,5 +260,6 @@ fn convert_code(c: usfm3_lib::diagnostics::DiagnosticCode) -> DiagnosticCode {
         DC::LeadingZeros => DiagnosticCode::LeadingZeros,
         DC::EmptyWordMarker => DiagnosticCode::EmptyWordMarker,
         DC::MissingMilestoneSelfClose => DiagnosticCode::MissingMilestoneSelfClose,
+        DC::InvalidTableColumnSequence => DiagnosticCode::InvalidTableColumnSequence,
     }
 }

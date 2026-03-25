@@ -248,28 +248,29 @@ impl TreeBuilder {
             ));
         }
 
-        // For table-row markers, the newline between rows is structural
-        // (not a word boundary) -- just clear it.  For all other markers,
-        // consume it: block-level trailing space is stripped by
-        // `trim_trailing_text` during finalization; inline space acts as
-        // a word boundary.
-        if info.kind == MarkerKind::TableRow {
-            self.pending_newline = false;
+        if matches!(
+            info.kind,
+            MarkerKind::Header
+                | MarkerKind::Paragraph
+                | MarkerKind::TableRow
+                | MarkerKind::Periph
+                | MarkerKind::SidebarStart
+                | MarkerKind::Meta
+        ) {
+            self.flush_pending_newline_at_block_boundary();
         } else {
             self.consume_pending_newline();
         }
 
         match info.kind {
             MarkerKind::Header => {
-                // Close character markers and paragraphs above.
-                self.force_close_notes();
-                self.close_paragraph(&span);
+                // Close any open block context before starting a new header.
+                self.close_block_context(&span);
                 self.push_open(name.to_string(), MarkerKind::Header, span);
             }
 
             MarkerKind::Paragraph => {
-                self.force_close_notes();
-                self.close_paragraph(&span);
+                self.close_block_context(&span);
                 self.push_open(name.to_string(), MarkerKind::Paragraph, span);
             }
 
@@ -308,11 +309,7 @@ impl TreeBuilder {
 
             MarkerKind::TableRow => {
                 // Table rows are paragraph-level: close notes and paragraphs first.
-                self.force_close_notes();
-                self.close_paragraph(&span);
-                // Close previous table cell and row if any.
-                self.close_table_cell_in_row();
-                self.close_table_row();
+                self.close_block_context(&span);
                 self.push_open(name.to_string(), MarkerKind::TableRow, span);
             }
 
@@ -324,8 +321,7 @@ impl TreeBuilder {
 
             MarkerKind::Periph => {
                 // Periph acts as a section-level container (like sidebar).
-                self.force_close_notes();
-                self.close_paragraph(&span);
+                self.close_block_context(&span);
                 self.push_open(name.to_string(), MarkerKind::Periph, span);
             }
 
@@ -334,8 +330,7 @@ impl TreeBuilder {
             }
 
             MarkerKind::SidebarStart => {
-                self.force_close_notes();
-                self.close_paragraph(&span);
+                self.close_block_context(&span);
                 self.push_open(name.to_string(), MarkerKind::SidebarStart, span);
             }
 
@@ -355,8 +350,7 @@ impl TreeBuilder {
                     self.close_inline_above_paragraph();
                     self.push_open(name.to_string(), MarkerKind::Meta, span);
                 } else {
-                    self.force_close_notes();
-                    self.close_paragraph(&span);
+                    self.close_block_context(&span);
                     self.push_open(name.to_string(), MarkerKind::Meta, span);
                 }
             }
@@ -388,13 +382,12 @@ impl TreeBuilder {
     // -----------------------------------------------------------------
 
     fn handle_chapter(&mut self, span: Span) {
-        self.consume_pending_newline();
+        self.flush_pending_newline_at_block_boundary();
         // Flush any pending chapter/verse that never got a number.
         self.flush_pending_chapter();
         self.flush_pending_verse();
 
-        self.force_close_notes();
-        self.close_paragraph(&span);
+        self.close_block_context(&span);
         self.pending_chapter = Some(span);
     }
 
@@ -811,6 +804,17 @@ impl TreeBuilder {
         self.pending_newline = true;
     }
 
+    /// A newline at a block boundary usually becomes a word boundary, except
+    /// when it ends a table row. In that case the newline is structural and
+    /// must not become table-cell content.
+    fn flush_pending_newline_at_block_boundary(&mut self) {
+        if self.in_table_context() {
+            self.pending_newline = false;
+        } else {
+            self.consume_pending_newline();
+        }
+    }
+
     /// Consume the deferred newline by pushing a space onto the last text
     /// child in the current context — matching old `handle_newline` behaviour.
     /// If the last child is not a text node, the newline is silently dropped
@@ -1133,6 +1137,21 @@ impl TreeBuilder {
         }
     }
 
+    /// Close any open table context so table cells and rows end structurally
+    /// at block boundaries rather than producing character-style diagnostics.
+    fn close_table_context(&mut self) {
+        self.close_table_cell_in_row();
+        self.close_table_row();
+    }
+
+    /// Close block-level context in boundary order: notes first, then any open
+    /// table row/cell, then the paragraph/header/meta container.
+    fn close_block_context(&mut self, trigger_span: &Span) {
+        self.force_close_notes();
+        self.close_table_context();
+        self.close_paragraph(trigger_span);
+    }
+
     /// Close all character markers on top of the stack, then close the current
     /// paragraph (or header/meta) if one exists.
     fn close_paragraph(&mut self, trigger_span: &Span) {
@@ -1145,8 +1164,7 @@ impl TreeBuilder {
             match top_kind {
                 Some(MarkerKind::Character)
                 | Some(MarkerKind::Unknown)
-                | Some(MarkerKind::Figure)
-                | Some(MarkerKind::TableCell) => {
+                | Some(MarkerKind::Figure) => {
                     let top = self.stack.pop().unwrap();
                     if !top.marker.starts_with('z') {
                         self.diagnostics.push(Diagnostic::implicitly_closed(
@@ -1160,8 +1178,7 @@ impl TreeBuilder {
                 }
                 Some(MarkerKind::Paragraph)
                 | Some(MarkerKind::Header)
-                | Some(MarkerKind::Meta)
-                | Some(MarkerKind::TableRow) => {
+                | Some(MarkerKind::Meta) => {
                     let top = self.stack.pop().unwrap();
                     let node = self.finalize_open_node(top);
                     self.append_node(node);
@@ -1274,6 +1291,14 @@ impl TreeBuilder {
             .iter()
             .rev()
             .any(|o| o.kind == MarkerKind::Note || o.kind == MarkerKind::SidebarStart)
+    }
+
+    /// Returns `true` if a table row/cell is currently open on the stack.
+    fn in_table_context(&self) -> bool {
+        self.stack
+            .iter()
+            .rev()
+            .any(|o| matches!(o.kind, MarkerKind::TableRow | MarkerKind::TableCell))
     }
 
     /// Returns `true` if there is a Paragraph-kind marker on the stack.
@@ -1493,7 +1518,7 @@ impl TreeBuilder {
 
     /// Finish parsing: close everything on the stack and return the result.
     fn finish(mut self) -> ParseResult {
-        self.consume_pending_newline();
+        self.flush_pending_newline_at_block_boundary();
         self.flush_pending_milestone_close();
         // Flush any pending chapter/verse that never got numbers.
         self.flush_pending_chapter();
@@ -1508,8 +1533,7 @@ impl TreeBuilder {
             } else if open.kind == MarkerKind::SidebarStart
                 || open.kind == MarkerKind::Figure
                 || ((open.kind == MarkerKind::Character
-                    || open.kind == MarkerKind::Unknown
-                    || open.kind == MarkerKind::TableCell)
+                    || open.kind == MarkerKind::Unknown)
                     && !open.marker.starts_with('z'))
             {
                 self.diagnostics

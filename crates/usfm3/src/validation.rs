@@ -69,6 +69,28 @@ fn parse_verse_end(s: &str) -> Option<u32> {
     }
 }
 
+/// Parse numbered table-cell markers like `th1`, `tc3`, or `tcr1-2`.
+///
+/// Returns `(start_col, end_col)` where `end_col == start_col` for cells that
+/// do not span multiple columns.
+fn parse_table_cell_columns(marker: &str) -> Option<(u32, u32)> {
+    let (base, end_col) = if let Some(dash) = marker.rfind('-') {
+        let after_dash = &marker[dash + 1..];
+        if !after_dash.is_empty() && after_dash.chars().all(|c| c.is_ascii_digit()) {
+            (&marker[..dash], after_dash.parse::<u32>().ok())
+        } else {
+            (marker, None)
+        }
+    } else {
+        (marker, None)
+    };
+
+    let digit_start = base.find(|c: char| c.is_ascii_digit())?;
+    let start_col = base[digit_start..].parse::<u32>().ok()?;
+    let end_col = end_col.unwrap_or(start_col);
+    Some((start_col, end_col.max(start_col)))
+}
+
 // ── Validator ───────────────────────────────────────────────────────────────
 
 struct Validator<'a> {
@@ -96,6 +118,7 @@ impl<'a> Validator<'a> {
         self.check_body_paragraph_before_chapter(doc);
         self.check_non_empty_blank_line(doc);
         self.check_empty_word_marker(doc);
+        self.check_table_column_sequence(doc);
     }
 
     // ── 1. \id must be the first marker ─────────────────────────────────
@@ -281,6 +304,54 @@ impl<'a> Validator<'a> {
         let is_note = matches!(node, Node::Note { .. });
         for child in node.children() {
             self.walk_note_submarkers(child, inside_note || is_note);
+        }
+    }
+
+    // ── 7b. Table columns progress contiguously within a row ─────────────
+
+    fn check_table_column_sequence(&mut self, doc: &Document) {
+        for node in &doc.content {
+            self.walk_tables(node);
+        }
+    }
+
+    fn walk_tables(&mut self, node: &Node) {
+        if let Node::Table { content, .. } = node {
+            for row in content {
+                self.check_table_row_columns(row);
+            }
+        }
+
+        for child in node.children() {
+            self.walk_tables(child);
+        }
+    }
+
+    fn check_table_row_columns(&mut self, row: &Node) {
+        let Node::TableRow { content, .. } = row else {
+            return;
+        };
+
+        let mut expected_col = 1;
+        for cell in content {
+            let Node::TableCell { marker, .. } = cell else {
+                continue;
+            };
+
+            let Some((start_col, end_col)) = parse_table_cell_columns(marker) else {
+                continue;
+            };
+
+            if start_col != expected_col {
+                self.diagnostics
+                    .push(Diagnostic::invalid_table_column_sequence(
+                        expected_col,
+                        start_col,
+                        cell.span().cloned().unwrap_or(0..0),
+                    ));
+            }
+
+            expected_col = end_col + 1;
         }
     }
 
@@ -1436,6 +1507,84 @@ mod tests {
             diags
                 .iter()
                 .any(|d| d.code == DiagnosticCode::MilestoneMismatch)
+        );
+    }
+
+    #[test]
+    fn test_table_column_sequence_gap() {
+        let doc = doc_with(vec![
+            Node::Book {
+                marker: "id".into(),
+                code: "GEN".into(),
+                content: vec![],
+                spans: NodeSpans::node(0..10).with_code(0..0),
+            },
+            Node::Table {
+                content: vec![Node::TableRow {
+                    marker: "tr".into(),
+                    content: vec![
+                        Node::TableCell {
+                            marker: "th1".into(),
+                            align: "start".into(),
+                            content: vec![Node::text("header1 ")],
+                            spans: NodeSpans::node(10..20),
+                        },
+                        Node::TableCell {
+                            marker: "th3".into(),
+                            align: "start".into(),
+                            content: vec![Node::text("header3")],
+                            spans: NodeSpans::node(21..31),
+                        },
+                    ],
+                    spans: NodeSpans::node(10..31),
+                }],
+                spans: NodeSpans::node(10..31),
+            },
+        ]);
+        let diags = validate(&doc);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::InvalidTableColumnSequence)
+        );
+    }
+
+    #[test]
+    fn test_table_column_sequence_with_span_is_valid() {
+        let doc = doc_with(vec![
+            Node::Book {
+                marker: "id".into(),
+                code: "GEN".into(),
+                content: vec![],
+                spans: NodeSpans::node(0..10).with_code(0..0),
+            },
+            Node::Table {
+                content: vec![Node::TableRow {
+                    marker: "tr".into(),
+                    content: vec![
+                        Node::TableCell {
+                            marker: "tcr1-2".into(),
+                            align: "end".into(),
+                            content: vec![Node::text("Total: ")],
+                            spans: NodeSpans::node(10..24),
+                        },
+                        Node::TableCell {
+                            marker: "tcc3".into(),
+                            align: "center".into(),
+                            content: vec![Node::text("186,400")],
+                            spans: NodeSpans::node(25..34),
+                        },
+                    ],
+                    spans: NodeSpans::node(10..34),
+                }],
+                spans: NodeSpans::node(10..34),
+            },
+        ]);
+        let diags = validate(&doc);
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::InvalidTableColumnSequence)
         );
     }
 

@@ -134,6 +134,14 @@ fn standard_keys(node_type: &str) -> &'static [&'static str] {
 /// Transforms both our output and BridgeConn's expected output into a
 /// common format so structural differences don't cause spurious failures.
 fn normalize_for_comparison(value: &mut Value) {
+    normalize_for_comparison_inner(value, None);
+}
+
+fn preserve_trailing_content_space(node_type: Option<&str>) -> bool {
+    matches!(node_type, Some("char" | "ref" | "table:cell"))
+}
+
+fn normalize_for_comparison_inner(value: &mut Value, parent_type: Option<&str>) {
     match value {
         Value::Object(map) => {
             let node_type = map.get("type").and_then(|v| v.as_str()).map(String::from);
@@ -218,7 +226,7 @@ fn normalize_for_comparison(value: &mut Value) {
             // Recurse into content arrays
             if let Some(Value::Array(arr)) = map.get_mut("content") {
                 for item in &mut *arr {
-                    normalize_for_comparison(item);
+                    normalize_for_comparison_inner(item, node_type.as_deref());
                 }
 
                 // ── Note sub-marker leading-whitespace normalization ──
@@ -258,18 +266,20 @@ fn normalize_for_comparison(value: &mut Value) {
                 // sometimes preserves extra whitespace.  Normalize both sides.
                 for item in arr.iter_mut() {
                     if let Value::String(s) = item {
+                        let had_newline = s.contains('\n');
                         // Replace literal newlines with space
-                        if s.contains('\n') {
+                        if had_newline {
                             *s = s.replace('\n', " ");
                         }
                         // Collapse multiple spaces to single
                         while s.contains("  ") {
                             *s = s.replace("  ", " ");
                         }
-                        // Trim trailing whitespace
-                        let trimmed = s.trim_end();
-                        if trimmed.len() != s.len() {
-                            *s = trimmed.to_string();
+                        if had_newline || !preserve_trailing_content_space(node_type.as_deref()) {
+                            let trimmed = s.trim_end();
+                            if trimmed.len() != s.len() {
+                                *s = trimmed.to_string();
+                            }
                         }
                     }
                 }
@@ -298,7 +308,7 @@ fn normalize_for_comparison(value: &mut Value) {
         }
         Value::Array(arr) => {
             for item in arr {
-                normalize_for_comparison(item);
+                normalize_for_comparison_inner(item, parent_type);
             }
         }
         Value::String(_) => {}
