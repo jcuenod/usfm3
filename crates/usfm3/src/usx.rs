@@ -424,7 +424,7 @@ mod tests {
                     marker: "id".into(),
                     code: "GEN".into(),
                     content: vec![Node::text("Genesis")],
-                    span: 0..20,
+                    spans: NodeSpans::node(0..20).with_code(0..0),
                 },
                 Node::Chapter {
                     marker: "c".into(),
@@ -432,7 +432,7 @@ mod tests {
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                    span: 20..25,
+                    spans: NodeSpans::node(20..25).with_number(0..0),
                 },
                 Node::Para {
                     marker: "p".into(),
@@ -443,11 +443,11 @@ mod tests {
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                            span: 30..33,
+                            spans: NodeSpans::node(30..33).with_number(0..0),
                         },
                         Node::text("In the beginning God created the heavens and the earth."),
                     ],
-                    span: 25..90,
+                    spans: NodeSpans::node(25..90),
                 },
             ],
         }
@@ -473,7 +473,7 @@ mod tests {
                     marker: "id".into(),
                     code: "GEN".into(),
                     content: vec![],
-                    span: 0..5,
+                    spans: NodeSpans::node(0..5).with_code(0..0),
                 },
                 Node::Chapter {
                     marker: "c".into(),
@@ -481,7 +481,7 @@ mod tests {
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                    span: 5..10,
+                    spans: NodeSpans::node(5..10).with_number(0..0),
                 },
                 Node::Chapter {
                     marker: "c".into(),
@@ -489,7 +489,7 @@ mod tests {
                     sid: Some("GEN 2".into()),
                     altnumber: None,
                     pubnumber: None,
-                    span: 10..15,
+                    spans: NodeSpans::node(10..15).with_number(0..0),
                 },
             ],
         };
@@ -508,7 +508,7 @@ mod tests {
                     marker: "id".into(),
                     code: "GEN".into(),
                     content: vec![],
-                    span: 0..5,
+                    spans: NodeSpans::node(0..5).with_code(0..0),
                 },
                 Node::Chapter {
                     marker: "c".into(),
@@ -516,7 +516,7 @@ mod tests {
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                    span: 5..10,
+                    spans: NodeSpans::node(5..10).with_number(0..0),
                 },
                 Node::Para {
                     marker: "p".into(),
@@ -527,7 +527,7 @@ mod tests {
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                            span: 10..14,
+                            spans: NodeSpans::node(10..14).with_number(0..0),
                         },
                         Node::text("First verse. "),
                         Node::Verse {
@@ -536,11 +536,11 @@ mod tests {
                             sid: Some("GEN 1:2".into()),
                             altnumber: None,
                             pubnumber: None,
-                            span: 20..24,
+                            spans: NodeSpans::node(20..24).with_number(0..0),
                         },
                         Node::text("Second verse."),
                     ],
-                    span: 10..40,
+                    spans: NodeSpans::node(10..40),
                 },
             ],
         };
@@ -562,11 +562,11 @@ mod tests {
                         marker: "ft".into(),
                         content: vec![Node::text("A footnote")],
                         attributes: vec![],
-                        span: 5..20,
+                        spans: NodeSpans::node(5..20),
                     }],
-                    span: 0..25,
+                    spans: NodeSpans::node(0..25),
                 }],
-                span: 0..30,
+                spans: NodeSpans::node(0..30),
             }],
         };
         let xml = to_usx_string(&doc).unwrap();
@@ -586,9 +586,9 @@ mod tests {
                         key: "who".into(),
                         value: "Jesus".into(),
                     }],
-                    span: 0..15,
+                    spans: NodeSpans::node(0..15),
                 }],
-                span: 0..20,
+                spans: NodeSpans::node(0..20),
             }],
         };
         let xml = to_usx_string(&doc).unwrap();
@@ -609,7 +609,7 @@ mod tests {
             content: vec![Node::Para {
                 marker: "p".into(),
                 content: vec![Node::text("He said \"hello\" & <goodbye>")],
-                span: 0..30,
+                spans: NodeSpans::node(0..30),
             }],
         };
         let xml = to_usx_string(&doc).unwrap();

@@ -145,7 +145,7 @@ mod tests {
                     marker: "id".into(),
                     code: "GEN".into(),
                     content: vec![Node::text("Genesis")],
-                    span: 0..10,
+                    spans: NodeSpans::node(0..10).with_code(0..0),
                 },
                 Node::Chapter {
                     marker: "c".into(),
@@ -153,7 +153,7 @@ mod tests {
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                    span: 10..15,
+                    spans: NodeSpans::node(10..15).with_number(0..0),
                 },
                 Node::Para {
                     marker: "p".into(),
@@ -164,7 +164,7 @@ mod tests {
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                            span: 15..20,
+                            spans: NodeSpans::node(15..20).with_number(0..0),
                         },
                         Node::text("In the beginning God created the heavens and the earth."),
                         Node::Verse {
@@ -173,11 +173,11 @@ mod tests {
                             sid: Some("GEN 1:2".into()),
                             altnumber: None,
                             pubnumber: None,
-                            span: 80..85,
+                            spans: NodeSpans::node(80..85).with_number(0..0),
                         },
                         Node::text("The earth was without form and void."),
                     ],
-                    span: 15..120,
+                    spans: NodeSpans::node(15..120),
                 },
             ],
         }
@@ -212,7 +212,7 @@ mod tests {
                     marker: "id".into(),
                     code: "GEN".into(),
                     content: vec![],
-                    span: 0..5,
+                    spans: NodeSpans::node(0..5).with_code(0..0),
                 },
                 Node::Chapter {
                     marker: "c".into(),
@@ -220,7 +220,7 @@ mod tests {
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                    span: 5..10,
+                    spans: NodeSpans::node(5..10).with_number(0..0),
                 },
                 Node::Para {
                     marker: "p".into(),
@@ -231,7 +231,7 @@ mod tests {
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                            span: 10..14,
+                            spans: NodeSpans::node(10..14).with_number(0..0),
                         },
                         Node::text("In the beginning"),
                         Node::Note {
@@ -239,11 +239,11 @@ mod tests {
                             caller: "+".into(),
                             category: None,
                             content: vec![Node::text("A footnote")],
-                            span: 30..45,
+                            spans: NodeSpans::node(30..45),
                         },
                         Node::text(" God created."),
                     ],
-                    span: 10..60,
+                    spans: NodeSpans::node(10..60),
                 },
             ],
         };
@@ -262,7 +262,7 @@ mod tests {
                     marker: "id".into(),
                     code: "GEN".into(),
                     content: vec![],
-                    span: 0..5,
+                    spans: NodeSpans::node(0..5).with_code(0..0),
                 },
                 Node::Chapter {
                     marker: "c".into(),
@@ -270,13 +270,13 @@ mod tests {
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                    span: 5..10,
+                    spans: NodeSpans::node(5..10).with_number(0..0),
                 },
                 // Section heading -- should be ignored.
                 Node::Para {
                     marker: "s1".into(),
                     content: vec![Node::text("The Creation")],
-                    span: 10..25,
+                    spans: NodeSpans::node(10..25),
                 },
                 Node::Para {
                     marker: "p".into(),
@@ -287,11 +287,11 @@ mod tests {
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                            span: 25..29,
+                            spans: NodeSpans::node(25..29).with_number(0..0),
                         },
                         Node::text("In the beginning."),
                     ],
-                    span: 25..50,
+                    spans: NodeSpans::node(25..50),
                 },
             ],
         };
@@ -311,7 +311,7 @@ mod tests {
                     marker: "id".into(),
                     code: "GEN".into(),
                     content: vec![],
-                    span: 0..5,
+                    spans: NodeSpans::node(0..5).with_code(0..0),
                 },
                 Node::Chapter {
                     marker: "c".into(),
@@ -319,7 +319,7 @@ mod tests {
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                    span: 5..10,
+                    spans: NodeSpans::node(5..10).with_number(0..0),
                 },
                 Node::Para {
                     marker: "p".into(),
@@ -330,18 +330,18 @@ mod tests {
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                            span: 10..14,
+                            spans: NodeSpans::node(10..14).with_number(0..0),
                         },
                         Node::text("The "),
                         Node::Char {
                             marker: "nd".into(),
                             content: vec![Node::text("Lord")],
                             attributes: vec![],
-                            span: 18..28,
+                            spans: NodeSpans::node(18..28),
                         },
                         Node::text(" said."),
                     ],
-                    span: 10..40,
+                    spans: NodeSpans::node(10..40),
                 },
             ],
         };
@@ -366,7 +366,7 @@ mod tests {
                     marker: "id".into(),
                     code: "GEN".into(),
                     content: vec![],
-                    span: 0..5,
+                    spans: NodeSpans::node(0..5).with_code(0..0),
                 },
                 Node::Chapter {
                     marker: "c".into(),
@@ -374,7 +374,7 @@ mod tests {
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                    span: 5..10,
+                    spans: NodeSpans::node(5..10).with_number(0..0),
                 },
                 Node::Para {
                     marker: "p".into(),
@@ -385,17 +385,17 @@ mod tests {
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                            span: 10..14,
+                            spans: NodeSpans::node(10..14).with_number(0..0),
                         },
                         Node::text("First part."),
                     ],
-                    span: 10..30,
+                    spans: NodeSpans::node(10..30),
                 },
                 // Continuation paragraph (no verse marker, same verse).
                 Node::Para {
                     marker: "q1".into(),
                     content: vec![Node::text("Second part.")],
-                    span: 30..50,
+                    spans: NodeSpans::node(30..50),
                 },
             ],
         };
@@ -424,7 +424,7 @@ mod tests {
                     marker: "id".into(),
                     code: "GEN".into(),
                     content: vec![],
-                    span: 0..5,
+                    spans: NodeSpans::node(0..5).with_code(0..0),
                 },
                 Node::Chapter {
                     marker: "c".into(),
@@ -432,7 +432,7 @@ mod tests {
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                    span: 5..10,
+                    spans: NodeSpans::node(5..10).with_number(0..0),
                 },
                 Node::Verse {
                     marker: "v".into(),
@@ -440,7 +440,7 @@ mod tests {
                     sid: Some("GEN 1:1".into()),
                     altnumber: None,
                     pubnumber: None,
-                    span: 10..14,
+                    spans: NodeSpans::node(10..14).with_number(0..0),
                 },
                 Node::text("In the beginning."),
                 Node::Verse {
@@ -449,7 +449,7 @@ mod tests {
                     sid: Some("GEN 1:2".into()),
                     altnumber: None,
                     pubnumber: None,
-                    span: 30..34,
+                    spans: NodeSpans::node(30..34).with_number(0..0),
                 },
                 Node::text("And God said."),
             ],
@@ -475,7 +475,7 @@ mod tests {
                     marker: "id".into(),
                     code: "GEN".into(),
                     content: vec![],
-                    span: 0..5,
+                    spans: NodeSpans::node(0..5).with_code(0..0),
                 },
                 Node::Chapter {
                     marker: "c".into(),
@@ -483,7 +483,7 @@ mod tests {
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                    span: 5..10,
+                    spans: NodeSpans::node(5..10).with_number(0..0),
                 },
                 // Root-level verse.
                 Node::Verse {
@@ -492,7 +492,7 @@ mod tests {
                     sid: Some("GEN 1:1".into()),
                     altnumber: None,
                     pubnumber: None,
-                    span: 10..14,
+                    spans: NodeSpans::node(10..14).with_number(0..0),
                 },
                 Node::text("First."),
                 // Then a paragraph with verse 2.
@@ -505,11 +505,11 @@ mod tests {
                             sid: Some("GEN 1:2".into()),
                             altnumber: None,
                             pubnumber: None,
-                            span: 20..24,
+                            spans: NodeSpans::node(20..24).with_number(0..0),
                         },
                         Node::text("Second."),
                     ],
-                    span: 18..30,
+                    spans: NodeSpans::node(18..30),
                 },
             ],
         };

@@ -37,9 +37,15 @@ struct ParseResult {
 #[pymethods]
 impl ParseResult {
     /// Returns USJ as a native Python dict.
-    fn to_usj(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let value = usfm3_lib::usj::to_usj_value(&self.document)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    #[pyo3(signature = (spans=false))]
+    fn to_usj(&self, py: Python<'_>, spans: bool) -> PyResult<PyObject> {
+        let value = usfm3_lib::usj::to_usj_value_with_options(
+            &self.document,
+            usfm3_lib::usj::UsjOptions {
+                include_spans: spans,
+            },
+        )
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         pythonize::pythonize(py, &value)
             .map(|obj| obj.unbind())
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))

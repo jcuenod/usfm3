@@ -3,7 +3,7 @@
 //! Consumes the token stream produced by [`crate::lexer`] and produces an AST
 //! ([`crate::ast::Document`]) together with a list of diagnostics.
 
-use crate::ast::{Attribute, Document, Node, Span};
+use crate::ast::{Attribute, Document, Node, NodeSpans, Span};
 use crate::diagnostics::{Diagnostic, DiagnosticList};
 use crate::lexer::{self, Token};
 use crate::markers::{self, MarkerKind};
@@ -40,10 +40,28 @@ struct OpenNode {
     children: Vec<Node>,
     /// For Note nodes: the caller character extracted from the first text.
     caller: Option<String>,
+    /// For \id (Book) nodes: the byte span of the book code token.
+    code_span: Option<Span>,
+    /// For closeable nodes (Char, Note, Figure, etc.): span of the closing `\marker*` token.
+    /// `None` when the node was implicitly closed (e.g. by a paragraph boundary).
+    close_span: Option<Span>,
     /// For Figure nodes: collected attributes.
     attributes: Vec<Attribute>,
     /// True when the marker was opened with `\+` nesting prefix.
     nested: bool,
+}
+
+impl OpenNode {
+    fn node_spans(&self) -> NodeSpans {
+        let mut spans = NodeSpans::node(self.span.clone());
+        if let Some(code) = self.code_span.clone() {
+            spans = spans.with_code(code);
+        }
+        if let Some(close) = self.close_span.clone() {
+            spans = spans.with_close(close);
+        }
+        spans
+    }
 }
 
 /// The tree-building state machine.
@@ -148,7 +166,7 @@ impl TreeBuilder {
             Token::ClosingMarker(m) => self.handle_close(m, span),
             Token::Marker(m) => self.handle_marker(m, span),
             Token::Attributes(a) => self.handle_attributes(a, span),
-            Token::Text(t) => self.append_text(t),
+            Token::Text(t) => self.append_text(t, span),
             Token::MilestoneEnd => self.handle_milestone_end(span),
             Token::Newline => self.handle_newline(),
         }
@@ -400,7 +418,7 @@ impl TreeBuilder {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                span,
+                spans: NodeSpans::node(span),
             };
             self.append_node(node);
         }
@@ -418,7 +436,7 @@ impl TreeBuilder {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                span,
+                spans: NodeSpans::node(span),
             };
             self.append_node(node);
         }
@@ -436,7 +454,7 @@ impl TreeBuilder {
         let node = Node::Milestone {
             marker: name.to_string(),
             attributes: Vec::new(),
-            span: span.clone(),
+            spans: NodeSpans::node(span.clone()),
         };
         self.append_node(node);
         // Track this milestone as expecting `\*`.
@@ -464,7 +482,7 @@ impl TreeBuilder {
             let node = Node::Milestone {
                 marker: open.marker,
                 attributes: open.attributes,
-                span: open.span,
+                spans: NodeSpans::node(open.span.clone()),
             };
             self.append_node(node);
         }
@@ -545,7 +563,8 @@ impl TreeBuilder {
                     self.append_node(node);
                 }
                 // Close the match itself.
-                let matched = self.stack.pop().unwrap();
+                let mut matched = self.stack.pop().unwrap();
+                matched.close_span = Some(span.clone());
                 let node = self.finalize_open_node(matched);
                 self.append_node(node);
             }
@@ -618,7 +637,7 @@ impl TreeBuilder {
     // Text handling
     // -----------------------------------------------------------------
 
-    fn append_text(&mut self, text: &str) {
+    fn append_text(&mut self, text: &str, text_span: Span) {
         // 0. \usfm marker — absorb the version text and discard.
         if self.pending_usfm {
             self.pending_usfm = false;
@@ -646,13 +665,17 @@ impl TreeBuilder {
             self.current_chapter = Some(number.clone());
             let book = self.current_book_code.as_deref().unwrap_or("");
             let sid = Some(format!("{} {}", book, strip_leading_zeros(&number)));
+            // Compute the byte span of the number within the text token.
+            // Token::Text never starts with whitespace, so the number begins at
+            // text_span.start and extends by its byte length.
+            let number_span = text_span.start..text_span.start + number.len();
             let node = Node::Chapter {
                 marker: "c".into(),
                 number,
                 sid,
                 altnumber: None,
                 pubnumber: None,
-                span,
+                spans: NodeSpans::node(span).with_number(number_span),
             };
             self.append_node(node);
             if !rest.is_empty() {
@@ -679,13 +702,15 @@ impl TreeBuilder {
                 strip_leading_zeros(ch),
                 strip_leading_zeros(&number)
             ));
+            // Compute the byte span of the number within the text token.
+            let number_span = text_span.start..text_span.start + number.len();
             let node = Node::Verse {
                 marker: "v".into(),
                 number,
                 sid,
                 altnumber: None,
                 pubnumber: None,
-                span,
+                spans: NodeSpans::node(span).with_number(number_span),
             };
             self.append_node(node);
             if !rest.is_empty() {
@@ -705,6 +730,9 @@ impl TreeBuilder {
         {
             let (code, rest) = split_first_word(text);
             self.current_book_code = Some(code.to_string());
+            // Compute the byte span of the code within the text token.
+            let code_span = text_span.start..text_span.start + code.len();
+            top.code_span = Some(code_span);
             // Store the book code in a special way -- we'll use it in
             // finalize_open_node to create a Node::Book.
             // For now, record it as caller (ab)using that field.
@@ -955,6 +983,8 @@ impl TreeBuilder {
             span,
             children: Vec::new(),
             caller: None,
+            code_span: None,
+            close_span: None,
             attributes: Vec::new(),
             nested: false,
         });
@@ -1031,7 +1061,7 @@ impl TreeBuilder {
                 let span = node.span().cloned().unwrap_or(0..0);
                 children.push(Node::Table {
                     content: vec![node],
-                    span,
+                    spans: NodeSpans::node(span),
                 });
             }
             return;
@@ -1185,7 +1215,8 @@ impl TreeBuilder {
                     self.append_node(node);
                 }
                 // Close the sidebar.
-                let sidebar = self.stack.pop().unwrap();
+                let mut sidebar = self.stack.pop().unwrap();
+                sidebar.close_span = Some(trigger_span.clone());
                 let node = self.finalize_open_node(sidebar);
                 self.append_node(node);
             }
@@ -1271,10 +1302,6 @@ impl TreeBuilder {
 
     /// Convert an [`OpenNode`] into the appropriate [`Node`] variant.
     fn finalize_open_node(&self, open: OpenNode) -> Node {
-        let mut children = open.children;
-        // Only trim trailing whitespace for block-level nodes.
-        // Inline elements (Character, Note, Figure) preserve trailing spaces
-        // because they separate content from subsequent siblings.
         let is_block = matches!(
             open.kind,
             MarkerKind::Paragraph
@@ -1283,27 +1310,29 @@ impl TreeBuilder {
                 | MarkerKind::TableRow
                 | MarkerKind::SidebarStart
         );
+        let full_spans = open.node_spans();
+        let node_span = open.span.clone();
+        let mut children = open.children;
+        // Only trim trailing whitespace for block-level nodes.
+        // Inline elements (Character, Note, Figure) preserve trailing spaces
+        // because they separate content from subsequent siblings.
         if is_block {
             trim_trailing_text(&mut children);
         }
         match open.kind {
             MarkerKind::Header => {
                 if open.marker == "id" {
-                    // Special case: \id becomes a Book node.
-                    let code = open.caller.unwrap_or_default();
                     Node::Book {
                         marker: open.marker,
-                        code,
+                        code: open.caller.unwrap_or_default(),
                         content: children,
-                        span: open.span,
+                        spans: full_spans.clone(),
                     }
                 } else {
-                    // Other headers (like \h, \toc1, \mt1) become Para nodes
-                    // to match USJ.
                     Node::Para {
                         marker: open.marker,
                         content: children,
-                        span: open.span,
+                        spans: NodeSpans::node(node_span.clone()),
                     }
                 }
             }
@@ -1311,7 +1340,7 @@ impl TreeBuilder {
             MarkerKind::Paragraph => Node::Para {
                 marker: open.marker,
                 content: children,
-                span: open.span,
+                spans: NodeSpans::node(node_span.clone()),
             },
 
             MarkerKind::Character => {
@@ -1320,13 +1349,9 @@ impl TreeBuilder {
                     Node::Ref {
                         content: children,
                         attributes: open.attributes,
-                        span: open.span,
+                        spans: full_spans.clone(),
                     }
-                // [TODO] This seems a bit hacky. We should return to this and confirm that it is according to spec (I think .nested only exists for this)
                 } else if clean_marker == "xt" && open.nested {
-                    // When \+xt (nested) has a link-href attribute and no
-                    // explicit \ref children, auto-wrap content in a Ref
-                    // node.  Non-nested \xt keeps plain text content.
                     let has_ref_child = children.iter().any(|n| matches!(n, Node::Ref { .. }));
                     let href_value = open
                         .attributes
@@ -1341,7 +1366,7 @@ impl TreeBuilder {
                                     key: "loc".to_string(),
                                     value: loc.clone(),
                                 }],
-                                span: open.span.clone(),
+                                spans: NodeSpans::node(node_span.clone()),
                             }]
                         } else {
                             children
@@ -1353,14 +1378,14 @@ impl TreeBuilder {
                         marker: open.marker,
                         content: final_children,
                         attributes: open.attributes,
-                        span: open.span,
+                        spans: full_spans.clone(),
                     }
                 } else {
                     Node::Char {
                         marker: open.marker,
                         content: children,
                         attributes: open.attributes,
-                        span: open.span,
+                        spans: full_spans.clone(),
                     }
                 }
             }
@@ -1373,7 +1398,7 @@ impl TreeBuilder {
                     caller,
                     category,
                     content: cat_children,
-                    span: open.span,
+                    spans: full_spans.clone(),
                 }
             }
 
@@ -1381,14 +1406,14 @@ impl TreeBuilder {
                 marker: open.marker,
                 content: children,
                 attributes: open.attributes,
-                span: open.span,
+                spans: full_spans.clone(),
             },
 
             MarkerKind::Periph => Node::Periph {
                 alt: open.caller,
                 content: children,
                 attributes: open.attributes,
-                span: open.span,
+                spans: NodeSpans::node(node_span.clone()),
             },
 
             MarkerKind::SidebarStart => {
@@ -1397,26 +1422,23 @@ impl TreeBuilder {
                     marker: open.marker,
                     category,
                     content: cat_children,
-                    span: open.span,
+                    spans: full_spans.clone(),
                 }
             }
 
             MarkerKind::Meta => Node::Para {
                 marker: open.marker,
                 content: children,
-                span: open.span,
+                spans: NodeSpans::node(node_span.clone()),
             },
 
             MarkerKind::TableRow => Node::TableRow {
                 marker: open.marker,
                 content: children,
-                span: open.span,
+                spans: NodeSpans::node(node_span.clone()),
             },
 
             MarkerKind::TableCell => {
-                // Determine alignment from base marker name (digits and
-                // column-span suffix stripped):
-                //   thr*/tcr* → "end", thc*/tcc* → "center", others → "start"
                 let without_span = if let Some(dash) = open.marker.rfind('-') {
                     let after = &open.marker[dash + 1..];
                     if !after.is_empty() && after.chars().all(|c| c.is_ascii_digit()) {
@@ -1439,18 +1461,16 @@ impl TreeBuilder {
                     marker: open.marker,
                     align,
                     content: children,
-                    span: open.span,
+                    spans: full_spans.clone(),
                 }
             }
 
             MarkerKind::Unknown => Node::Unknown {
                 marker: open.marker,
                 content: children,
-                span: open.span,
+                spans: full_spans.clone(),
             },
 
-            // These shouldn't normally appear as OpenNodes, but handle them
-            // defensively.
             MarkerKind::SidebarEnd
             | MarkerKind::Chapter
             | MarkerKind::Verse
@@ -1458,7 +1478,7 @@ impl TreeBuilder {
             | MarkerKind::MilestoneEnd => Node::Unknown {
                 marker: open.marker,
                 content: children,
-                span: open.span,
+                spans: NodeSpans::node(node_span.clone()),
             },
         }
     }

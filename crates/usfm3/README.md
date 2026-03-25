@@ -36,6 +36,15 @@ for diag in result.diagnostics.iter() {
 // Output as USJ (JSON)
 let usj = usfm3::usj::to_usj_string_pretty(&result.document).unwrap();
 
+// Include source spans for editor tooling
+let usj_with_spans = usfm3::usj::to_usj_string_pretty_with_options(
+    &result.document,
+    usfm3::usj::UsjOptions {
+        include_spans: true,
+    },
+)
+.unwrap();
+
 // Output as USX (XML)
 let usx = usfm3::usx::to_usx_string(&result.document).unwrap();
 
@@ -53,10 +62,12 @@ let validation_diags = usfm3::validation::validate(&result.document);
 
 | Format | Function | Description |
 |--------|----------|-------------|
-| USJ | `usj::to_usj_string()` | Unified Scripture JSON |
+| USJ | `usj::to_usj_string()` / `usj::to_usj_string_with_options()` | Unified Scripture JSON; optional nested source spans |
 | USX | `usx::to_usx_string()` | Unified Scripture XML |
 | USFM | `usfm::to_usfm_string()` | Normalized USFM with regularized whitespace |
 | VRef | `vref::to_vref_json_string()` | Verse reference to plain text map |
+
+When `include_spans` is enabled, each structural USJ node includes a `spans` object with a required `node` range and optional `code`, `number`, and `close` ranges.
 
 ## License
 

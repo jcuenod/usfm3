@@ -38,6 +38,10 @@ const usx = result.toUsx();    // USX XML string
 const usfm = result.toUsfm();  // Normalized USFM string
 const vref = result.toVref();  // Vref pairs like { "GEN 1:1": "In the beginning...", ... }
 
+const usjWithSpans = result.toUsj({ spans: true });
+// Structural nodes then include `spans.node` and, when relevant, `spans.code`,
+// `spans.number`, and `spans.close`.
+
 // Diagnostics
 for (const d of result.diagnostics) {
     console.log(`[${d.severity}] ${d.message} (${d.start}..${d.end})`);
@@ -63,11 +67,17 @@ Parse a USFM string. Returns a `ParseResult` with lazy output methods and diagno
 |---|---|---|---|
 | `validate` | `boolean` | `true` | Run semantic validation after parsing |
 
+**UsjOptions:**
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `spans` | `boolean` | `false` | Include nested source byte-offset metadata on structural JSON nodes |
+
 ### `ParseResult`
 
 | Method / Property | Returns | Description |
 |---|---|---|
-| `toUsj()` | `object` | USJ (Unified Scripture JSON) |
+| `toUsj(options?: UsjOptions)` | `object` | USJ (Unified Scripture JSON) |
 | `toUsx()` | `string` | USX (Unified Scripture XML) |
 | `toUsfm()` | `string` | Normalized USFM |
 | `toVref()` | `Record<string, string>` | Verse reference to plain text map |

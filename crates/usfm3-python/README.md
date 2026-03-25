@@ -3,7 +3,7 @@
 `usfm3` is a Python parser for [USFM 3.x](https://docs.usfm.bible/usfm/3.1.1/index.html).
 It turns USFM into Python-friendly outputs:
 
-- `to_usj()`: [USJ](https://docs.usfm.bible/usfm/3.1.1/usj/index.html) as a `dict`
+- `to_usj(spans=False)`: [USJ](https://docs.usfm.bible/usfm/3.1.1/usj/index.html) as a `dict`
 - `to_usx()`: [USX](https://docs.usfm.bible/usfm/3.1.1/usx/index.html) as an XML `str`
 - `to_usfm()`: normalized USFM as a `str`
 - `to_vref()`: a verse-text map like `{"GEN 1:1": "In the beginning..."}`
@@ -43,6 +43,7 @@ for diagnostic in result.diagnostics:
     )
 
 usj = result.to_usj()
+usj_with_spans = result.to_usj(spans=True)
 usx = result.to_usx()
 normalized_usfm = result.to_usfm()
 ```
@@ -66,7 +67,7 @@ Parses a USFM string and returns a `ParseResult`.
 
 ### `ParseResult`
 
-- `to_usj() -> dict`
+- `to_usj(spans: bool = False) -> dict`
 - `to_usx() -> str`
 - `to_usfm() -> str`
 - `to_vref() -> dict[str, str]`
@@ -89,6 +90,7 @@ Each diagnostic has:
 
 - `to_vref()` returns plain verse text keyed by references such as `"GEN 1:1"`.
 - `to_usfm()` returns normalized USFM, so whitespace may be regularized.
+- When `spans=True`, structural USJ nodes include a nested `spans` object with `node` and optional `code`, `number`, and `close` ranges.
 - Invalid USFM is reported through `diagnostics`; `parse()` still returns a result.
 
 ## Related Packages

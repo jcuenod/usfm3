@@ -102,11 +102,17 @@ impl<'a> Validator<'a> {
 
     fn check_id_marker(&mut self, doc: &Document) {
         match doc.content.first() {
-            Some(Node::Book { code, span, .. }) => {
+            Some(Node::Book { code, .. }) => {
                 // Validate the book code (check 2).
                 if !is_valid_book_code(code) {
-                    self.diagnostics
-                        .push(Diagnostic::invalid_book_code(code, span.clone()));
+                    self.diagnostics.push(Diagnostic::invalid_book_code(
+                        code,
+                        doc.content
+                            .first()
+                            .and_then(Node::span)
+                            .cloned()
+                            .unwrap_or(0..0),
+                    ));
                 }
             }
             _ => {
@@ -128,10 +134,11 @@ impl<'a> Validator<'a> {
             // Find the second Book node and report it.
             let mut seen = false;
             for node in &doc.content {
-                if let Node::Book { span, .. } = node {
+                if let Node::Book { .. } = node {
                     if seen {
-                        self.diagnostics
-                            .push(Diagnostic::duplicate_id(span.clone()));
+                        self.diagnostics.push(Diagnostic::duplicate_id(
+                            node.span().cloned().unwrap_or(0..0),
+                        ));
                     }
                     seen = true;
                 }
@@ -146,20 +153,22 @@ impl<'a> Validator<'a> {
         let mut seen = HashSet::new();
 
         for node in &doc.content {
-            if let Node::Chapter { number, span, .. } = node
+            if let Node::Chapter { number, .. } = node
                 && let Ok(num) = number.parse::<u32>()
             {
                 // Duplicate check.
                 if !seen.insert(num) {
-                    self.diagnostics
-                        .push(Diagnostic::duplicate_chapter(num, span.clone()));
+                    self.diagnostics.push(Diagnostic::duplicate_chapter(
+                        num,
+                        node.span().cloned().unwrap_or(0..0),
+                    ));
                 }
                 // Sequence check.
                 if num != expected {
                     self.diagnostics.push(Diagnostic::invalid_chapter_sequence(
                         expected,
                         num,
-                        span.clone(),
+                        node.span().cloned().unwrap_or(0..0),
                     ));
                 }
                 expected = num + 1;
@@ -187,9 +196,10 @@ impl<'a> Validator<'a> {
 
     /// Recursively walk a node and its children looking for `Verse` nodes.
     fn check_verses_in_node(&mut self, node: &Node, expected_verse: &mut Option<u32>) {
-        if let Node::Verse { number, span, .. } = node {
+        if let Node::Verse { number, .. } = node {
             let start = parse_verse_start(number);
             let end = parse_verse_end(number);
+            let span = node.span().cloned().unwrap_or(0..0);
             if let Some(v_start) = start {
                 match *expected_verse {
                     Some(exp) if v_start != exp => {
@@ -231,14 +241,16 @@ impl<'a> Validator<'a> {
                 Node::Chapter { .. } => {
                     body_started = true;
                 }
-                Node::Para { marker, span, .. } => {
+                Node::Para { marker, .. } => {
                     let info = markers::lookup_marker(marker);
                     if info.kind == MarkerKind::Header
                         && body_started
                         && !is_body_header_marker(marker)
                     {
-                        self.diagnostics
-                            .push(Diagnostic::header_after_body(marker, span.clone()));
+                        self.diagnostics.push(Diagnostic::header_after_body(
+                            marker,
+                            node.span().cloned().unwrap_or(0..0),
+                        ));
                     }
                 }
                 _ => {}
@@ -255,14 +267,14 @@ impl<'a> Validator<'a> {
     }
 
     fn walk_note_submarkers(&mut self, node: &Node, inside_note: bool) {
-        if let Node::Char { marker, span, .. } = node
+        if let Node::Char { marker, .. } = node
             && !inside_note
             && is_note_only_marker(marker)
         {
             self.diagnostics
                 .push(Diagnostic::note_submarker_outside_note(
                     marker,
-                    span.clone(),
+                    node.span().cloned().unwrap_or(0..0),
                 ));
         }
 
@@ -315,14 +327,16 @@ impl<'a> Validator<'a> {
         ends: &mut HashMap<String, Vec<Span>>,
     ) {
         for node in nodes {
-            if let Node::Milestone { marker, span, .. } = node {
+            if let Node::Milestone { marker, .. } = node {
                 if let Some(base) = marker.strip_suffix("-s") {
                     starts
                         .entry(base.to_string())
                         .or_default()
-                        .push(span.clone());
+                        .push(node.span().cloned().unwrap_or(0..0));
                 } else if let Some(base) = marker.strip_suffix("-e") {
-                    ends.entry(base.to_string()).or_default().push(span.clone());
+                    ends.entry(base.to_string())
+                        .or_default()
+                        .push(node.span().cloned().unwrap_or(0..0));
                 }
             }
             self.collect_milestones(node.children(), starts, ends);
@@ -352,16 +366,15 @@ impl<'a> Validator<'a> {
 
     fn walk_char_crosses_verse(&mut self, node: &Node) {
         if let Node::Char {
-            marker,
-            content,
-            span,
-            ..
+            marker, content, ..
         } = node
         {
             let has_verse = content.iter().any(|n| matches!(n, Node::Verse { .. }));
             if has_verse {
-                self.diagnostics
-                    .push(Diagnostic::char_crosses_verse(marker, span.clone()));
+                self.diagnostics.push(Diagnostic::char_crosses_verse(
+                    marker,
+                    node.span().cloned().unwrap_or(0..0),
+                ));
             }
         }
         for child in node.children() {
@@ -381,7 +394,6 @@ impl<'a> Validator<'a> {
         if let Node::Figure {
             content,
             attributes,
-            span,
             ..
         } = node
         {
@@ -398,8 +410,9 @@ impl<'a> Validator<'a> {
                 .iter()
                 .any(|a| a.value.chars().any(|c| c != '|' && !c.is_whitespace()));
             if !has_text && !has_meaningful_attrs {
-                self.diagnostics
-                    .push(Diagnostic::empty_figure(span.clone()));
+                self.diagnostics.push(Diagnostic::empty_figure(
+                    node.span().cloned().unwrap_or(0..0),
+                ));
             }
         }
         for child in node.children() {
@@ -418,10 +431,7 @@ impl<'a> Validator<'a> {
     fn walk_attribute_rules(&mut self, node: &Node) {
         match node {
             Node::Char {
-                marker,
-                attributes,
-                span,
-                ..
+                marker, attributes, ..
             } => {
                 let clean_marker = marker.strip_prefix('+').unwrap_or(marker);
 
@@ -432,7 +442,7 @@ impl<'a> Validator<'a> {
                             .push(Diagnostic::missing_required_attribute(
                                 clean_marker,
                                 req,
-                                span.clone(),
+                                node.span().cloned().unwrap_or(0..0),
                             ));
                     }
                 }
@@ -444,24 +454,22 @@ impl<'a> Validator<'a> {
                     self.diagnostics
                         .push(Diagnostic::default_attribute_not_defined(
                             clean_marker,
-                            span.clone(),
+                            node.span().cloned().unwrap_or(0..0),
                         ));
                 }
 
                 // Check for whitespace-only attribute values.
                 for attr in attributes {
                     if !attr.value.is_empty() && attr.value.trim().is_empty() {
-                        self.diagnostics
-                            .push(Diagnostic::malformed_attributes(span.clone()));
+                        self.diagnostics.push(Diagnostic::malformed_attributes(
+                            node.span().cloned().unwrap_or(0..0),
+                        ));
                         break;
                     }
                 }
             }
             Node::Figure {
-                marker,
-                attributes,
-                span,
-                ..
+                marker, attributes, ..
             } => {
                 let clean_marker = marker.strip_prefix('+').unwrap_or(marker);
                 if attributes.iter().any(|a| a.key == "default")
@@ -470,7 +478,7 @@ impl<'a> Validator<'a> {
                     self.diagnostics
                         .push(Diagnostic::default_attribute_not_defined(
                             clean_marker,
-                            span.clone(),
+                            node.span().cloned().unwrap_or(0..0),
                         ));
                 }
             }
@@ -491,15 +499,14 @@ impl<'a> Validator<'a> {
 
     fn walk_non_empty_blank_line(&mut self, node: &Node) {
         if let Node::Para {
-            marker,
-            content,
-            span,
+            marker, content, ..
         } = node
             && marker == "b"
             && !content.is_empty()
         {
-            self.diagnostics
-                .push(Diagnostic::non_empty_blank_line(span.clone()));
+            self.diagnostics.push(Diagnostic::non_empty_blank_line(
+                node.span().cloned().unwrap_or(0..0),
+            ));
         }
         for child in node.children() {
             self.walk_non_empty_blank_line(child);
@@ -519,7 +526,7 @@ impl<'a> Validator<'a> {
             marker,
             content,
             attributes,
-            span,
+            ..
         } = node
         {
             let clean_marker = marker.strip_prefix('+').unwrap_or(marker);
@@ -532,8 +539,9 @@ impl<'a> Validator<'a> {
                     }
                 });
                 if !has_text && attributes.is_empty() {
-                    self.diagnostics
-                        .push(Diagnostic::empty_word_marker(span.clone()));
+                    self.diagnostics.push(Diagnostic::empty_word_marker(
+                        node.span().cloned().unwrap_or(0..0),
+                    ));
                 }
             }
         }
@@ -551,13 +559,13 @@ impl<'a> Validator<'a> {
                     // Reached the first chapter — stop checking.
                     return;
                 }
-                Node::Para { marker, span, .. } => {
+                Node::Para { marker, .. } => {
                     let info = markers::lookup_marker(marker);
                     if info.kind == MarkerKind::Paragraph && !is_introduction_marker(marker) {
                         self.diagnostics
                             .push(Diagnostic::body_paragraph_before_chapter(
                                 marker,
-                                span.clone(),
+                                node.span().cloned().unwrap_or(0..0),
                             ));
                     }
                 }
@@ -644,7 +652,7 @@ mod tests {
         let doc = doc_with(vec![Node::Para {
             marker: "p".into(),
             content: vec![],
-            span: 0..2,
+            spans: NodeSpans::node(0..2),
         }]);
         let diags = validate(&doc);
         assert!(diags.has_errors());
@@ -674,7 +682,7 @@ mod tests {
             marker: "id".into(),
             code: "GEN".into(),
             content: vec![],
-            span: 0..10,
+            spans: NodeSpans::node(0..10).with_code(0..0),
         }]);
         let diags = validate(&doc);
         assert!(
@@ -690,7 +698,7 @@ mod tests {
             marker: "id".into(),
             code: "XYZ".into(),
             content: vec![],
-            span: 0..10,
+            spans: NodeSpans::node(0..10).with_code(0..0),
         }]);
         let diags = validate(&doc);
         assert!(
@@ -709,7 +717,7 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -717,7 +725,7 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                span: 10..14,
+                spans: NodeSpans::node(10..14).with_number(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -725,7 +733,7 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                span: 20..24,
+                spans: NodeSpans::node(20..24).with_number(0..0),
             },
         ]);
         let diags = validate(&doc);
@@ -743,7 +751,7 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -751,7 +759,7 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                span: 10..14,
+                spans: NodeSpans::node(10..14).with_number(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -759,7 +767,7 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                span: 20..24,
+                spans: NodeSpans::node(20..24).with_number(0..0),
             },
         ]);
         let diags = validate(&doc);
@@ -777,7 +785,7 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -785,7 +793,7 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                span: 10..14,
+                spans: NodeSpans::node(10..14).with_number(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -793,7 +801,7 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                span: 20..24,
+                spans: NodeSpans::node(20..24).with_number(0..0),
             },
         ]);
         let diags = validate(&doc);
@@ -813,7 +821,7 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -821,7 +829,7 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                span: 10..14,
+                spans: NodeSpans::node(10..14).with_number(0..0),
             },
             Node::Para {
                 marker: "p".into(),
@@ -832,7 +840,7 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        span: 15..18,
+                        spans: NodeSpans::node(15..18).with_number(0..0),
                     },
                     Node::text("Text"),
                     Node::Verse {
@@ -841,11 +849,11 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        span: 25..28,
+                        spans: NodeSpans::node(25..28).with_number(0..0),
                     },
                     Node::text("More text"),
                 ],
-                span: 14..40,
+                spans: NodeSpans::node(14..40),
             },
         ]);
         let diags = validate(&doc);
@@ -863,7 +871,7 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -871,7 +879,7 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                span: 10..14,
+                spans: NodeSpans::node(10..14).with_number(0..0),
             },
             Node::Para {
                 marker: "p".into(),
@@ -882,7 +890,7 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        span: 15..18,
+                        spans: NodeSpans::node(15..18).with_number(0..0),
                     },
                     Node::Verse {
                         marker: "v".into(),
@@ -890,10 +898,10 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        span: 25..28,
+                        spans: NodeSpans::node(25..28).with_number(0..0),
                     },
                 ],
-                span: 14..40,
+                spans: NodeSpans::node(14..40),
             },
         ]);
         let diags = validate(&doc);
@@ -912,7 +920,7 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -920,7 +928,7 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                span: 10..14,
+                spans: NodeSpans::node(10..14).with_number(0..0),
             },
             Node::Para {
                 marker: "p".into(),
@@ -931,7 +939,7 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        span: 15..18,
+                        spans: NodeSpans::node(15..18).with_number(0..0),
                     },
                     Node::Verse {
                         marker: "v".into(),
@@ -939,7 +947,7 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        span: 19..22,
+                        spans: NodeSpans::node(19..22).with_number(0..0),
                     },
                     Node::Verse {
                         marker: "v".into(),
@@ -947,7 +955,7 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        span: 23..28,
+                        spans: NodeSpans::node(23..28).with_number(0..0),
                     },
                     Node::Verse {
                         marker: "v".into(),
@@ -955,10 +963,10 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        span: 29..32,
+                        spans: NodeSpans::node(29..32).with_number(0..0),
                     },
                 ],
-                span: 14..40,
+                spans: NodeSpans::node(14..40),
             },
         ]);
         let diags = validate(&doc);
@@ -976,7 +984,7 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -984,7 +992,7 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                span: 10..14,
+                spans: NodeSpans::node(10..14).with_number(0..0),
             },
             Node::Para {
                 marker: "p".into(),
@@ -995,7 +1003,7 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        span: 15..18,
+                        spans: NodeSpans::node(15..18).with_number(0..0),
                     },
                     Node::Verse {
                         marker: "v".into(),
@@ -1003,10 +1011,10 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        span: 19..22,
+                        spans: NodeSpans::node(19..22).with_number(0..0),
                     },
                 ],
-                span: 14..30,
+                spans: NodeSpans::node(14..30),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -1014,7 +1022,7 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                span: 30..34,
+                spans: NodeSpans::node(30..34).with_number(0..0),
             },
             Node::Para {
                 marker: "p".into(),
@@ -1024,9 +1032,9 @@ mod tests {
                     sid: None,
                     altnumber: None,
                     pubnumber: None,
-                    span: 35..38,
+                    spans: NodeSpans::node(35..38).with_number(0..0),
                 }],
-                span: 34..45,
+                spans: NodeSpans::node(34..45),
             },
         ]);
         let diags = validate(&doc);
@@ -1047,7 +1055,7 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 10..20,
+                spans: NodeSpans::node(10..20).with_code(0..0),
             },
         ]);
         let diags = validate(&doc);
@@ -1060,7 +1068,7 @@ mod tests {
             marker: "id".into(),
             code: "GEN".into(),
             content: vec![],
-            span: 0..10,
+            spans: NodeSpans::node(0..10).with_code(0..0),
         }]);
         let diags = validate(&doc);
         assert!(!diags.iter().any(|d| d.code == DiagnosticCode::TextBeforeId));
@@ -1075,7 +1083,7 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -1083,12 +1091,12 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                span: 10..14,
+                spans: NodeSpans::node(10..14).with_number(0..0),
             },
             Node::Para {
                 marker: "h".into(),
                 content: vec![Node::text("Genesis")],
-                span: 14..25,
+                spans: NodeSpans::node(14..25),
             },
         ]);
         let diags = validate(&doc);
@@ -1106,12 +1114,12 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Para {
                 marker: "h".into(),
                 content: vec![Node::text("Genesis")],
-                span: 10..21,
+                spans: NodeSpans::node(10..21),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -1119,7 +1127,7 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                span: 21..25,
+                spans: NodeSpans::node(21..25).with_number(0..0),
             },
         ]);
         let diags = validate(&doc);
@@ -1137,17 +1145,17 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Para {
                 marker: "rem".into(),
                 content: vec![Node::text("A remark")],
-                span: 10..25,
+                spans: NodeSpans::node(10..25),
             },
             Node::Para {
                 marker: "h".into(),
                 content: vec![Node::text("Genesis")],
-                span: 25..36,
+                spans: NodeSpans::node(25..36),
             },
         ]);
         let diags = validate(&doc);
@@ -1166,17 +1174,17 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Para {
                 marker: "ip".into(),
                 content: vec![Node::text("Introduction paragraph")],
-                span: 10..40,
+                spans: NodeSpans::node(10..40),
             },
             Node::Para {
                 marker: "h".into(),
                 content: vec![Node::text("Genesis")],
-                span: 40..51,
+                spans: NodeSpans::node(40..51),
             },
         ]);
         let diags = validate(&doc);
@@ -1195,12 +1203,12 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Para {
                 marker: "h".into(),
                 content: vec![Node::text("Genesis")],
-                span: 10..21,
+                spans: NodeSpans::node(10..21),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -1208,12 +1216,12 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                span: 21..25,
+                spans: NodeSpans::node(21..25).with_number(0..0),
             },
             Node::Para {
                 marker: "cl".into(),
                 content: vec![Node::text("Chapter One")],
-                span: 25..40,
+                spans: NodeSpans::node(25..40),
             },
         ]);
         let diags = validate(&doc);
@@ -1232,7 +1240,7 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -1240,17 +1248,17 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                span: 10..14,
+                spans: NodeSpans::node(10..14).with_number(0..0),
             },
             Node::Para {
                 marker: "p".into(),
                 content: vec![Node::text("Content")],
-                span: 14..25,
+                spans: NodeSpans::node(14..25),
             },
             Node::Para {
                 marker: "mte1".into(),
                 content: vec![Node::text("End of Genesis")],
-                span: 25..45,
+                spans: NodeSpans::node(25..45),
             },
         ]);
         let diags = validate(&doc);
@@ -1271,7 +1279,7 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Para {
                 marker: "p".into(),
@@ -1279,9 +1287,9 @@ mod tests {
                     marker: "ft".into(),
                     content: vec![Node::text("footnote text")],
                     attributes: vec![],
-                    span: 15..30,
+                    spans: NodeSpans::node(15..30),
                 }],
-                span: 10..35,
+                spans: NodeSpans::node(10..35),
             },
         ]);
         let diags = validate(&doc);
@@ -1299,7 +1307,7 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Para {
                 marker: "p".into(),
@@ -1311,11 +1319,11 @@ mod tests {
                         marker: "ft".into(),
                         content: vec![Node::text("footnote text")],
                         attributes: vec![],
-                        span: 20..35,
+                        spans: NodeSpans::node(20..35),
                     }],
-                    span: 15..40,
+                    spans: NodeSpans::node(15..40),
                 }],
-                span: 10..45,
+                spans: NodeSpans::node(10..45),
             },
         ]);
         let diags = validate(&doc);
@@ -1334,7 +1342,7 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Para {
                 marker: "p".into(),
@@ -1342,9 +1350,9 @@ mod tests {
                     marker: "nd".into(),
                     content: vec![Node::text("Lord")],
                     attributes: vec![],
-                    span: 15..25,
+                    spans: NodeSpans::node(15..25),
                 }],
-                span: 10..30,
+                spans: NodeSpans::node(10..30),
             },
         ]);
         let diags = validate(&doc);
@@ -1364,17 +1372,17 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Milestone {
                 marker: "qt1-s".into(),
                 attributes: vec![],
-                span: 10..20,
+                spans: NodeSpans::node(10..20),
             },
             Node::Milestone {
                 marker: "qt1-e".into(),
                 attributes: vec![],
-                span: 30..40,
+                spans: NodeSpans::node(30..40),
             },
         ]);
         let diags = validate(&doc);
@@ -1392,12 +1400,12 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Milestone {
                 marker: "qt1-s".into(),
                 attributes: vec![],
-                span: 10..20,
+                spans: NodeSpans::node(10..20),
             },
         ]);
         let diags = validate(&doc);
@@ -1415,12 +1423,12 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Milestone {
                 marker: "qt1-e".into(),
                 attributes: vec![],
-                span: 10..20,
+                spans: NodeSpans::node(10..20),
             },
         ]);
         let diags = validate(&doc);
@@ -1440,7 +1448,7 @@ mod tests {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                span: 0..10,
+                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -1448,7 +1456,7 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                span: 10..14,
+                spans: NodeSpans::node(10..14).with_number(0..0),
             },
             Node::Para {
                 marker: "p".into(),
@@ -1459,11 +1467,11 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        span: 15..18,
+                        spans: NodeSpans::node(15..18).with_number(0..0),
                     },
                     Node::text("In the beginning"),
                 ],
-                span: 14..40,
+                spans: NodeSpans::node(14..40),
             },
         ]);
         let diags = validate(&doc);

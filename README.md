@@ -63,6 +63,15 @@ for diag in result.diagnostics.iter() {
 let usj = usfm3::usj::to_usj_string_pretty(&result.document).unwrap();
 println!("{usj}");
 
+// Include source spans for editor tooling
+let usj_with_spans = usfm3::usj::to_usj_string_pretty_with_options(
+    &result.document,
+    usfm3::usj::UsjOptions {
+        include_spans: true,
+    },
+)
+.unwrap();
+
 // Output as USX (XML)
 let usx = usfm3::usx::to_usx_string(&result.document).unwrap();
 
@@ -83,10 +92,11 @@ import usfm3
 result = usfm3.parse(open("GEN.usfm").read())
 
 # Output formats
-usj = result.to_usj()       # dict
-usx = result.to_usx()       # XML string
-usfm = result.to_usfm()     # USFM string
-vref = result.to_vref()     # {"GEN 1:1": "In the beginning...", ...}
+usj = result.to_usj()              # dict
+usj_with_spans = result.to_usj(spans=True)
+usx = result.to_usx()              # XML string
+usfm = result.to_usfm()            # USFM string
+vref = result.to_vref()            # {"GEN 1:1": "In the beginning...", ...}
 
 # Diagnostics
 for d in result.diagnostics:
@@ -124,6 +134,7 @@ const result = parse(usfmText);
 
 // Output formats (lazy -- only serialized when called)
 const usj = result.toUsj();    // USJ object
+const usjWithSpans = result.toUsj({ spans: true });
 const usx = result.toUsx();    // USX XML string
 const usfm = result.toUsfm();  // Normalized USFM string
 const vref = result.toVref();  // Vref pairs like { "GEN 1:1": "In the beginning...", ... }
@@ -177,10 +188,12 @@ Validation is a separate pass over the AST that checks semantic rules without mo
 
 | Format | Function | Description |
 |--------|----------|-------------|
-| USJ | `usj::to_usj_string()` | Unified Scripture JSON -- the standard JSON representation |
+| USJ | `usj::to_usj_string()` / `usj::to_usj_string_with_options()` | Unified Scripture JSON; optional nested source spans for editor tooling |
 | USX | `usx::to_usx_string()` | Unified Scripture XML -- the standard XML representation |
 | USFM | `usfm::to_usfm_string()` | Normalized USFM with regularized whitespace |
 | VRef | `vref::to_vref_json_string()` | Verse reference to plain text map (strips formatting/notes) |
+
+When USJ spans are enabled, each structural node includes a `spans` object with a required `node` range and optional `code`, `number`, and `close` ranges.
 
 ## License
 

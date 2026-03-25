@@ -4,11 +4,57 @@ use serde::Serialize;
 pub type Span = std::ops::Range<usize>;
 
 // ---------------------------------------------------------------------------
+// Node metadata
+// ---------------------------------------------------------------------------
+
+/// Source-location metadata attached to a structural node.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+pub struct NodeSpans {
+    pub node: Span,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<Span>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub number: Option<Span>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub close: Option<Span>,
+}
+
+impl NodeSpans {
+    /// Create metadata with only the primary node span populated.
+    pub fn node(span: Span) -> Self {
+        Self {
+            node: span,
+            code: None,
+            number: None,
+            close: None,
+        }
+    }
+
+    /// Attach a book-code span.
+    pub fn with_code(mut self, span: Span) -> Self {
+        self.code = Some(span);
+        self
+    }
+
+    /// Attach a chapter/verse-number span.
+    pub fn with_number(mut self, span: Span) -> Self {
+        self.number = Some(span);
+        self
+    }
+
+    /// Attach an explicit close-marker span.
+    pub fn with_close(mut self, span: Span) -> Self {
+        self.close = Some(span);
+        self
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Top-level document
 // ---------------------------------------------------------------------------
 
 /// The top-level document.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Document {
     pub content: Vec<Node>,
 }
@@ -36,191 +82,131 @@ impl Default for Document {
 ///
 /// Modeled after the USJ (Unified Scripture JSON) specification so that
 /// conversion to both USX (XML) and USJ (JSON) is straightforward.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "type")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Node {
     /// `\id` -- book identification.
-    #[serde(rename = "book")]
     Book {
         marker: String,
         code: String,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
         content: Vec<Node>,
-        #[serde(skip)]
-        span: Span,
+        spans: NodeSpans,
     },
 
     /// `\c` -- chapter milestone (NOT a container).
-    #[serde(rename = "chapter")]
     Chapter {
         marker: String,
         number: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
         sid: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
         altnumber: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
         pubnumber: Option<String>,
-        #[serde(skip)]
-        span: Span,
+        spans: NodeSpans,
     },
 
     /// `\v` -- verse milestone (NOT a container).
-    #[serde(rename = "verse")]
     Verse {
         marker: String,
         number: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
         sid: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
         altnumber: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
         pubnumber: Option<String>,
-        #[serde(skip)]
-        span: Span,
+        spans: NodeSpans,
     },
 
     /// `\p`, `\q1`, `\m`, `\li1`, `\b`, etc. -- paragraph-level container.
-    #[serde(rename = "para")]
     Para {
         marker: String,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
         content: Vec<Node>,
-        #[serde(skip)]
-        span: Span,
+        spans: NodeSpans,
     },
 
     /// `\nd`, `\bk`, `\add`, `\it`, etc. -- character-level container.
-    #[serde(rename = "char")]
     Char {
         marker: String,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
         content: Vec<Node>,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
         attributes: Vec<Attribute>,
-        #[serde(skip)]
-        span: Span,
+        spans: NodeSpans,
     },
 
     /// `\f`, `\x` -- footnote or cross-reference container.
-    #[serde(rename = "note")]
     Note {
         marker: String,
         caller: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
         category: Option<String>,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
         content: Vec<Node>,
-        #[serde(skip)]
-        span: Span,
+        spans: NodeSpans,
     },
 
     /// `\qt1-s`, `\qt1-e`, `\ts-s`, etc. -- milestone (empty element with attributes).
-    #[serde(rename = "ms")]
     Milestone {
         marker: String,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
         attributes: Vec<Attribute>,
-        #[serde(skip)]
-        span: Span,
+        spans: NodeSpans,
     },
 
     /// `\fig` -- figure with attributes.
-    #[serde(rename = "figure")]
     Figure {
         marker: String,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
         content: Vec<Node>,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
         attributes: Vec<Attribute>,
-        #[serde(skip)]
-        span: Span,
+        spans: NodeSpans,
     },
 
     /// `\esb` ... `\esbe` -- sidebar container.
-    #[serde(rename = "sidebar")]
     Sidebar {
         marker: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
         category: Option<String>,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
         content: Vec<Node>,
-        #[serde(skip)]
-        span: Span,
+        spans: NodeSpans,
     },
 
     /// `\periph` -- peripheral content section.
-    #[serde(rename = "periph")]
     Periph {
-        #[serde(skip_serializing_if = "Option::is_none")]
         alt: Option<String>,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
         content: Vec<Node>,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
         attributes: Vec<Attribute>,
-        #[serde(skip)]
-        span: Span,
+        spans: NodeSpans,
     },
 
     /// Table container wrapping consecutive `\tr` rows.
-    #[serde(rename = "table")]
     Table {
-        #[serde(skip_serializing_if = "Vec::is_empty")]
         content: Vec<Node>,
-        #[serde(skip)]
-        span: Span,
+        spans: NodeSpans,
     },
 
     /// `\tr` -- table row container.
-    #[serde(rename = "table:row")]
     TableRow {
         marker: String,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
         content: Vec<Node>,
-        #[serde(skip)]
-        span: Span,
+        spans: NodeSpans,
     },
 
     /// `\th1`, `\tc2`, etc. -- table cell.
-    #[serde(rename = "table:cell")]
     TableCell {
         marker: String,
         align: String,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
         content: Vec<Node>,
-        #[serde(skip)]
-        span: Span,
+        spans: NodeSpans,
     },
 
     /// `\ref` -- scripture reference with target location.
-    #[serde(rename = "ref")]
     Ref {
-        #[serde(skip_serializing_if = "Vec::is_empty")]
         content: Vec<Node>,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
         attributes: Vec<Attribute>,
-        #[serde(skip)]
-        span: Span,
+        spans: NodeSpans,
     },
 
     /// Unrecognized marker (from `\z` namespace or genuinely unknown).
     /// Preserved so no data is lost.
-    #[serde(rename = "unknown")]
     Unknown {
         marker: String,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
         content: Vec<Node>,
-        #[serde(skip)]
-        span: Span,
+        spans: NodeSpans,
     },
 
     /// `//` -- optional line break.
-    #[serde(rename = "optbreak")]
     OptBreak,
 
-    /// Plain text content -- serialized as a bare string in USJ.
-    /// Must be the last variant because of `#[serde(untagged)]`.
-    #[serde(untagged)]
+    /// Plain text content.
     Text(String),
 }
 
@@ -326,22 +312,49 @@ impl Node {
     ///
     /// Returns `None` for [`Node::Text`].
     pub fn span(&self) -> Option<&Span> {
+        self.spans().map(|spans| &spans.node)
+    }
+
+    /// Returns the full source metadata if the node has it.
+    pub fn spans(&self) -> Option<&NodeSpans> {
         match self {
-            Node::Book { span, .. }
-            | Node::Chapter { span, .. }
-            | Node::Verse { span, .. }
-            | Node::Para { span, .. }
-            | Node::Char { span, .. }
-            | Node::Note { span, .. }
-            | Node::Milestone { span, .. }
-            | Node::Figure { span, .. }
-            | Node::Sidebar { span, .. }
-            | Node::Periph { span, .. }
-            | Node::Table { span, .. }
-            | Node::TableRow { span, .. }
-            | Node::TableCell { span, .. }
-            | Node::Ref { span, .. }
-            | Node::Unknown { span, .. } => Some(span),
+            Node::Book { spans, .. }
+            | Node::Chapter { spans, .. }
+            | Node::Verse { spans, .. }
+            | Node::Para { spans, .. }
+            | Node::Char { spans, .. }
+            | Node::Note { spans, .. }
+            | Node::Milestone { spans, .. }
+            | Node::Figure { spans, .. }
+            | Node::Sidebar { spans, .. }
+            | Node::Periph { spans, .. }
+            | Node::Table { spans, .. }
+            | Node::TableRow { spans, .. }
+            | Node::TableCell { spans, .. }
+            | Node::Ref { spans, .. }
+            | Node::Unknown { spans, .. } => Some(spans),
+            Node::OptBreak | Node::Text(_) => None,
+        }
+    }
+
+    /// Returns mutable source metadata if the node has it.
+    pub fn spans_mut(&mut self) -> Option<&mut NodeSpans> {
+        match self {
+            Node::Book { spans, .. }
+            | Node::Chapter { spans, .. }
+            | Node::Verse { spans, .. }
+            | Node::Para { spans, .. }
+            | Node::Char { spans, .. }
+            | Node::Note { spans, .. }
+            | Node::Milestone { spans, .. }
+            | Node::Figure { spans, .. }
+            | Node::Sidebar { spans, .. }
+            | Node::Periph { spans, .. }
+            | Node::Table { spans, .. }
+            | Node::TableRow { spans, .. }
+            | Node::TableCell { spans, .. }
+            | Node::Ref { spans, .. }
+            | Node::Unknown { spans, .. } => Some(spans),
             Node::OptBreak | Node::Text(_) => None,
         }
     }
@@ -354,9 +367,29 @@ impl Node {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{Value, json};
+    use crate::usj::{to_usj_value, to_usj_value_with_options, UsjOptions};
+    use serde_json::{json, Value};
 
-    // -- Construction helpers ------------------------------------------------
+    fn node_value(node: Node) -> Value {
+        to_usj_value(&Document {
+            content: vec![node],
+        })
+        .unwrap()["content"][0]
+            .clone()
+    }
+
+    fn node_value_with_spans(node: Node) -> Value {
+        to_usj_value_with_options(
+            &Document {
+                content: vec![node],
+            },
+            UsjOptions {
+                include_spans: true,
+            },
+        )
+        .unwrap()["content"][0]
+            .clone()
+    }
 
     #[test]
     fn create_document() {
@@ -370,11 +403,12 @@ mod tests {
             marker: "id".into(),
             code: "GEN".into(),
             content: vec![],
-            span: 0..5,
+            spans: NodeSpans::node(0..5).with_code(0..3),
         };
         assert_eq!(node.marker(), Some("id"));
         assert_eq!(node.span(), Some(&(0..5)));
         assert!(node.children().is_empty());
+        assert_eq!(node.spans().unwrap().code, Some(0..3));
     }
 
     #[test]
@@ -385,13 +419,13 @@ mod tests {
             sid: Some("GEN 1".into()),
             altnumber: None,
             pubnumber: None,
-            span: 10..14,
+            spans: NodeSpans::node(10..14).with_number(12..13),
         };
         assert_eq!(node.marker(), Some("c"));
         assert_eq!(node.span(), Some(&(10..14)));
-        // Chapter is a milestone: no children.
         assert!(node.children().is_empty());
         assert!(node.children_mut().is_none());
+        assert_eq!(node.spans().unwrap().number, Some(12..13));
     }
 
     #[test]
@@ -402,10 +436,11 @@ mod tests {
             sid: Some("GEN 1:3-4".into()),
             altnumber: None,
             pubnumber: None,
-            span: 20..25,
+            spans: NodeSpans::node(20..25).with_number(22..25),
         };
         assert_eq!(node.marker(), Some("v"));
         assert!(node.children().is_empty());
+        assert_eq!(node.spans().unwrap().number, Some(22..25));
     }
 
     #[test]
@@ -413,7 +448,7 @@ mod tests {
         let node = Node::Para {
             marker: "p".into(),
             content: vec![Node::text("Hello world")],
-            span: 30..50,
+            spans: NodeSpans::node(30..50),
         };
         assert_eq!(node.marker(), Some("p"));
         assert_eq!(node.children().len(), 1);
@@ -425,10 +460,11 @@ mod tests {
             marker: "nd".into(),
             content: vec![Node::text("Lord")],
             attributes: vec![],
-            span: 40..55,
+            spans: NodeSpans::node(40..55).with_close(53..55),
         };
         assert_eq!(node.marker(), Some("nd"));
         assert_eq!(node.children().len(), 1);
+        assert_eq!(node.spans().unwrap().close, Some(53..55));
     }
 
     #[test]
@@ -438,10 +474,11 @@ mod tests {
             caller: "+".into(),
             category: None,
             content: vec![Node::text("A footnote.")],
-            span: 60..80,
+            spans: NodeSpans::node(60..80).with_close(78..80),
         };
         assert_eq!(node.marker(), Some("f"));
         assert_eq!(node.children().len(), 1);
+        assert_eq!(node.spans().unwrap().close, Some(78..80));
     }
 
     #[test]
@@ -452,7 +489,7 @@ mod tests {
                 key: "who".into(),
                 value: "Jesus".into(),
             }],
-            span: 90..100,
+            spans: NodeSpans::node(90..100),
         };
         assert_eq!(node.marker(), Some("qt1-s"));
         assert!(node.children().is_empty());
@@ -473,10 +510,11 @@ mod tests {
                     value: "Description".into(),
                 },
             ],
-            span: 100..130,
+            spans: NodeSpans::node(100..130).with_close(125..130),
         };
         assert_eq!(node.marker(), Some("fig"));
         assert_eq!(node.children().len(), 1);
+        assert_eq!(node.spans().unwrap().close, Some(125..130));
     }
 
     #[test]
@@ -487,21 +525,22 @@ mod tests {
             content: vec![Node::Para {
                 marker: "p".into(),
                 content: vec![Node::text("Sidebar content")],
-                span: 140..160,
+                spans: NodeSpans::node(140..160),
             }],
-            span: 135..170,
+            spans: NodeSpans::node(135..170).with_close(166..170),
         };
         assert_eq!(node.marker(), Some("esb"));
         assert_eq!(node.children().len(), 1);
+        assert_eq!(node.spans().unwrap().close, Some(166..170));
     }
 
     #[test]
     fn create_text_node() {
-        let mut node = Node::text("In the beginning");
+        let node = Node::text("In the beginning");
         assert_eq!(node.marker(), None);
         assert_eq!(node.span(), None);
         assert!(node.children().is_empty());
-        assert!(node.children_mut().is_none());
+        assert!(matches!(node, Node::Text(_)));
     }
 
     #[test]
@@ -509,13 +548,12 @@ mod tests {
         let node = Node::Unknown {
             marker: "zcustom".into(),
             content: vec![Node::text("custom data")],
-            span: 200..220,
+            spans: NodeSpans::node(200..220).with_close(218..220),
         };
         assert_eq!(node.marker(), Some("zcustom"));
         assert_eq!(node.children().len(), 1);
+        assert_eq!(node.spans().unwrap().close, Some(218..220));
     }
-
-    // -- Helper methods ------------------------------------------------------
 
     #[test]
     fn text_shorthand() {
@@ -534,7 +572,7 @@ mod tests {
         let mut node = Node::Para {
             marker: "p".into(),
             content: vec![],
-            span: 0..1,
+            spans: NodeSpans::node(0..1),
         };
         let kids = node.children_mut().unwrap();
         kids.push(Node::text("appended"));
@@ -549,7 +587,7 @@ mod tests {
             sid: None,
             altnumber: None,
             pubnumber: None,
-            span: 0..3,
+            spans: NodeSpans::node(0..3).with_number(2..3),
         };
         assert!(node.children_mut().is_none());
     }
@@ -564,7 +602,37 @@ mod tests {
         assert_eq!(Node::text("x").span(), None);
     }
 
-    // -- Serialization (USJ-like JSON) ---------------------------------------
+    #[test]
+    fn node_spans_builders_attach_optional_metadata() {
+        let spans = NodeSpans::node(10..20)
+            .with_code(11..14)
+            .with_number(15..16)
+            .with_close(18..20);
+
+        assert_eq!(spans.node, 10..20);
+        assert_eq!(spans.code, Some(11..14));
+        assert_eq!(spans.number, Some(15..16));
+        assert_eq!(spans.close, Some(18..20));
+    }
+
+    #[test]
+    fn spans_mut_allows_updating_subspans() {
+        let mut node = Node::Sidebar {
+            marker: "esb".into(),
+            category: None,
+            content: vec![Node::Para {
+                marker: "p".into(),
+                content: vec![Node::text("Sidebar")],
+                spans: NodeSpans::node(5..15),
+            }],
+            spans: NodeSpans::node(0..20),
+        };
+
+        node.spans_mut().unwrap().close = Some(18..20);
+
+        assert_eq!(node.spans().unwrap().close, Some(18..20));
+        assert_eq!(node.children().len(), 1);
+    }
 
     #[test]
     fn serialize_document_to_usj() {
@@ -574,7 +642,7 @@ mod tests {
                     marker: "id".into(),
                     code: "GEN".into(),
                     content: vec![Node::text("Genesis")],
-                    span: 0..20,
+                    spans: NodeSpans::node(0..20).with_code(0..3),
                 },
                 Node::Chapter {
                     marker: "c".into(),
@@ -582,7 +650,7 @@ mod tests {
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                    span: 20..25,
+                    spans: NodeSpans::node(20..25).with_number(22..23),
                 },
                 Node::Para {
                     marker: "p".into(),
@@ -593,48 +661,40 @@ mod tests {
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                            span: 30..33,
+                            spans: NodeSpans::node(30..33).with_number(32..33),
                         },
                         Node::text("In the beginning God created the heavens and the earth."),
                     ],
-                    span: 25..90,
+                    spans: NodeSpans::node(25..90),
                 },
             ],
         };
 
-        let value: Value = serde_json::to_value(&doc).unwrap();
+        let value = to_usj_value(&doc).unwrap();
 
-        // Top-level structure
         assert!(value["content"].is_array());
-
-        // Book node
         let book = &value["content"][0];
         assert_eq!(book["type"], "book");
         assert_eq!(book["marker"], "id");
         assert_eq!(book["code"], "GEN");
         assert_eq!(book["content"][0], "Genesis");
 
-        // Chapter node
         let chapter = &value["content"][1];
         assert_eq!(chapter["type"], "chapter");
         assert_eq!(chapter["marker"], "c");
         assert_eq!(chapter["number"], "1");
         assert_eq!(chapter["sid"], "GEN 1");
-        // span must NOT appear in JSON
-        assert!(chapter.get("span").is_none());
+        assert!(chapter.get("spans").is_none());
 
-        // Para node
         let para = &value["content"][2];
         assert_eq!(para["type"], "para");
         assert_eq!(para["marker"], "p");
 
-        // Verse inside para
         let verse = &para["content"][0];
         assert_eq!(verse["type"], "verse");
         assert_eq!(verse["number"], "1");
         assert_eq!(verse["sid"], "GEN 1:1");
 
-        // Text inside para (untagged -- bare string)
         let text = &para["content"][1];
         assert_eq!(
             text,
@@ -643,8 +703,25 @@ mod tests {
     }
 
     #[test]
+    fn serialize_document_with_spans() {
+        let value = node_value_with_spans(Node::Book {
+            marker: "id".into(),
+            code: "GEN".into(),
+            content: vec![],
+            spans: NodeSpans::node(0..10).with_code(0..3),
+        });
+
+        let spans = &value["spans"];
+        assert_eq!(spans["node"]["start"], 0);
+        assert_eq!(spans["node"]["end"], 10);
+        assert_eq!(spans["code"]["start"], 0);
+        assert_eq!(spans["code"]["end"], 3);
+        assert!(spans.get("number").is_none());
+    }
+
+    #[test]
     fn serialize_note_to_json() {
-        let note = Node::Note {
+        let value = node_value(Node::Note {
             marker: "f".into(),
             caller: "+".into(),
             category: None,
@@ -653,19 +730,18 @@ mod tests {
                     marker: "fr".into(),
                     content: vec![Node::text("1.1")],
                     attributes: vec![],
-                    span: 0..5,
+                    spans: NodeSpans::node(0..5),
                 },
                 Node::Char {
                     marker: "ft".into(),
                     content: vec![Node::text("Some manuscripts read ...")],
                     attributes: vec![],
-                    span: 5..30,
+                    spans: NodeSpans::node(5..30),
                 },
             ],
-            span: 0..35,
-        };
+            spans: NodeSpans::node(0..35),
+        });
 
-        let value: Value = serde_json::to_value(&note).unwrap();
         assert_eq!(value["type"], "note");
         assert_eq!(value["marker"], "f");
         assert_eq!(value["caller"], "+");
@@ -674,16 +750,15 @@ mod tests {
 
     #[test]
     fn serialize_milestone_to_json() {
-        let ms = Node::Milestone {
+        let value = node_value(Node::Milestone {
             marker: "qt1-s".into(),
             attributes: vec![Attribute {
                 key: "who".into(),
                 value: "Jesus".into(),
             }],
-            span: 0..10,
-        };
+            spans: NodeSpans::node(0..10),
+        });
 
-        let value: Value = serde_json::to_value(&ms).unwrap();
         assert_eq!(value["type"], "ms");
         assert_eq!(value["marker"], "qt1-s");
         assert_eq!(value["attributes"][0]["key"], "who");
@@ -692,17 +767,16 @@ mod tests {
 
     #[test]
     fn serialize_figure_to_json() {
-        let fig = Node::Figure {
+        let value = node_value(Node::Figure {
             marker: "fig".into(),
             content: vec![Node::text("A beautiful landscape")],
             attributes: vec![Attribute {
                 key: "src".into(),
                 value: "landscape.jpg".into(),
             }],
-            span: 0..50,
-        };
+            spans: NodeSpans::node(0..50),
+        });
 
-        let value: Value = serde_json::to_value(&fig).unwrap();
         assert_eq!(value["type"], "figure");
         assert_eq!(value["marker"], "fig");
         assert_eq!(value["content"][0], "A beautiful landscape");
@@ -711,13 +785,12 @@ mod tests {
 
     #[test]
     fn serialize_unknown_to_json() {
-        let node = Node::Unknown {
+        let value = node_value(Node::Unknown {
             marker: "zcustom".into(),
             content: vec![Node::text("data")],
-            span: 0..15,
-        };
+            spans: NodeSpans::node(0..15),
+        });
 
-        let value: Value = serde_json::to_value(&node).unwrap();
         assert_eq!(value["type"], "unknown");
         assert_eq!(value["marker"], "zcustom");
         assert_eq!(value["content"][0], "data");
@@ -725,52 +798,54 @@ mod tests {
 
     #[test]
     fn serialize_empty_content_omitted() {
-        let para = Node::Para {
+        let value = node_value(Node::Para {
             marker: "b".into(),
             content: vec![],
-            span: 0..3,
-        };
+            spans: NodeSpans::node(0..3),
+        });
 
-        let value: Value = serde_json::to_value(&para).unwrap();
         assert_eq!(value["type"], "para");
         assert_eq!(value["marker"], "b");
-        // Empty content should be omitted
         assert!(value.get("content").is_none());
     }
 
     #[test]
     fn serialize_optional_sid_omitted_when_none() {
-        let verse = Node::Verse {
+        let value = node_value(Node::Verse {
             marker: "v".into(),
             number: "1".into(),
             sid: None,
             altnumber: None,
             pubnumber: None,
-            span: 0..3,
-        };
+            spans: NodeSpans::node(0..3).with_number(2..3),
+        });
 
-        let value: Value = serde_json::to_value(&verse).unwrap();
         assert_eq!(value["type"], "verse");
         assert!(value.get("sid").is_none());
     }
 
     #[test]
     fn serialize_text_as_bare_string() {
-        let text = Node::text("plain text");
-        let value: Value = serde_json::to_value(&text).unwrap();
-        assert_eq!(value, json!("plain text"));
+        let value = to_usj_value(&Document {
+            content: vec![Node::Para {
+                marker: "p".into(),
+                content: vec![Node::text("plain text")],
+                spans: NodeSpans::node(0..10),
+            }],
+        })
+        .unwrap();
+        assert_eq!(value["content"][0]["content"][0], json!("plain text"));
     }
 
     #[test]
     fn serialize_char_to_json() {
-        let node = Node::Char {
+        let value = node_value(Node::Char {
             marker: "nd".into(),
             content: vec![Node::text("Lord")],
             attributes: vec![],
-            span: 0..10,
-        };
+            spans: NodeSpans::node(0..10),
+        });
 
-        let value: Value = serde_json::to_value(&node).unwrap();
         assert_eq!(value["type"], "char");
         assert_eq!(value["marker"], "nd");
         assert_eq!(value["content"][0], "Lord");
@@ -778,28 +853,24 @@ mod tests {
 
     #[test]
     fn serialize_sidebar_to_json() {
-        let node = Node::Sidebar {
+        let value = node_value(Node::Sidebar {
             marker: "esb".into(),
             category: None,
             content: vec![Node::Para {
                 marker: "p".into(),
                 content: vec![Node::text("Sidebar text")],
-                span: 5..20,
+                spans: NodeSpans::node(5..20),
             }],
-            span: 0..25,
-        };
+            spans: NodeSpans::node(0..25),
+        });
 
-        let value: Value = serde_json::to_value(&node).unwrap();
         assert_eq!(value["type"], "sidebar");
         assert_eq!(value["marker"], "esb");
         assert_eq!(value["content"].as_array().unwrap().len(), 1);
     }
 
-    // -- Span type -----------------------------------------------------------
-
     #[test]
     fn span_is_std_range() {
-        // Confirm that Span is exactly std::ops::Range<usize>.
         let s: Span = 10..20;
         assert_eq!(s.start, 10);
         assert_eq!(s.end, 20);

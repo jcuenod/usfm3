@@ -412,7 +412,7 @@ mod tests {
                     marker: "id".into(),
                     code: "GEN".into(),
                     content: vec![Node::text("Genesis")],
-                    span: 0..20,
+                    spans: NodeSpans::node(0..20).with_code(0..0),
                 },
                 Node::Chapter {
                     marker: "c".into(),
@@ -420,7 +420,7 @@ mod tests {
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                    span: 20..25,
+                    spans: NodeSpans::node(20..25).with_number(0..0),
                 },
                 Node::Para {
                     marker: "p".into(),
@@ -431,11 +431,11 @@ mod tests {
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                            span: 30..33,
+                            spans: NodeSpans::node(30..33).with_number(0..0),
                         },
                         Node::text("In the beginning God created the heavens and the earth."),
                     ],
-                    span: 25..90,
+                    spans: NodeSpans::node(25..90),
                 },
             ],
         };
@@ -458,11 +458,11 @@ mod tests {
                         marker: "nd".into(),
                         content: vec![Node::text("Lord")],
                         attributes: vec![],
-                        span: 5..15,
+                        spans: NodeSpans::node(5..15),
                     },
                     Node::text(" spoke."),
                 ],
-                span: 0..25,
+                spans: NodeSpans::node(0..25),
             }],
         };
         let usfm = to_usfm_string(&doc);
@@ -485,20 +485,20 @@ mod tests {
                                 marker: "fr".into(),
                                 content: vec![Node::text("1.1")],
                                 attributes: vec![],
-                                span: 5..10,
+                                spans: NodeSpans::node(5..10),
                             },
                             Node::Char {
                                 marker: "ft".into(),
                                 content: vec![Node::text("A note")],
                                 attributes: vec![],
-                                span: 10..20,
+                                spans: NodeSpans::node(10..20),
                             },
                         ],
-                        span: 0..25,
+                        spans: NodeSpans::node(0..25),
                     },
                     Node::text(" more text"),
                 ],
-                span: 0..40,
+                spans: NodeSpans::node(0..40),
             }],
         };
         let usfm = to_usfm_string(&doc);
@@ -520,16 +520,16 @@ mod tests {
                             sid: None,
                             altnumber: None,
                             pubnumber: None,
-                            span: 0..3,
+                            spans: NodeSpans::node(0..3).with_number(0..0),
                         },
                         Node::text("O Lord, I have heard of what you have done,"),
                     ],
-                    span: 0..50,
+                    spans: NodeSpans::node(0..50),
                 },
                 Node::Para {
                     marker: "q2".into(),
                     content: vec![Node::text("and I am filled with awe.")],
-                    span: 50..80,
+                    spans: NodeSpans::node(50..80),
                 },
             ],
         };
@@ -547,9 +547,9 @@ mod tests {
                 content: vec![Node::Para {
                     marker: "p".into(),
                     content: vec![Node::text("Sidebar content")],
-                    span: 5..25,
+                    spans: NodeSpans::node(5..25),
                 }],
-                span: 0..30,
+                spans: NodeSpans::node(0..30),
             }],
         };
         let usfm = to_usfm_string(&doc);
@@ -571,7 +571,7 @@ mod tests {
             content: vec![Node::Para {
                 marker: "b".into(),
                 content: vec![],
-                span: 0..2,
+                spans: NodeSpans::node(0..2),
             }],
         };
         let usfm = to_usfm_string(&doc);
@@ -589,9 +589,9 @@ mod tests {
                         key: "who".into(),
                         value: "Jesus".into(),
                     }],
-                    span: 0..15,
+                    spans: NodeSpans::node(0..15),
                 }],
-                span: 0..20,
+                spans: NodeSpans::node(0..20),
             }],
         };
         let usfm = to_usfm_string(&doc);
@@ -606,9 +606,9 @@ mod tests {
                 content: vec![Node::Milestone {
                     marker: "qt1-e".into(),
                     attributes: vec![],
-                    span: 0..8,
+                    spans: NodeSpans::node(0..8),
                 }],
-                span: 0..12,
+                spans: NodeSpans::node(0..12),
             }],
         };
         let usfm = to_usfm_string(&doc);
@@ -627,9 +627,9 @@ mod tests {
                         key: "src".into(),
                         value: "image.jpg".into(),
                     }],
-                    span: 0..30,
+                    spans: NodeSpans::node(0..30),
                 }],
-                span: 0..35,
+                spans: NodeSpans::node(0..35),
             }],
         };
         let usfm = to_usfm_string(&doc);
@@ -644,9 +644,9 @@ mod tests {
                 content: vec![Node::Unknown {
                     marker: "zcustom".into(),
                     content: vec![Node::text("data")],
-                    span: 0..15,
+                    spans: NodeSpans::node(0..15),
                 }],
-                span: 0..20,
+                spans: NodeSpans::node(0..20),
             }],
         };
         let usfm = to_usfm_string(&doc);
@@ -665,7 +665,7 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        span: 0..3,
+                        spans: NodeSpans::node(0..3).with_number(0..0),
                     },
                     Node::text("First verse text."),
                     Node::Verse {
@@ -674,11 +674,11 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        span: 20..23,
+                        spans: NodeSpans::node(20..23).with_number(0..0),
                     },
                     Node::text("Second verse text."),
                 ],
-                span: 0..50,
+                spans: NodeSpans::node(0..50),
             }],
         };
         let usfm = to_usfm_string(&doc);
@@ -692,7 +692,7 @@ mod tests {
             content: vec![Node::Para {
                 marker: "p".into(),
                 content: vec![Node::text("hello")],
-                span: 0..10,
+                spans: NodeSpans::node(0..10),
             }],
         };
         let usfm = to_usfm_string(&doc);
@@ -707,17 +707,17 @@ mod tests {
                     marker: "id".into(),
                     code: "GEN".into(),
                     content: vec![Node::text("Genesis")],
-                    span: 0..20,
+                    spans: NodeSpans::node(0..20).with_code(0..0),
                 },
                 Node::Para {
                     marker: "h".into(),
                     content: vec![Node::text("Genesis")],
-                    span: 20..35,
+                    spans: NodeSpans::node(20..35),
                 },
                 Node::Para {
                     marker: "toc1".into(),
                     content: vec![Node::text("Genesis")],
-                    span: 35..55,
+                    spans: NodeSpans::node(35..55),
                 },
             ],
         };
@@ -740,13 +740,13 @@ mod tests {
                             marker: "nd".into(),
                             content: vec![Node::text("Lord")],
                             attributes: vec![],
-                            span: 10..20,
+                            spans: NodeSpans::node(10..20),
                         },
                     ],
                     attributes: vec![],
-                    span: 0..25,
+                    spans: NodeSpans::node(0..25),
                 }],
-                span: 0..30,
+                spans: NodeSpans::node(0..30),
             }],
         };
         let usfm = to_usfm_string(&doc);
@@ -768,12 +768,12 @@ mod tests {
                             marker: "xt".into(),
                             content: vec![Node::text("Gen 1:1")],
                             attributes: vec![],
-                            span: 5..15,
+                            spans: NodeSpans::node(5..15),
                         }],
-                        span: 0..20,
+                        spans: NodeSpans::node(0..20),
                     },
                 ],
-                span: 0..25,
+                spans: NodeSpans::node(0..25),
             }],
         };
         let usfm = to_usfm_string(&doc);

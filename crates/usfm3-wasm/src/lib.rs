@@ -78,6 +78,14 @@ fn default_true() -> bool {
     true
 }
 
+/// Options for the `toUsj` method.
+#[derive(Tsify, Deserialize)]
+#[tsify(from_wasm_abi)]
+pub struct UsjOptions {
+    #[serde(default)]
+    pub spans: bool,
+}
+
 // ---------------------------------------------------------------------------
 // Hand-written TypeScript declarations for ParseResult and parse()
 // ---------------------------------------------------------------------------
@@ -88,7 +96,7 @@ export class ParseResult {
   free(): void;
   readonly diagnostics: Diagnostic[];
   hasErrors(): boolean;
-  toUsj(): any;
+  toUsj(options?: UsjOptions): any;
   toUsx(): string;
   toUsfm(): string;
   toVref(): Record<string, string>;
@@ -111,8 +119,13 @@ pub struct ParseResult {
 impl ParseResult {
     /// Serialize the parsed document to USJ (Unified Scripture JSON).
     #[wasm_bindgen(js_name = "toUsj")]
-    pub fn to_usj(&self) -> Result<JsValue, JsError> {
-        let usj = usfm3_lib::usj::UsjDocument::from_document(&self.document);
+    pub fn to_usj(&self, options: Option<UsjOptions>) -> Result<JsValue, JsError> {
+        let include_spans = options.map(|o| o.spans).unwrap_or(false);
+        let usj = usfm3_lib::usj::to_usj_value_with_options(
+            &self.document,
+            usfm3_lib::usj::UsjOptions { include_spans },
+        )
+        .map_err(|e| JsError::new(&e.to_string()))?;
         serde_wasm_bindgen::to_value(&usj).map_err(|e| JsError::new(&e.to_string()))
     }
 
