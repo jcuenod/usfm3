@@ -30,6 +30,7 @@ impl std::fmt::Display for Severity {
 pub enum DiagnosticCode {
     // Parser-generated diagnostics
     UnknownMarker,
+    DeprecatedMarker,
     UnclosedMarker,
     StrayCloseMarker,
     MisnestedMarker,
@@ -89,6 +90,16 @@ impl Diagnostic {
             span,
             message: format!("unknown marker \\{marker}"),
             code: DiagnosticCode::UnknownMarker,
+        }
+    }
+
+    /// A recognized marker is deprecated and should be replaced.
+    pub fn deprecated_marker(marker: &str, replacement: &str, span: Span) -> Self {
+        Diagnostic {
+            severity: Severity::Warning,
+            span,
+            message: format!("\\{marker} is deprecated; prefer {replacement}"),
+            code: DiagnosticCode::DeprecatedMarker,
         }
     }
 
@@ -504,6 +515,22 @@ mod tests {
     }
 
     #[test]
+    fn test_deprecated_marker() {
+        let d = Diagnostic::deprecated_marker(
+            "addpn",
+            "nested \\pn ...\\pn* within \\add ...\\add*",
+            15..21,
+        );
+        assert_eq!(d.severity, Severity::Warning);
+        assert_eq!(d.code, DiagnosticCode::DeprecatedMarker);
+        assert_eq!(d.span, 15..21);
+        assert!(d.message.contains("\\addpn"));
+        assert!(d.message.contains("\\pn"));
+        assert!(d.message.contains("\\add"));
+        assert!(d.message.contains("deprecated"));
+    }
+
+    #[test]
     fn test_implicitly_closed() {
         let d = Diagnostic::implicitly_closed("p", 0..2, 50..53);
         assert_eq!(d.severity, Severity::Error);
@@ -768,9 +795,14 @@ mod tests {
         list.push(Diagnostic::implicitly_closed("p", 0..2, 50..53)); // Error
         list.push(Diagnostic::stray_close("nd", 10..14)); // Error
         list.push(Diagnostic::invalid_chapter_sequence(1, 3, 20..22)); // Warning
+        list.push(Diagnostic::deprecated_marker(
+            "addpn",
+            "nested \\pn ...\\pn* within \\add ...\\add*",
+            30..36,
+        )); // Warning
 
         let warnings: Vec<_> = list.warnings().collect();
-        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings.len(), 2);
         assert!(warnings.iter().all(|d| d.severity == Severity::Warning));
     }
 

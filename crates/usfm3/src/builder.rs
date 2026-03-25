@@ -240,6 +240,14 @@ impl TreeBuilder {
 
         let info = markers::lookup_marker(name);
 
+        if name == "addpn" {
+            self.diagnostics.push(Diagnostic::deprecated_marker(
+                name,
+                "nested \\pn ...\\pn* within \\add ...\\add*",
+                span.clone(),
+            ));
+        }
+
         // For table-row markers, the newline between rows is structural
         // (not a word boundary) -- just clear it.  For all other markers,
         // consume it: block-level trailing space is stripped by
@@ -2187,5 +2195,57 @@ mod tests {
             }
         });
         assert_eq!(verse, Some("3-4".into()));
+    }
+
+    #[test]
+    fn test_fm_marker_parses_as_character() {
+        let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 17 text\\fm GEN 2:9\\fm* more text");
+
+        let has_unknown = result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == crate::diagnostics::DiagnosticCode::UnknownMarker);
+        assert!(!has_unknown, "\\fm should not produce UnknownMarker");
+
+        let has_fm_char = result.document.content.iter().any(|n| {
+            matches!(
+                n,
+                Node::Para { content, .. }
+                if content.iter().any(|c| matches!(c, Node::Char { marker, .. } if marker == "fm"))
+            )
+        });
+        assert!(has_fm_char, "\\fm should parse as a character node");
+    }
+
+    #[test]
+    fn test_addpn_marker_parses_as_character_with_deprecation_warning() {
+        let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 text \\addpn Added Name\\addpn* more");
+
+        let has_unknown = result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == crate::diagnostics::DiagnosticCode::UnknownMarker);
+        assert!(!has_unknown, "\\addpn should not produce UnknownMarker");
+
+        let deprecation_warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == crate::diagnostics::DiagnosticCode::DeprecatedMarker)
+            .collect();
+        assert_eq!(
+            deprecation_warnings.len(),
+            1,
+            "\\addpn should produce exactly one deprecation warning"
+        );
+        assert!(deprecation_warnings[0].message.contains("\\addpn"));
+
+        let has_addpn_char = result.document.content.iter().any(|n| {
+            matches!(
+                n,
+                Node::Para { content, .. }
+                if content.iter().any(|c| matches!(c, Node::Char { marker, .. } if marker == "addpn"))
+            )
+        });
+        assert!(has_addpn_char, "\\addpn should parse as a character node");
     }
 }

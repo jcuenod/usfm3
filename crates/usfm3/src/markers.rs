@@ -248,7 +248,7 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
         // =============================================================
 
         // -- special text --
-        "add" | "bk" | "dc" | "ior" | "iqt"
+        "add" | "addpn" | "bk" | "dc" | "ior" | "iqt"
         | "k" | "litl" | "nd" | "ord"
         | "pn" | "png" | "qs" | "qt" | "sig"
         | "sls" | "tl" | "wj"
@@ -260,7 +260,7 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
         | "pro" | "w" | "wg" | "wh" | "wa"
 
         // -- references / annotations --
-        | "rq" | "ca" | "va" | "vp"
+        | "rq" | "ca" | "va" | "vp" | "fm"
 
         // -- linking / references --
         | "jmp" | "ref"
@@ -454,7 +454,7 @@ mod tests {
         let chars = [
             "add", "bk", "dc", "ior", "iqt", "k", "litl", "nd", "ord", "pn", "png", "qs", "qt",
             "sig", "sls", "tl", "wj", "em", "bd", "bdit", "it", "no", "sc", "sup", "rb", "pro",
-            "w", "wg", "wh", "wa", "rq", "ca", "va", "vp", "jmp",
+            "w", "wg", "wh", "wa", "rq", "ca", "va", "vp", "jmp", "fm", "addpn",
         ];
         for marker in &chars {
             let info = lookup_marker(marker);

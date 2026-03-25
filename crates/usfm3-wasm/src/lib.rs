@@ -21,6 +21,7 @@ pub enum Severity {
 #[derive(Tsify, Serialize, Clone)]
 pub enum DiagnosticCode {
     UnknownMarker,
+    DeprecatedMarker,
     UnclosedMarker,
     StrayCloseMarker,
     MisnestedMarker,
@@ -225,6 +226,7 @@ fn convert_code(c: usfm3_lib::diagnostics::DiagnosticCode) -> DiagnosticCode {
     use usfm3_lib::diagnostics::DiagnosticCode as DC;
     match c {
         DC::UnknownMarker => DiagnosticCode::UnknownMarker,
+        DC::DeprecatedMarker => DiagnosticCode::DeprecatedMarker,
         DC::UnclosedMarker => DiagnosticCode::UnclosedMarker,
         DC::StrayCloseMarker => DiagnosticCode::StrayCloseMarker,
         DC::MisnestedMarker => DiagnosticCode::MisnestedMarker,
