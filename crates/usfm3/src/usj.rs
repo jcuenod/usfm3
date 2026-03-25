@@ -375,7 +375,7 @@ pub fn to_usj_value_with_options(
     doc: &Document,
     options: UsjOptions,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    serde_json::to_value(&UsjDocumentView::new(doc, options))
+    serde_json::to_value(UsjDocumentView::new(doc, options))
 }
 
 #[cfg(test)]

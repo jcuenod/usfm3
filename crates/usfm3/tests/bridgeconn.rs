@@ -141,7 +141,7 @@ fn preserve_trailing_content_space(node_type: Option<&str>) -> bool {
     matches!(node_type, Some("char" | "ref" | "table:cell"))
 }
 
-fn normalize_for_comparison_inner(value: &mut Value, parent_type: Option<&str>) {
+fn normalize_for_comparison_inner(value: &mut Value, _parent_type: Option<&str>) {
     match value {
         Value::Object(map) => {
             let node_type = map.get("type").and_then(|v| v.as_str()).map(String::from);
@@ -308,7 +308,7 @@ fn normalize_for_comparison_inner(value: &mut Value, parent_type: Option<&str>) 
         }
         Value::Array(arr) => {
             for item in arr {
-                normalize_for_comparison_inner(item, parent_type);
+                normalize_for_comparison_inner(item, _parent_type);
             }
         }
         Value::String(_) => {}
