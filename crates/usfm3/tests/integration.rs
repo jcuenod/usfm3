@@ -385,10 +385,10 @@ fn tables_do_not_emit_close_diagnostics_at_row_or_eof_boundaries() {
     let result = builder::parse(usfm);
 
     assert!(
-        !result
-            .diagnostics
-            .iter()
-            .any(|d| matches!(d.code, DiagnosticCode::ImplicitClose | DiagnosticCode::UnclosedAtEof)),
+        !result.diagnostics.iter().any(|d| matches!(
+            d.code,
+            DiagnosticCode::ImplicitClose | DiagnosticCode::UnclosedAtEof
+        )),
         "table rows/cells should close structurally without implicit/unclosed diagnostics: {:?}",
         result
             .diagnostics
@@ -412,10 +412,10 @@ fn tables_close_cleanly_before_following_block_markers() {
     let result = builder::parse(usfm);
 
     assert!(
-        !result
-            .diagnostics
-            .iter()
-            .any(|d| matches!(d.code, DiagnosticCode::ImplicitClose | DiagnosticCode::UnclosedAtEof)),
+        !result.diagnostics.iter().any(|d| matches!(
+            d.code,
+            DiagnosticCode::ImplicitClose | DiagnosticCode::UnclosedAtEof
+        )),
         "table rows/cells should close cleanly before later block markers: {:?}",
         result
             .diagnostics

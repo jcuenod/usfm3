@@ -367,8 +367,8 @@ impl Node {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::usj::{to_usj_value, to_usj_value_with_options, UsjOptions};
-    use serde_json::{json, Value};
+    use crate::usj::{UsjOptions, to_usj_value, to_usj_value_with_options};
+    use serde_json::{Value, json};
 
     fn node_value(node: Node) -> Value {
         to_usj_value(&Document {

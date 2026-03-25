@@ -1176,9 +1176,7 @@ impl TreeBuilder {
                     let node = self.finalize_open_node(top);
                     self.append_node(node);
                 }
-                Some(MarkerKind::Paragraph)
-                | Some(MarkerKind::Header)
-                | Some(MarkerKind::Meta) => {
+                Some(MarkerKind::Paragraph) | Some(MarkerKind::Header) | Some(MarkerKind::Meta) => {
                     let top = self.stack.pop().unwrap();
                     let node = self.finalize_open_node(top);
                     self.append_node(node);
@@ -1532,8 +1530,7 @@ impl TreeBuilder {
                     .push(Diagnostic::unclosed_note(&open.marker, open.span.clone()));
             } else if open.kind == MarkerKind::SidebarStart
                 || open.kind == MarkerKind::Figure
-                || ((open.kind == MarkerKind::Character
-                    || open.kind == MarkerKind::Unknown)
+                || ((open.kind == MarkerKind::Character || open.kind == MarkerKind::Unknown)
                     && !open.marker.starts_with('z'))
             {
                 self.diagnostics
