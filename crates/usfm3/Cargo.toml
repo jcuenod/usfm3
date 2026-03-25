@@ -5,7 +5,7 @@ edition = "2024"
 license = "MIT"
 description = "Error-tolerant USFM 3.x parser with USJ, USX, and USFM output"
 readme = "README.md"
-repository = "https://github.com/jcuenod/rsusfm3"
+repository = "https://github.com/jcuenod/usfm3"
 keywords = ["usfm", "usj", "usx", "bible", "parser"]
 categories = ["parser-implementations", "text-processing"]
 
