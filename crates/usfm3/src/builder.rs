@@ -265,12 +265,12 @@ impl TreeBuilder {
         match info.kind {
             MarkerKind::Header => {
                 // Close any open block context before starting a new header.
-                self.close_block_context(&span);
+                self.close_block_context(name);
                 self.push_open(name.to_string(), MarkerKind::Header, span);
             }
 
             MarkerKind::Paragraph => {
-                self.close_block_context(&span);
+                self.close_block_context(name);
                 self.push_open(name.to_string(), MarkerKind::Paragraph, span);
             }
 
@@ -309,7 +309,7 @@ impl TreeBuilder {
 
             MarkerKind::TableRow => {
                 // Table rows are paragraph-level: close notes and paragraphs first.
-                self.close_block_context(&span);
+                self.close_block_context(name);
                 self.push_open(name.to_string(), MarkerKind::TableRow, span);
             }
 
@@ -321,7 +321,7 @@ impl TreeBuilder {
 
             MarkerKind::Periph => {
                 // Periph acts as a section-level container (like sidebar).
-                self.close_block_context(&span);
+                self.close_block_context(name);
                 self.push_open(name.to_string(), MarkerKind::Periph, span);
             }
 
@@ -330,12 +330,12 @@ impl TreeBuilder {
             }
 
             MarkerKind::SidebarStart => {
-                self.close_block_context(&span);
+                self.close_block_context(name);
                 self.push_open(name.to_string(), MarkerKind::SidebarStart, span);
             }
 
             MarkerKind::SidebarEnd => {
-                self.close_sidebar(&span);
+                self.close_sidebar(name, &span);
             }
 
             MarkerKind::Meta => {
@@ -350,7 +350,7 @@ impl TreeBuilder {
                     self.close_inline_above_paragraph();
                     self.push_open(name.to_string(), MarkerKind::Meta, span);
                 } else {
-                    self.close_block_context(&span);
+                    self.close_block_context(name);
                     self.push_open(name.to_string(), MarkerKind::Meta, span);
                 }
             }
@@ -387,7 +387,7 @@ impl TreeBuilder {
         self.flush_pending_chapter();
         self.flush_pending_verse();
 
-        self.close_block_context(&span);
+        self.close_block_context("c");
         self.pending_chapter = Some(span);
     }
 
@@ -1146,15 +1146,15 @@ impl TreeBuilder {
 
     /// Close block-level context in boundary order: notes first, then any open
     /// table row/cell, then the paragraph/header/meta container.
-    fn close_block_context(&mut self, trigger_span: &Span) {
+    fn close_block_context(&mut self, trigger_marker: &str) {
         self.force_close_notes();
         self.close_table_context();
-        self.close_paragraph(trigger_span);
+        self.close_paragraph(trigger_marker);
     }
 
     /// Close all character markers on top of the stack, then close the current
     /// paragraph (or header/meta) if one exists.
-    fn close_paragraph(&mut self, trigger_span: &Span) {
+    fn close_paragraph(&mut self, trigger_marker: &str) {
         // Walk the stack from the top. Close character, unknown, and figure
         // markers (they are implicitly closed). Stop when we hit a paragraph,
         // header, meta, sidebar, or note -- close the paragraph/header/meta if
@@ -1170,7 +1170,7 @@ impl TreeBuilder {
                         self.diagnostics.push(Diagnostic::implicitly_closed(
                             &top.marker,
                             top.span.clone(),
-                            trigger_span.clone(),
+                            trigger_marker,
                         ));
                     }
                     let node = self.finalize_open_node(top);
@@ -1217,7 +1217,7 @@ impl TreeBuilder {
 
     /// Close the sidebar: walk the stack for a `SidebarStart`, close everything
     /// in between, then finalize the sidebar node.
-    fn close_sidebar(&mut self, trigger_span: &Span) {
+    fn close_sidebar(&mut self, trigger_marker: &str, trigger_span: &Span) {
         let sidebar_idx = self
             .stack
             .iter()
@@ -1231,7 +1231,7 @@ impl TreeBuilder {
                         self.diagnostics.push(Diagnostic::implicitly_closed(
                             &top.marker,
                             top.span.clone(),
-                            trigger_span.clone(),
+                            trigger_marker,
                         ));
                     }
                     let node = self.finalize_open_node(top);
@@ -1841,6 +1841,7 @@ mod tests {
         let has_implicit_close_add = result.diagnostics.iter().any(|d| {
             d.code == crate::diagnostics::DiagnosticCode::ImplicitClose
                 && d.message.contains("\\add")
+                && d.message.contains("\\p")
         });
         assert!(
             has_implicit_close_add,

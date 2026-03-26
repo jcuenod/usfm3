@@ -108,15 +108,14 @@ impl Diagnostic {
     /// paragraph).  In USFM 3.1, character styles must be explicitly closed,
     /// so this is an error.
     ///
-    /// The `close_span` is used as the diagnostic span (where the problem manifests),
-    /// while the opening location is mentioned in the message.
-    pub fn implicitly_closed(marker: &str, open_span: Span, close_span: Span) -> Self {
+    /// The diagnostic highlights the opener that remained unclosed, while the
+    /// message still reports where it was opened.
+    pub fn implicitly_closed(marker: &str, open_span: Span, close_marker: &str) -> Self {
         Diagnostic {
             severity: Severity::Error,
-            span: close_span,
+            span: open_span.clone(),
             message: format!(
-                "\\{marker} (opened at byte {}) was implicitly closed",
-                open_span.start
+                "\\{marker} is missing explicit close (\\{marker}*). It was closed implicitly by \\{close_marker}.",
             ),
             code: DiagnosticCode::ImplicitClose,
         }
@@ -543,13 +542,14 @@ mod tests {
 
     #[test]
     fn test_implicitly_closed() {
-        let d = Diagnostic::implicitly_closed("p", 0..2, 50..53);
+        let d = Diagnostic::implicitly_closed("p", 0..2, "q");
         assert_eq!(d.severity, Severity::Error);
         assert_eq!(d.code, DiagnosticCode::ImplicitClose);
-        assert_eq!(d.span, 50..53);
+        assert_eq!(d.span, 0..2);
         assert!(d.message.contains("\\p"));
-        assert!(d.message.contains("byte 0"));
-        assert!(d.message.contains("implicitly closed"));
+        assert!(d.message.contains("\\p*"));
+        assert!(d.message.contains("\\q"));
+        assert!(d.message.contains("missing explicit close"));
     }
 
     #[test]
@@ -766,7 +766,7 @@ mod tests {
     fn test_diagnostic_list_push_and_len() {
         let mut list = DiagnosticList::new();
         list.push(Diagnostic::unknown_marker("zzz", 0..3));
-        list.push(Diagnostic::implicitly_closed("p", 0..2, 50..53));
+        list.push(Diagnostic::implicitly_closed("p", 0..2, "q"));
         assert!(!list.is_empty());
         assert_eq!(list.len(), 2);
     }
@@ -778,7 +778,7 @@ mod tests {
 
         let mut list_b = DiagnosticList::new();
         list_b.push(Diagnostic::stray_close("nd", 10..14));
-        list_b.push(Diagnostic::implicitly_closed("p", 0..2, 50..53));
+        list_b.push(Diagnostic::implicitly_closed("p", 0..2, "q"));
 
         list_a.extend(list_b);
         assert_eq!(list_a.len(), 3);
@@ -800,7 +800,7 @@ mod tests {
     fn test_diagnostic_list_errors_filter() {
         let mut list = DiagnosticList::new();
         list.push(Diagnostic::unknown_marker("zzz", 0..3)); // Error
-        list.push(Diagnostic::implicitly_closed("p", 0..2, 50..53)); // Error
+        list.push(Diagnostic::implicitly_closed("p", 0..2, "q")); // Error
         list.push(Diagnostic::stray_close("nd", 10..14)); // Error
         list.push(Diagnostic::invalid_chapter_sequence(1, 3, 20..22)); // Warning
 
@@ -813,7 +813,7 @@ mod tests {
     fn test_diagnostic_list_warnings_filter() {
         let mut list = DiagnosticList::new();
         list.push(Diagnostic::unknown_marker("zzz", 0..3)); // Error
-        list.push(Diagnostic::implicitly_closed("p", 0..2, 50..53)); // Error
+        list.push(Diagnostic::implicitly_closed("p", 0..2, "q")); // Error
         list.push(Diagnostic::stray_close("nd", 10..14)); // Error
         list.push(Diagnostic::invalid_chapter_sequence(1, 3, 20..22)); // Warning
         list.push(Diagnostic::deprecated_marker(
@@ -830,7 +830,7 @@ mod tests {
     #[test]
     fn test_diagnostic_list_has_errors() {
         let mut list = DiagnosticList::new();
-        list.push(Diagnostic::implicitly_closed("p", 0..2, 50..53));
+        list.push(Diagnostic::implicitly_closed("p", 0..2, "q"));
         assert!(list.has_errors());
     }
 
