@@ -202,13 +202,13 @@ impl<'a> Validator<'a> {
     // ── 4. Verse sequence (per chapter scope) ───────────────────────────
 
     fn check_verse_sequence(&mut self, doc: &Document) {
-        let mut expected_verse: Option<u32> = None;
+        let mut expected_verse: u32 = 1;
 
         for node in &doc.content {
             match node {
                 Node::Chapter { .. } => {
-                    // Reset verse tracking for each chapter.
-                    expected_verse = None;
+                    // Each new chapter is expected to begin with verse 1.
+                    expected_verse = 1;
                 }
                 _ => {
                     self.check_verses_in_node(node, &mut expected_verse);
@@ -218,24 +218,21 @@ impl<'a> Validator<'a> {
     }
 
     /// Recursively walk a node and its children looking for `Verse` nodes.
-    fn check_verses_in_node(&mut self, node: &Node, expected_verse: &mut Option<u32>) {
+    fn check_verses_in_node(&mut self, node: &Node, expected_verse: &mut u32) {
         if let Node::Verse { number, .. } = node {
             let start = parse_verse_start(number);
             let end = parse_verse_end(number);
             let span = node.span().cloned().unwrap_or(0..0);
             if let Some(v_start) = start {
-                match *expected_verse {
-                    Some(exp) if v_start != exp => {
+                if v_start != *expected_verse {
                         self.diagnostics.push(Diagnostic::invalid_verse_sequence(
-                            &exp.to_string(),
+                            &expected_verse.to_string(),
                             number,
                             span.clone(),
                         ));
                     }
-                    _ => {}
-                }
                 // Next expected verse is end-of-range + 1 (or start + 1).
-                *expected_verse = Some(end.unwrap_or(v_start) + 1);
+                *expected_verse = end.unwrap_or(v_start) + 1;
             }
         }
 
@@ -1106,6 +1103,92 @@ mod tests {
                     spans: NodeSpans::node(35..38).with_number(0..0),
                 }],
                 spans: NodeSpans::node(34..45),
+            },
+        ]);
+        let diags = validate(&doc);
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::InvalidVerseSequence)
+        );
+    }
+
+    #[test]
+    fn test_verse_must_restart_at_one_after_new_chapter() {
+        let doc = doc_with(vec![
+            Node::Book {
+                marker: "id".into(),
+                code: "GEN".into(),
+                content: vec![],
+                spans: NodeSpans::node(0..10).with_code(0..0),
+            },
+            Node::Chapter {
+                marker: "c".into(),
+                number: "1".into(),
+                sid: None,
+                altnumber: None,
+                pubnumber: None,
+                spans: NodeSpans::node(10..14).with_number(0..0),
+            },
+            Node::Para {
+                marker: "p".into(),
+                content: vec![Node::Verse {
+                    marker: "v".into(),
+                    number: "2".into(),
+                    sid: None,
+                    altnumber: None,
+                    pubnumber: None,
+                    spans: NodeSpans::node(15..18).with_number(0..0),
+                }],
+                spans: NodeSpans::node(14..25),
+            },
+        ]);
+        let diags = validate(&doc);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == DiagnosticCode::InvalidVerseSequence)
+        );
+    }
+
+    #[test]
+    fn test_verse_range_can_open_chapter() {
+        let doc = doc_with(vec![
+            Node::Book {
+                marker: "id".into(),
+                code: "GEN".into(),
+                content: vec![],
+                spans: NodeSpans::node(0..10).with_code(0..0),
+            },
+            Node::Chapter {
+                marker: "c".into(),
+                number: "1".into(),
+                sid: None,
+                altnumber: None,
+                pubnumber: None,
+                spans: NodeSpans::node(10..14).with_number(0..0),
+            },
+            Node::Para {
+                marker: "p".into(),
+                content: vec![
+                    Node::Verse {
+                        marker: "v".into(),
+                        number: "1-2".into(),
+                        sid: None,
+                        altnumber: None,
+                        pubnumber: None,
+                        spans: NodeSpans::node(15..20).with_number(0..0),
+                    },
+                    Node::Verse {
+                        marker: "v".into(),
+                        number: "3".into(),
+                        sid: None,
+                        altnumber: None,
+                        pubnumber: None,
+                        spans: NodeSpans::node(21..24).with_number(0..0),
+                    },
+                ],
+                spans: NodeSpans::node(14..30),
             },
         ]);
         let diags = validate(&doc);
