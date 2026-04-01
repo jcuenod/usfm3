@@ -15,43 +15,43 @@ use usfm3::vref;
 // ---------------------------------------------------------------------------
 
 /// Parse USFM and return the document, panicking on unexpected errors.
-fn parse(usfm: &str) -> usfm3::ast::Document {
-    builder::parse(usfm).document
+fn get_ast(usfm: &str) -> usfm3::ast::Document {
+    builder::parse(usfm).ast
 }
 
-fn parse_to_cst(usfm: &str) -> usfm3::cst::CstDocument {
-    cst::parse(usfm).document
+fn get_cst(usfm: &str) -> usfm3::cst::CstDocument {
+    cst::parse(usfm).cst
 }
 
 /// Parse USFM and return the USJ JSON value.
 fn parse_to_usj(usfm: &str) -> Value {
-    let doc = parse(usfm);
+    let doc = get_ast(usfm);
     usj::to_usj_value(&doc).expect("USJ serialization failed")
 }
 
 /// Parse USFM and return the vref map (verse-ref → plain text).
 fn parse_to_vref(usfm: &str) -> serde_json::Map<String, Value> {
-    let doc = parse(usfm);
+    let doc = get_ast(usfm);
     vref::to_vref_map(&doc)
 }
 
 /// Parse USFM and return the USX XML string.
 fn parse_to_usx(usfm: &str) -> String {
-    let doc = parse(usfm);
+    let doc = get_ast(usfm);
     usfm3::usx::to_usx_string(&doc).expect("USX serialization failed")
 }
 
 #[test]
 fn cst_round_trip_preserves_source_exactly() {
     let usfm = "\\id GEN\r\n\\c 1\r\n\\p  \\v 1  In the beginning\\nd Lord\\nd*\r\n";
-    let cst = parse_to_cst(usfm);
+    let cst = get_cst(usfm);
     assert_eq!(cst.to_source_string(), usfm);
 }
 
 #[test]
 fn cst_leaf_spans_are_gap_free_and_ordered() {
     let usfm = "\\id GEN\r\n\\c 1\r\n\\p  \\v 1  In the beginning\r\n";
-    let cst = parse_to_cst(usfm);
+    let cst = get_cst(usfm);
 
     let mut expected_start = 0;
     for &leaf_id in cst.leaf_ids() {
@@ -67,7 +67,7 @@ fn cst_leaf_spans_are_gap_free_and_ordered() {
 #[test]
 fn cst_cursor_mapping_finds_preserved_trivia() {
     let usfm = "\\p  \\v 1  In the beginning";
-    let cst = parse_to_cst(usfm);
+    let cst = get_cst(usfm);
 
     let first_gap = cst.leaf_at_offset(2).unwrap();
     let second_gap = cst.leaf_at_offset(8).unwrap();
@@ -82,7 +82,7 @@ fn cst_cursor_mapping_finds_preserved_trivia() {
 #[test]
 fn cst_preserves_explicit_close_markers_as_leaves() {
     let usfm = "\\p \\nd Lord\\nd*";
-    let cst = parse_to_cst(usfm);
+    let cst = get_cst(usfm);
     let close_leaf = cst
         .leaf_ids()
         .iter()
@@ -96,7 +96,7 @@ fn cst_preserves_explicit_close_markers_as_leaves() {
 #[test]
 fn cst_preserves_raw_marker_spelling() {
     let usfm = "\\p \\+nd Lord\\+nd*";
-    let cst = parse_to_cst(usfm);
+    let cst = get_cst(usfm);
     let nested_open = cst
         .leaf_ids()
         .iter()
@@ -188,7 +188,7 @@ fn implicit_paragraph_and_verses() {
 \v 2 The earth was formless"#;
 
     let result = builder::parse(usfm);
-    let doc = result.document;
+    let doc = result.ast;
     let warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -253,7 +253,7 @@ fn bare_verse_recovery_serializes_with_implicit_paragraph() {
 \v 1 In the beginning
 \v 2 The earth was formless"#;
 
-    let doc = parse(usfm);
+    let doc = get_ast(usfm);
     let normalized = usfm3::usfm::to_usfm_string(&doc);
 
     assert!(normalized.contains("\\c 1\n\\p \\v 1 In the beginning"));
@@ -730,11 +730,11 @@ fn usfm_round_trip_preserves_structure() {
 \v 2 The earth was without form and void.
 "#;
 
-    let doc = parse(usfm);
+    let doc = get_ast(usfm);
     let output = usfm3::usfm::to_usfm_string(&doc);
 
     // Re-parse the output and compare USJ.
-    let doc2 = parse(&output);
+    let doc2 = get_ast(&output);
     let usj1 = usj::to_usj_value(&doc).unwrap();
     let usj2 = usj::to_usj_value(&doc2).unwrap();
     assert_eq!(usj1, usj2, "USFM round-trip should produce identical USJ");
@@ -751,7 +751,7 @@ fn usx_output_is_xml() {
 \p
 \v 1 In the beginning."#;
 
-    let doc = parse(usfm);
+    let doc = get_ast(usfm);
     let xml = usfm3::usx::to_usx_string(&doc).expect("USX serialization failed");
     assert!(
         xml.contains("<?xml"),
@@ -770,7 +770,7 @@ fn usx_output_is_xml() {
 
 #[test]
 fn ast_book_node_is_first() {
-    let doc = parse(r#"\id GEN Genesis"#);
+    let doc = get_ast(r#"\id GEN Genesis"#);
     assert!(
         matches!(&doc.content[0], Node::Book { code, .. } if code == "GEN"),
         "first node should be a Book with code GEN"
@@ -779,7 +779,7 @@ fn ast_book_node_is_first() {
 
 #[test]
 fn ast_chapter_produces_chapter_node() {
-    let doc = parse(
+    let doc = get_ast(
         r#"\id GEN
 \c 1
 \c 2"#,
@@ -795,7 +795,7 @@ fn ast_chapter_produces_chapter_node() {
 
 #[test]
 fn ast_verse_inside_para() {
-    let doc = parse(
+    let doc = get_ast(
         r#"\id GEN
 \c 1
 \p
@@ -817,7 +817,7 @@ fn ast_verse_inside_para() {
 
 #[test]
 fn ast_note_node_structure() {
-    let doc = parse(
+    let doc = get_ast(
         r#"\id GEN
 \c 1
 \p
@@ -847,7 +847,7 @@ fn ast_note_node_structure() {
 
 #[test]
 fn ast_table_grouping() {
-    let doc = parse(
+    let doc = get_ast(
         r#"\id GEN
 \c 1
 \tr \th1 A \th2 B

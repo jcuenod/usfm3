@@ -34,7 +34,7 @@ fn main() {
         }
 
         // Run validation
-        let validation_diags = usfm3::validation::validate(&result.document);
+        let validation_diags = usfm3::validation::validate(&result.ast);
         for diag in validation_diags.iter() {
             eprintln!("[{}:{}] {}", diag.span.start, diag.span.end, diag);
         }
@@ -45,21 +45,21 @@ fn main() {
 
     match format {
         "usj" => {
-            let json = usfm3::usj::to_usj_string_pretty(&result.document)
+            let json = usfm3::usj::to_usj_string_pretty(&result.ast)
                 .expect("USJ serialization failed");
             println!("{json}");
         }
         "usx" => {
             let xml =
-                usfm3::usx::to_usx_string(&result.document).expect("USX serialization failed");
+                usfm3::usx::to_usx_string(&result.ast).expect("USX serialization failed");
             println!("{xml}");
         }
         "usfm" => {
-            let usfm = usfm3::usfm::to_usfm_string(&result.document);
+            let usfm = usfm3::usfm::to_usfm_string(&result.ast);
             print!("{usfm}");
         }
         "vref" => {
-            let json = usfm3::vref::to_vref_json_string(&result.document);
+            let json = usfm3::vref::to_vref_json_string(&result.ast);
             println!("{json}");
         }
         other => {

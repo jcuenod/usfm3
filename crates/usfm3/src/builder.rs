@@ -1,7 +1,7 @@
-//! Stack-based tree builder (Phase 2 parser) for USFM 3.x.
+//! Stack-based AST builder for USFM 3.x.
 //!
-//! Consumes the token stream produced by [`crate::lexer`] and produces an AST
-//! ([`crate::ast::Document`]) together with a list of diagnostics.
+//! Lowers CST leaf tokens into an AST ([`crate::ast::Document`]) together with
+//! a list of diagnostics.
 
 use crate::ast::{Attribute, Document, Node, NodeSpans, Span};
 use crate::cst::{self, ClosingTokenKind, CstDocument, CstKind, MarkerTokenKind};
@@ -15,31 +15,18 @@ use crate::markers::{self, MarkerKind};
 
 /// Result of parsing a USFM string.
 pub struct ParseResult {
-    pub document: Document,
+    pub ast: Document,
     pub diagnostics: DiagnosticList,
 }
 
 /// Parse a USFM source string into a [`Document`] with diagnostics.
 pub fn parse(input: &str) -> ParseResult {
-    let cst = cst::parse(input);
-    ParseResult {
-        document: lower_cst_to_ast(&cst.document),
-        diagnostics: cst.diagnostics,
-    }
+    let cst = cst::get_cst(input);
+    parse_from_cst(&cst)
 }
 
-/// Parse a USFM source string into a CST with diagnostics.
-pub fn parse_cst(input: &str) -> cst::CstParseResult {
-    cst::parse(input)
-}
-
-pub(crate) fn parse_lossy(input: &str) -> ParseResult {
-    let tokens = lexer::tokenize(input);
-    parse_token_stream(tokens)
-}
-
-fn lower_cst_to_ast(document: &CstDocument) -> Document {
-    parse_token_stream(cst_leaf_tokens(document)).document
+pub(crate) fn parse_from_cst(document: &CstDocument) -> ParseResult {
+    parse_token_stream(cst_leaf_tokens(document))
 }
 
 fn cst_leaf_tokens<'a>(document: &'a CstDocument) -> Vec<(Token<'a>, Span)> {
@@ -1601,7 +1588,7 @@ impl TreeBuilder {
         }
 
         ParseResult {
-            document: Document {
+            ast: Document {
                 content: self.root_children,
             },
             diagnostics: self.diagnostics,
@@ -1814,9 +1801,9 @@ mod tests {
     #[test]
     fn test_simple_document() {
         let result = parse("\\id GEN Genesis\n\\c 1\n\\p\n\\v 1 In the beginning");
-        assert!(!result.document.content.is_empty());
+        assert!(!result.ast.content.is_empty());
         // Should have Book, Chapter, Para nodes
-        match &result.document.content[0] {
+        match &result.ast.content[0] {
             Node::Book { code, .. } => assert_eq!(code, "GEN"),
             other => panic!("expected Book, got {:?}", other),
         }
@@ -1826,7 +1813,7 @@ mod tests {
     fn test_character_markers() {
         let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 The \\nd Lord\\nd* spoke");
         // Find the Para node and check it has Char child
-        let has_char = result.document.content.iter().any(|n| {
+        let has_char = result.ast.content.iter().any(|n| {
             if let Node::Para { content, .. } = n {
                 content
                     .iter()
@@ -1843,7 +1830,7 @@ mod tests {
         let result =
             parse("\\id GEN\n\\c 1\n\\p\n\\v 1 text\\f + \\fr 1.1 \\ft note text\\f* more");
         // Should have a Note node inside the Para
-        let has_note = result.document.content.iter().any(|n| {
+        let has_note = result.ast.content.iter().any(|n| {
             if let Node::Para { content, .. } = n {
                 content
                     .iter()
@@ -1860,7 +1847,7 @@ mod tests {
         let result = parse("\\id GEN\n\\c 1\n\\p First para\n\\p Second para");
         // Should have two Para nodes (first implicitly closed by second)
         let para_count = result
-            .document
+            .ast
             .content
             .iter()
             .filter(|n| matches!(n, Node::Para { .. }))
@@ -1918,7 +1905,7 @@ mod tests {
         assert_eq!(warnings[0].severity, crate::diagnostics::Severity::Warning);
 
         let para = result
-            .document
+            .ast
             .content
             .iter()
             .find(|n| matches!(n, Node::Para { marker, .. } if marker == "p"))
@@ -1935,7 +1922,7 @@ mod tests {
     #[test]
     fn test_milestone() {
         let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 \\qt1-s text \\qt1-e");
-        let has_milestone = result.document.content.iter().any(|n| {
+        let has_milestone = result.ast.content.iter().any(|n| {
             if let Node::Para { content, .. } = n {
                 content.iter().any(|c| matches!(c, Node::Milestone { .. }))
             } else {
@@ -1960,14 +1947,14 @@ mod tests {
     #[test]
     fn test_empty_input() {
         let result = parse("");
-        assert!(result.document.content.is_empty());
+        assert!(result.ast.content.is_empty());
     }
 
     #[test]
     fn test_poetry_paragraphs() {
         let result = parse("\\id GEN\n\\c 1\n\\q1\n\\v 1 Line one\n\\q2 Line two");
         let para_count = result
-            .document
+            .ast
             .content
             .iter()
             .filter(|n| matches!(n, Node::Para { .. }))
@@ -2037,7 +2024,7 @@ mod tests {
     fn test_chapter_sid_generation() {
         let result = parse("\\id GEN\n\\c 3\n\\p\n\\v 5 text");
         // Find the Chapter node and verify sid.
-        let chapter = result.document.content.iter().find_map(|n| {
+        let chapter = result.ast.content.iter().find_map(|n| {
             if let Node::Chapter { sid, number, .. } = n {
                 Some((number.clone(), sid.clone()))
             } else {
@@ -2050,7 +2037,7 @@ mod tests {
     #[test]
     fn test_verse_sid_generation() {
         let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 2 text");
-        let verse = result.document.content.iter().find_map(|n| {
+        let verse = result.ast.content.iter().find_map(|n| {
             if let Node::Para { content, .. } = n {
                 content.iter().find_map(|c| {
                     if let Node::Verse { sid, number, .. } = c {
@@ -2069,7 +2056,7 @@ mod tests {
     #[test]
     fn test_book_code_extraction() {
         let result = parse("\\id MAT Gospel of Matthew");
-        match &result.document.content[0] {
+        match &result.ast.content[0] {
             Node::Book { code, content, .. } => {
                 assert_eq!(code, "MAT");
                 // The remainder "Gospel of Matthew" should be in content.
@@ -2084,25 +2071,27 @@ mod tests {
     }
 
     #[test]
-    fn test_cst_lowering_matches_legacy_parse_for_basic_document() {
+    fn test_cst_lowering_handles_basic_document() {
         let input = "\\id GEN Genesis\n\\c 1\n\\p  \\v 1  In the beginning";
-        let legacy = parse_lossy(input).document;
-        let lowered = parse(input).document;
-        assert_eq!(lowered, legacy);
+        let cst = cst::get_cst(input);
+        let lowered = parse_from_cst(&cst).ast;
+        let parsed = parse(input).ast;
+        assert_eq!(lowered, parsed);
     }
 
     #[test]
-    fn test_cst_lowering_matches_legacy_parse_for_sidebar_document() {
+    fn test_cst_lowering_handles_sidebar_document() {
         let input = "\\id MAT\n\\c 1\n\\esb \\cat People\\cat*\n\\ms \\jmp |link-href=\"article-john_the_baptist\"\\jmp* John the Baptist\n\\p John announced the coming king.\n\\esbe";
-        let legacy = parse_lossy(input).document;
-        let lowered = parse(input).document;
-        assert_eq!(lowered, legacy);
+        let cst = cst::get_cst(input);
+        let lowered = parse_from_cst(&cst).ast;
+        let parsed = parse(input).ast;
+        assert_eq!(lowered, parsed);
     }
 
     #[test]
     fn test_note_caller_extraction() {
         let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 text\\f + footnote text\\f*");
-        let note = result.document.content.iter().find_map(|n| {
+        let note = result.ast.content.iter().find_map(|n| {
             if let Node::Para { content, .. } = n {
                 content.iter().find_map(|c| {
                     if let Node::Note {
@@ -2139,7 +2128,7 @@ mod tests {
         let result = parse("\\id GEN\n\\h Genesis");
         // \h should become a Para node.
         let has_para = result
-            .document
+            .ast
             .content
             .iter()
             .any(|n| matches!(n, Node::Para { marker, .. } if marker == "h"));
@@ -2249,7 +2238,7 @@ mod tests {
     fn test_sidebar() {
         let result = parse("\\id GEN\n\\c 1\n\\esb\n\\p Sidebar content\n\\esbe");
         let has_sidebar = result
-            .document
+            .ast
             .content
             .iter()
             .any(|n| matches!(n, Node::Sidebar { .. }));
@@ -2260,7 +2249,7 @@ mod tests {
     fn test_multiple_chapters() {
         let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 text\n\\c 2\n\\p\n\\v 1 more text");
         let chapter_count = result
-            .document
+            .ast
             .content
             .iter()
             .filter(|n| matches!(n, Node::Chapter { .. }))
@@ -2271,7 +2260,7 @@ mod tests {
     #[test]
     fn test_verse_range() {
         let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 3-4 combined text");
-        let verse = result.document.content.iter().find_map(|n| {
+        let verse = result.ast.content.iter().find_map(|n| {
             if let Node::Para { content, .. } = n {
                 content.iter().find_map(|c| {
                     if let Node::Verse { number, .. } = c {
@@ -2297,7 +2286,7 @@ mod tests {
             .any(|d| d.code == crate::diagnostics::DiagnosticCode::UnknownMarker);
         assert!(!has_unknown, "\\fm should not produce UnknownMarker");
 
-        let has_fm_char = result.document.content.iter().any(|n| {
+        let has_fm_char = result.ast.content.iter().any(|n| {
             matches!(
                 n,
                 Node::Para { content, .. }
@@ -2329,7 +2318,7 @@ mod tests {
         );
         assert!(deprecation_warnings[0].message.contains("\\addpn"));
 
-        let has_addpn_char = result.document.content.iter().any(|n| {
+        let has_addpn_char = result.ast.content.iter().any(|n| {
             matches!(
                 n,
                 Node::Para { content, .. }

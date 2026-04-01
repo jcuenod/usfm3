@@ -381,7 +381,7 @@ fn run_test_case(case: &TestCase) -> TestResult {
     // For "fail" tests, check that we produce diagnostics (from parsing or validation).
     if !case.validated_pass {
         let has_parse_errors = result.diagnostics.has_errors();
-        let validation_diags = validation::validate(&result.document);
+        let validation_diags = validation::validate(&result.ast);
         let has_validation_errors = validation_diags.has_errors();
         if has_parse_errors || has_validation_errors {
             return TestResult::Pass;
@@ -393,7 +393,7 @@ fn run_test_case(case: &TestCase) -> TestResult {
     }
 
     // For "pass" tests, compare USJ output
-    let mut our_usj = match usj::to_usj_value(&result.document) {
+    let mut our_usj = match usj::to_usj_value(&result.ast) {
         Ok(v) => v,
         Err(e) => return TestResult::Fail(vec![format!("USJ serialization error: {e}")]),
     };

@@ -5,7 +5,7 @@ use crate::markers::{self, MarkerKind};
 
 #[derive(Debug, Clone)]
 pub struct CstParseResult {
-    pub document: CstDocument,
+    pub cst: CstDocument,
     pub diagnostics: DiagnosticList,
 }
 
@@ -176,17 +176,21 @@ impl CstDocument {
 }
 
 pub fn parse(input: &str) -> CstParseResult {
-    let diagnostics = crate::builder::parse_lossy(input).diagnostics;
+    let cst = get_cst(input);
+    let diagnostics = crate::builder::parse_from_cst(&cst).diagnostics;
+    CstParseResult {
+        cst,
+        diagnostics,
+    }
+}
+
+pub(crate) fn get_cst(input: &str) -> CstDocument {
     let tokens = lexer::tokenize(input);
     let mut parser = CstParser::new(input);
     for (token, span) in tokens {
         parser.handle_token(token, span);
     }
-    let document = parser.finish();
-    CstParseResult {
-        document,
-        diagnostics,
-    }
+    parser.finish()
 }
 
 #[derive(Debug, Clone)]
@@ -930,14 +934,20 @@ impl<'a> CstParser<'a> {
     }
 
     fn close_table_cell_in_row(&mut self) {
-        while matches!(self.stack.last().map(|open| open.kind), Some(MarkerKind::TableCell)) {
+        while matches!(
+            self.stack.last().map(|open| open.kind),
+            Some(MarkerKind::TableCell)
+        ) {
             let open = self.stack.pop().unwrap();
             self.refresh_span(open.id);
         }
     }
 
     fn close_table_row(&mut self) {
-        if matches!(self.stack.last().map(|open| open.kind), Some(MarkerKind::TableRow)) {
+        if matches!(
+            self.stack.last().map(|open| open.kind),
+            Some(MarkerKind::TableRow)
+        ) {
             let open = self.stack.pop().unwrap();
             self.refresh_span(open.id);
         }
@@ -957,7 +967,9 @@ impl<'a> CstParser<'a> {
     fn close_paragraph(&mut self) {
         loop {
             match self.stack.last().map(|open| open.kind) {
-                Some(MarkerKind::Character) | Some(MarkerKind::Unknown) | Some(MarkerKind::Figure) => {
+                Some(MarkerKind::Character)
+                | Some(MarkerKind::Unknown)
+                | Some(MarkerKind::Figure) => {
                     let open = self.stack.pop().unwrap();
                     self.refresh_span(open.id);
                 }
@@ -1048,7 +1060,10 @@ impl<'a> CstParser<'a> {
     }
 
     fn close_open_meta(&mut self) {
-        while matches!(self.stack.last().map(|open| open.kind), Some(MarkerKind::Meta)) {
+        while matches!(
+            self.stack.last().map(|open| open.kind),
+            Some(MarkerKind::Meta)
+        ) {
             let open = self.stack.pop().unwrap();
             self.refresh_span(open.id);
         }
@@ -1062,9 +1077,10 @@ impl<'a> CstParser<'a> {
     }
 
     fn in_note_or_sidebar_context(&self) -> bool {
-        self.stack.iter().rev().any(|open| {
-            open.kind == MarkerKind::Note || open.kind == MarkerKind::SidebarStart
-        })
+        self.stack
+            .iter()
+            .rev()
+            .any(|open| open.kind == MarkerKind::Note || open.kind == MarkerKind::SidebarStart)
     }
 
     fn has_open_paragraph(&self) -> bool {
@@ -1139,21 +1155,21 @@ mod tests {
     fn lossless_round_trip_preserves_source() {
         let input = "\\p  \\v 1  In the beginning\n";
         let parsed = parse(input);
-        assert_eq!(parsed.document.to_source_string(), input);
+        assert_eq!(parsed.cst.to_source_string(), input);
     }
 
     #[test]
     fn leaf_lookup_covers_whitespace_gap() {
         let input = "\\p  \\v 1  In the beginning";
         let parsed = parse(input);
-        let first_gap = parsed.document.leaf_at_offset(2).unwrap();
-        let second_gap = parsed.document.leaf_at_offset(8).unwrap();
+        let first_gap = parsed.cst.leaf_at_offset(2).unwrap();
+        let second_gap = parsed.cst.leaf_at_offset(8).unwrap();
         assert!(matches!(
-            parsed.document.node(first_gap).kind,
+            parsed.cst.node(first_gap).kind,
             CstKind::WhitespaceToken
         ));
         assert!(matches!(
-            parsed.document.node(second_gap).kind,
+            parsed.cst.node(second_gap).kind,
             CstKind::WhitespaceToken
         ));
     }

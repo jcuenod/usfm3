@@ -112,7 +112,7 @@ export function parse(usfm: string, options?: ParseOptions): ParseResult;
 
 #[wasm_bindgen(skip_typescript)]
 pub struct ParseResult {
-    document: usfm3_lib::ast::Document,
+    ast: usfm3_lib::ast::Document,
     diagnostics_js: JsValue,
     has_errors: bool,
 }
@@ -124,7 +124,7 @@ impl ParseResult {
     pub fn to_usj(&self, options: Option<UsjOptions>) -> Result<JsValue, JsError> {
         let include_spans = options.map(|o| o.spans).unwrap_or(false);
         let usj = usfm3_lib::usj::to_usj_value_with_options(
-            &self.document,
+            &self.ast,
             usfm3_lib::usj::UsjOptions { include_spans },
         )
         .map_err(|e| JsError::new(&e.to_string()))?;
@@ -134,19 +134,19 @@ impl ParseResult {
     /// Serialize the parsed document to USX XML.
     #[wasm_bindgen(js_name = "toUsx")]
     pub fn to_usx(&self) -> Result<String, JsError> {
-        usfm3_lib::usx::to_usx_string(&self.document).map_err(|e| JsError::new(&e.to_string()))
+        usfm3_lib::usx::to_usx_string(&self.ast).map_err(|e| JsError::new(&e.to_string()))
     }
 
     /// Serialize the parsed document to normalized USFM.
     #[wasm_bindgen(js_name = "toUsfm")]
     pub fn to_usfm(&self) -> String {
-        usfm3_lib::usfm::to_usfm_string(&self.document)
+        usfm3_lib::usfm::to_usfm_string(&self.ast)
     }
 
     /// Returns a verse reference map: `{ "GEN 1:1": "In the beginning ...", ... }`.
     #[wasm_bindgen(js_name = "toVref")]
     pub fn to_vref(&self) -> Result<JsValue, JsError> {
-        let map = usfm3_lib::vref::to_vref_map(&self.document);
+        let map = usfm3_lib::vref::to_vref_map(&self.ast);
         let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
         serde::Serialize::serialize(&map, &serializer).map_err(|e| JsError::new(&e.to_string()))
     }
@@ -175,7 +175,7 @@ pub fn parse(usfm: &str, options: Option<ParseOptions>) -> Result<ParseResult, J
     let result = usfm3_lib::builder::parse(usfm);
 
     let validation_diags = if validate {
-        usfm3_lib::validation::validate(&result.document)
+        usfm3_lib::validation::validate(&result.ast)
     } else {
         usfm3_lib::diagnostics::DiagnosticList::new()
     };
@@ -195,7 +195,7 @@ pub fn parse(usfm: &str, options: Option<ParseOptions>) -> Result<ParseResult, J
         serde_wasm_bindgen::to_value(&diagnostics).map_err(|e| JsError::new(&e.to_string()))?;
 
     Ok(ParseResult {
-        document: result.document,
+        ast: result.ast,
         diagnostics_js,
         has_errors,
     })
