@@ -5,6 +5,7 @@
 use serde_json::Value;
 use usfm3::ast::Node;
 use usfm3::builder;
+use usfm3::cst::{self, CstKind, MarkerTokenKind};
 use usfm3::diagnostics::{DiagnosticCode, Severity};
 use usfm3::usj;
 use usfm3::vref;
@@ -16,6 +17,10 @@ use usfm3::vref;
 /// Parse USFM and return the document, panicking on unexpected errors.
 fn parse(usfm: &str) -> usfm3::ast::Document {
     builder::parse(usfm).document
+}
+
+fn parse_to_cst(usfm: &str) -> usfm3::cst::CstDocument {
+    cst::parse(usfm).document
 }
 
 /// Parse USFM and return the USJ JSON value.
@@ -34,6 +39,80 @@ fn parse_to_vref(usfm: &str) -> serde_json::Map<String, Value> {
 fn parse_to_usx(usfm: &str) -> String {
     let doc = parse(usfm);
     usfm3::usx::to_usx_string(&doc).expect("USX serialization failed")
+}
+
+#[test]
+fn cst_round_trip_preserves_source_exactly() {
+    let usfm = "\\id GEN\r\n\\c 1\r\n\\p  \\v 1  In the beginning\\nd Lord\\nd*\r\n";
+    let cst = parse_to_cst(usfm);
+    assert_eq!(cst.to_source_string(), usfm);
+}
+
+#[test]
+fn cst_leaf_spans_are_gap_free_and_ordered() {
+    let usfm = "\\id GEN\r\n\\c 1\r\n\\p  \\v 1  In the beginning\r\n";
+    let cst = parse_to_cst(usfm);
+
+    let mut expected_start = 0;
+    for &leaf_id in cst.leaf_ids() {
+        let span = cst.node(leaf_id).span.clone();
+        assert_eq!(span.start, expected_start, "leaf spans should be contiguous");
+        assert!(span.end >= span.start, "leaf spans should be ordered");
+        expected_start = span.end;
+    }
+
+    assert_eq!(expected_start, usfm.len(), "leaf spans should cover the full source");
+}
+
+#[test]
+fn cst_cursor_mapping_finds_preserved_trivia() {
+    let usfm = "\\p  \\v 1  In the beginning";
+    let cst = parse_to_cst(usfm);
+
+    let first_gap = cst.leaf_at_offset(2).unwrap();
+    let second_gap = cst.leaf_at_offset(8).unwrap();
+
+    assert!(matches!(cst.node(first_gap).kind, CstKind::WhitespaceToken));
+    assert!(matches!(cst.node(second_gap).kind, CstKind::WhitespaceToken));
+
+    let range = cst.covering_node_range(4, 8).unwrap();
+    assert!(matches!(cst.node(range).kind, CstKind::Verse { .. }));
+}
+
+#[test]
+fn cst_preserves_explicit_close_markers_as_leaves() {
+    let usfm = "\\p \\nd Lord\\nd*";
+    let cst = parse_to_cst(usfm);
+    let close_leaf = cst
+        .leaf_ids()
+        .iter()
+        .copied()
+        .find(|&id| matches!(cst.node(id).kind, CstKind::ClosingMarkerToken { .. }))
+        .expect("expected explicit close-marker leaf");
+
+    assert_eq!(cst.source_text(close_leaf), "\\nd*");
+}
+
+#[test]
+fn cst_preserves_raw_marker_spelling() {
+    let usfm = "\\p \\+nd Lord\\+nd*";
+    let cst = parse_to_cst(usfm);
+    let nested_open = cst
+        .leaf_ids()
+        .iter()
+        .copied()
+        .find(|&id| {
+            matches!(
+                cst.node(id).kind,
+                CstKind::MarkerToken {
+                    token_kind: MarkerTokenKind::Nested,
+                    ..
+                }
+            )
+        })
+        .expect("expected nested marker leaf");
+
+    assert_eq!(cst.source_text(nested_open), "\\+nd");
 }
 
 /// Collect all nodes of a given USJ `type` from a JSON array, recursively.

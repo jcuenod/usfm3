@@ -1,5 +1,6 @@
 pub mod ast;
 pub mod builder;
+pub mod cst;
 pub mod diagnostics;
 pub mod lexer;
 pub mod markers;

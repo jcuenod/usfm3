@@ -4,6 +4,7 @@
 //! ([`crate::ast::Document`]) together with a list of diagnostics.
 
 use crate::ast::{Attribute, Document, Node, NodeSpans, Span};
+use crate::cst::{self, ClosingTokenKind, CstDocument, CstKind, MarkerTokenKind};
 use crate::diagnostics::{Diagnostic, DiagnosticList};
 use crate::lexer::{self, Token};
 use crate::markers::{self, MarkerKind};
@@ -20,7 +21,58 @@ pub struct ParseResult {
 
 /// Parse a USFM source string into a [`Document`] with diagnostics.
 pub fn parse(input: &str) -> ParseResult {
+    let cst = cst::parse(input);
+    ParseResult {
+        document: lower_cst_to_ast(&cst.document),
+        diagnostics: cst.diagnostics,
+    }
+}
+
+/// Parse a USFM source string into a CST with diagnostics.
+pub fn parse_cst(input: &str) -> cst::CstParseResult {
+    cst::parse(input)
+}
+
+pub(crate) fn parse_lossy(input: &str) -> ParseResult {
     let tokens = lexer::tokenize(input);
+    parse_token_stream(tokens)
+}
+
+fn lower_cst_to_ast(document: &CstDocument) -> Document {
+    parse_token_stream(cst_leaf_tokens(document)).document
+}
+
+fn cst_leaf_tokens<'a>(document: &'a CstDocument) -> Vec<(Token<'a>, Span)> {
+    let mut tokens = Vec::with_capacity(document.leaf_ids().len());
+    for &leaf_id in document.leaf_ids() {
+        let node = document.node(leaf_id);
+        let span = node.span.clone();
+        let text = document.source_text(leaf_id);
+        let token = match &node.kind {
+            CstKind::MarkerToken { token_kind, .. } => match token_kind {
+                MarkerTokenKind::Regular => Token::Marker(text),
+                MarkerTokenKind::Nested => Token::NestedMarker(text),
+                MarkerTokenKind::Chapter => Token::Chapter,
+                MarkerTokenKind::Verse => Token::Verse,
+                MarkerTokenKind::Milestone => Token::Milestone(text),
+            },
+            CstKind::ClosingMarkerToken { token_kind, .. } => match token_kind {
+                ClosingTokenKind::Regular => Token::ClosingMarker(text),
+                ClosingTokenKind::Nested => Token::NestedClosingMarker(text),
+            },
+            CstKind::MilestoneEndToken => Token::MilestoneEnd,
+            CstKind::AttributesToken => Token::Attributes(text),
+            CstKind::TextToken => Token::Text(text),
+            CstKind::WhitespaceToken => Token::Whitespace(text),
+            CstKind::NewlineToken => Token::Newline,
+            other => panic!("non-leaf CST node {:?} in leaf sequence", other),
+        };
+        tokens.push((token, span));
+    }
+    tokens
+}
+
+fn parse_token_stream(tokens: Vec<(Token<'_>, Span)>) -> ParseResult {
     let mut builder = TreeBuilder::new();
     for (token, span) in tokens {
         builder.handle_token(token, span);
@@ -2029,6 +2081,22 @@ mod tests {
             }
             other => panic!("expected Book, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_cst_lowering_matches_legacy_parse_for_basic_document() {
+        let input = "\\id GEN Genesis\n\\c 1\n\\p  \\v 1  In the beginning";
+        let legacy = parse_lossy(input).document;
+        let lowered = parse(input).document;
+        assert_eq!(lowered, legacy);
+    }
+
+    #[test]
+    fn test_cst_lowering_matches_legacy_parse_for_sidebar_document() {
+        let input = "\\id MAT\n\\c 1\n\\esb \\cat People\\cat*\n\\ms \\jmp |link-href=\"article-john_the_baptist\"\\jmp* John the Baptist\n\\p John announced the coming king.\n\\esbe";
+        let legacy = parse_lossy(input).document;
+        let lowered = parse(input).document;
+        assert_eq!(lowered, legacy);
     }
 
     #[test]
