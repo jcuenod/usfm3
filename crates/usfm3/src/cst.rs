@@ -1,20 +1,18 @@
 use crate::ast::Span;
-use crate::diagnostics::DiagnosticList;
 use crate::lexer::{self, Token};
-use crate::markers::{self, MarkerKind};
-
-#[derive(Debug, Clone)]
-pub struct CstParseResult {
-    pub cst: CstDocument,
-    pub diagnostics: DiagnosticList,
-}
+use crate::markers::{MarkerKind, MarkerName};
+use std::num::NonZeroUsize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CstNodeId(usize);
+pub struct CstNodeId(NonZeroUsize);
 
 impl CstNodeId {
+    fn from_index(index: usize) -> Self {
+        Self(NonZeroUsize::new(index + 1).expect("CST node indices are one-based"))
+    }
+
     pub fn index(self) -> usize {
-        self.0
+        self.0.get() - 1
     }
 }
 
@@ -41,52 +39,52 @@ pub struct CstNode {
 pub enum CstKind {
     Document,
     Book {
-        marker: String,
+        marker: MarkerName,
     },
     Chapter {
-        marker: String,
+        marker: MarkerName,
     },
     Verse {
-        marker: String,
+        marker: MarkerName,
     },
     Para {
-        marker: String,
+        marker: MarkerName,
     },
     Char {
-        marker: String,
+        marker: MarkerName,
     },
     Note {
-        marker: String,
+        marker: MarkerName,
     },
     Milestone {
-        marker: String,
+        marker: MarkerName,
     },
     Figure {
-        marker: String,
+        marker: MarkerName,
     },
     Sidebar {
-        marker: String,
+        marker: MarkerName,
     },
     Periph {
-        marker: String,
+        marker: MarkerName,
     },
     Table,
     TableRow {
-        marker: String,
+        marker: MarkerName,
     },
     TableCell {
-        marker: String,
+        marker: MarkerName,
     },
     Ref,
     Unknown {
-        marker: String,
+        marker: MarkerName,
     },
     MarkerToken {
-        normalized: String,
+        normalized: MarkerName,
         token_kind: MarkerTokenKind,
     },
     ClosingMarkerToken {
-        normalized: String,
+        normalized: MarkerName,
         token_kind: ClosingTokenKind,
     },
     MilestoneEndToken,
@@ -111,6 +109,32 @@ pub enum ClosingTokenKind {
     Nested,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum LeafTokenKind<'a> {
+    Marker {
+        normalized: &'a MarkerName,
+        token_kind: MarkerTokenKind,
+    },
+    ClosingMarker {
+        normalized: &'a MarkerName,
+        token_kind: ClosingTokenKind,
+    },
+    MilestoneEnd,
+    Attributes,
+    Text,
+    Whitespace,
+    Newline,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LeafToken<'a> {
+    pub id: CstNodeId,
+    pub parent: CstNodeId,
+    pub span: &'a Span,
+    pub text: &'a str,
+    pub kind: LeafTokenKind<'a>,
+}
+
 impl CstKind {
     pub fn is_leaf(&self) -> bool {
         matches!(
@@ -132,7 +156,7 @@ impl CstDocument {
     }
 
     pub fn node(&self, id: CstNodeId) -> &CstNode {
-        &self.nodes[id.0]
+        &self.nodes[id.index()]
     }
 
     pub fn nodes(&self) -> &[CstNode] {
@@ -149,6 +173,41 @@ impl CstDocument {
 
     pub fn source_text(&self, id: CstNodeId) -> &str {
         &self.source[self.node(id).span.clone()]
+    }
+
+    pub fn leaf_token(&self, id: CstNodeId) -> LeafToken<'_> {
+        let node = self.node(id);
+        let parent = node.parent.expect("leaf nodes always have a parent");
+        let text = self.source_text(id);
+        let kind = match &node.kind {
+            CstKind::MarkerToken {
+                normalized,
+                token_kind,
+            } => LeafTokenKind::Marker {
+                normalized,
+                token_kind: *token_kind,
+            },
+            CstKind::ClosingMarkerToken {
+                normalized,
+                token_kind,
+            } => LeafTokenKind::ClosingMarker {
+                normalized,
+                token_kind: *token_kind,
+            },
+            CstKind::MilestoneEndToken => LeafTokenKind::MilestoneEnd,
+            CstKind::AttributesToken => LeafTokenKind::Attributes,
+            CstKind::TextToken => LeafTokenKind::Text,
+            CstKind::WhitespaceToken => LeafTokenKind::Whitespace,
+            CstKind::NewlineToken => LeafTokenKind::Newline,
+            other => panic!("non-leaf CST node {:?} requested as leaf token", other),
+        };
+        LeafToken {
+            id,
+            parent,
+            span: &node.span,
+            text,
+            kind,
+        }
     }
 
     pub fn to_source_string(&self) -> String {
@@ -201,26 +260,36 @@ impl CstDocument {
     }
 }
 
-pub fn parse(input: &str) -> CstParseResult {
-    let cst = get_cst(input);
-    let diagnostics = crate::builder::parse_from_cst(&cst).diagnostics;
-    CstParseResult { cst, diagnostics }
+pub fn parse(input: &str) -> CstDocument {
+    parse_owned(input.to_string())
 }
 
-pub(crate) fn get_cst(input: &str) -> CstDocument {
-    let tokens = lexer::tokenize(input);
-    let mut parser = CstParser::new(input);
-    for (token, span) in tokens {
-        parser.handle_token(token, span);
+pub fn parse_owned(input: String) -> CstDocument {
+    let (root, nodes, leaf_ids) = {
+        let mut parser = CstParser::new(&input);
+        for (token, span) in lexer::spanned_tokens(&input) {
+            parser.handle_token(token, span);
+        }
+        parser.finish_parts()
+    };
+    CstDocument {
+        source: input,
+        root,
+        nodes,
+        leaf_ids,
     }
-    parser.finish()
+}
+
+#[cfg(test)]
+pub(crate) fn get_cst(input: &str) -> CstDocument {
+    parse(input)
 }
 
 #[derive(Debug, Clone)]
 struct OpenNode {
     id: CstNodeId,
     kind: MarkerKind,
-    marker: String,
+    marker: MarkerName,
 }
 
 struct CstParser<'a> {
@@ -237,7 +306,7 @@ struct CstParser<'a> {
 
 impl<'a> CstParser<'a> {
     fn new(source: &'a str) -> Self {
-        let root = CstNodeId(0);
+        let root = CstNodeId::from_index(0);
         Self {
             source,
             nodes: vec![CstNode {
@@ -259,17 +328,12 @@ impl<'a> CstParser<'a> {
         }
     }
 
-    fn finish(mut self) -> CstDocument {
+    fn finish_parts(mut self) -> (CstNodeId, Vec<CstNode>, Vec<CstNodeId>) {
         self.flush_pending_milestone();
         self.flush_pending_chapter();
         self.flush_pending_verse();
         self.close_all();
-        CstDocument {
-            source: self.source.to_string(),
-            root: self.root,
-            nodes: self.nodes,
-            leaf_ids: self.leaf_ids,
-        }
+        (self.root, self.nodes, self.leaf_ids)
     }
 
     fn handle_token(&mut self, token: Token<'a>, span: Span) {
@@ -355,13 +419,13 @@ impl<'a> CstParser<'a> {
         self.close_block_context();
         let id = self.open_structural(
             CstKind::Chapter {
-                marker: "c".to_string(),
+                marker: MarkerName::from("c"),
             },
             span.clone(),
         );
         self.append_leaf_to(
             CstKind::MarkerToken {
-                normalized: "c".to_string(),
+                normalized: MarkerName::from("c"),
                 token_kind: MarkerTokenKind::Chapter,
             },
             span,
@@ -376,13 +440,13 @@ impl<'a> CstParser<'a> {
         self.close_open_meta();
         let id = self.open_structural(
             CstKind::Verse {
-                marker: "v".to_string(),
+                marker: MarkerName::from("v"),
             },
             span.clone(),
         );
         self.append_leaf_to(
             CstKind::MarkerToken {
-                normalized: "v".to_string(),
+                normalized: MarkerName::from("v"),
                 token_kind: MarkerTokenKind::Verse,
             },
             span,
@@ -394,7 +458,7 @@ impl<'a> CstParser<'a> {
 
     fn handle_milestone(&mut self, span: Span, marker: &str) {
         self.flush_pending_milestone();
-        let normalized = lexer::strip_marker_backslash(marker).to_string();
+        let normalized = MarkerName::from(lexer::strip_marker_backslash(marker));
         let id = self.open_structural(
             CstKind::Milestone {
                 marker: normalized.clone(),
@@ -414,9 +478,8 @@ impl<'a> CstParser<'a> {
     }
 
     fn handle_nested_open(&mut self, span: Span, marker: &str) {
-        let normalized = lexer::strip_marker_backslash(marker)
-            .trim_start_matches('+')
-            .to_string();
+        let normalized =
+            MarkerName::from(lexer::strip_marker_backslash(marker).trim_start_matches('+'));
         let id = self.open_structural_from_name(&normalized, span.clone());
         self.append_leaf_to(
             CstKind::MarkerToken {
@@ -438,7 +501,7 @@ impl<'a> CstParser<'a> {
             let open = self.stack.pop().unwrap();
             self.append_leaf_to(
                 CstKind::ClosingMarkerToken {
-                    normalized: normalized.to_string(),
+                    normalized: MarkerName::from(normalized),
                     token_kind: if nested {
                         ClosingTokenKind::Nested
                     } else {
@@ -454,7 +517,7 @@ impl<'a> CstParser<'a> {
         }
         self.append_leaf(
             CstKind::ClosingMarkerToken {
-                normalized: normalized.to_string(),
+                normalized: MarkerName::from(normalized),
                 token_kind: if nested {
                     ClosingTokenKind::Nested
                 } else {
@@ -467,16 +530,17 @@ impl<'a> CstParser<'a> {
     }
 
     fn handle_marker(&mut self, span: Span, marker: &str) {
-        let name = lexer::strip_marker_backslash(marker);
+        let name = MarkerName::from(lexer::strip_marker_backslash(marker));
 
         if name == "usfm" {
             self.pending_usfm = true;
         }
 
-        let info = markers::lookup_marker(name);
+        let info_kind = name.kind();
+        let valid_in_note = name.valid_in_note();
 
         if matches!(
-            info.kind,
+            info_kind,
             MarkerKind::Header
                 | MarkerKind::Paragraph
                 | MarkerKind::TableRow
@@ -488,23 +552,23 @@ impl<'a> CstParser<'a> {
             self.flush_pending_verse();
         }
 
-        match info.kind {
+        match info_kind {
             MarkerKind::Header => {
                 self.close_block_context();
                 let id = self.open_structural(
                     CstKind::Para {
-                        marker: name.to_string(),
+                        marker: name.clone(),
                     },
                     span.clone(),
                 );
                 if name == "id" {
-                    self.nodes[id.0].kind = CstKind::Book {
-                        marker: name.to_string(),
+                    self.nodes[id.index()].kind = CstKind::Book {
+                        marker: name.clone(),
                     };
                 }
                 self.append_leaf_to(
                     CstKind::MarkerToken {
-                        normalized: name.to_string(),
+                        normalized: name.clone(),
                         token_kind: MarkerTokenKind::Regular,
                     },
                     span,
@@ -516,13 +580,13 @@ impl<'a> CstParser<'a> {
                 self.close_block_context();
                 let id = self.open_structural(
                     CstKind::Para {
-                        marker: name.to_string(),
+                        marker: name.clone(),
                     },
                     span.clone(),
                 );
                 self.append_leaf_to(
                     CstKind::MarkerToken {
-                        normalized: name.to_string(),
+                        normalized: name.clone(),
                         token_kind: MarkerTokenKind::Regular,
                     },
                     span,
@@ -533,13 +597,13 @@ impl<'a> CstParser<'a> {
             MarkerKind::Note => {
                 let id = self.open_structural(
                     CstKind::Note {
-                        marker: name.to_string(),
+                        marker: name.clone(),
                     },
                     span.clone(),
                 );
                 self.append_leaf_to(
                     CstKind::MarkerToken {
-                        normalized: name.to_string(),
+                        normalized: name.clone(),
                         token_kind: MarkerTokenKind::Regular,
                     },
                     span,
@@ -548,23 +612,23 @@ impl<'a> CstParser<'a> {
                 );
             }
             MarkerKind::Character => {
-                let clean_name = name.trim_start_matches('+');
+                let clean_name = MarkerName::from(name.as_str().trim_start_matches('+'));
                 let closed_sibling = if self.in_note_context()
-                    && info.valid_in_note
-                    && self.is_same_note_family(clean_name)
+                    && valid_in_note
+                    && self.is_same_note_family(clean_name.as_str())
                     && clean_name != "fv"
                 {
                     self.close_character_in_note()
                 } else {
                     false
                 };
-                let id = self.open_structural_from_name(clean_name, span.clone());
+                let id = self.open_structural_from_name(&clean_name, span.clone());
                 if clean_name == "ref" {
-                    self.nodes[id.0].kind = CstKind::Ref;
+                    self.nodes[id.index()].kind = CstKind::Ref;
                 }
                 self.append_leaf_to(
                     CstKind::MarkerToken {
-                        normalized: clean_name.to_string(),
+                        normalized: clean_name,
                         token_kind: MarkerTokenKind::Regular,
                     },
                     span,
@@ -579,13 +643,13 @@ impl<'a> CstParser<'a> {
                 self.close_block_context();
                 let row_id = self.open_structural(
                     CstKind::TableRow {
-                        marker: name.to_string(),
+                        marker: name.clone(),
                     },
                     span.clone(),
                 );
                 self.append_leaf_to(
                     CstKind::MarkerToken {
-                        normalized: name.to_string(),
+                        normalized: name.clone(),
                         token_kind: MarkerTokenKind::Regular,
                     },
                     span,
@@ -597,13 +661,13 @@ impl<'a> CstParser<'a> {
                 self.close_table_cell_in_row();
                 let id = self.open_structural(
                     CstKind::TableCell {
-                        marker: name.to_string(),
+                        marker: name.clone(),
                     },
                     span.clone(),
                 );
                 self.append_leaf_to(
                     CstKind::MarkerToken {
-                        normalized: name.to_string(),
+                        normalized: name.clone(),
                         token_kind: MarkerTokenKind::Regular,
                     },
                     span,
@@ -615,13 +679,13 @@ impl<'a> CstParser<'a> {
                 self.close_block_context();
                 let id = self.open_structural(
                     CstKind::Periph {
-                        marker: name.to_string(),
+                        marker: name.clone(),
                     },
                     span.clone(),
                 );
                 self.append_leaf_to(
                     CstKind::MarkerToken {
-                        normalized: name.to_string(),
+                        normalized: name.clone(),
                         token_kind: MarkerTokenKind::Regular,
                     },
                     span,
@@ -632,13 +696,13 @@ impl<'a> CstParser<'a> {
             MarkerKind::Figure => {
                 let id = self.open_structural(
                     CstKind::Figure {
-                        marker: name.to_string(),
+                        marker: name.clone(),
                     },
                     span.clone(),
                 );
                 self.append_leaf_to(
                     CstKind::MarkerToken {
-                        normalized: name.to_string(),
+                        normalized: name.clone(),
                         token_kind: MarkerTokenKind::Regular,
                     },
                     span,
@@ -650,13 +714,13 @@ impl<'a> CstParser<'a> {
                 self.close_block_context();
                 let id = self.open_structural(
                     CstKind::Sidebar {
-                        marker: name.to_string(),
+                        marker: name.clone(),
                     },
                     span.clone(),
                 );
                 self.append_leaf_to(
                     CstKind::MarkerToken {
-                        normalized: name.to_string(),
+                        normalized: name.clone(),
                         token_kind: MarkerTokenKind::Regular,
                     },
                     span,
@@ -664,18 +728,18 @@ impl<'a> CstParser<'a> {
                     Some(marker),
                 );
             }
-            MarkerKind::SidebarEnd => self.close_sidebar(span, marker, name),
+            MarkerKind::SidebarEnd => self.close_sidebar(span, marker, name.as_str()),
             MarkerKind::Meta => {
                 if name == "cat" && self.in_note_or_sidebar_context() {
                     let id = self.open_structural(
                         CstKind::Para {
-                            marker: name.to_string(),
+                            marker: name.clone(),
                         },
                         span.clone(),
                     );
                     self.append_leaf_to(
                         CstKind::MarkerToken {
-                            normalized: name.to_string(),
+                            normalized: name.clone(),
                             token_kind: MarkerTokenKind::Regular,
                         },
                         span,
@@ -686,13 +750,13 @@ impl<'a> CstParser<'a> {
                     self.close_inline_above_paragraph();
                     let id = self.open_structural(
                         CstKind::Para {
-                            marker: name.to_string(),
+                            marker: name.clone(),
                         },
                         span.clone(),
                     );
                     self.append_leaf_to(
                         CstKind::MarkerToken {
-                            normalized: name.to_string(),
+                            normalized: name.clone(),
                             token_kind: MarkerTokenKind::Regular,
                         },
                         span,
@@ -703,13 +767,13 @@ impl<'a> CstParser<'a> {
                     self.close_block_context();
                     let id = self.open_structural(
                         CstKind::Para {
-                            marker: name.to_string(),
+                            marker: name.clone(),
                         },
                         span.clone(),
                     );
                     self.append_leaf_to(
                         CstKind::MarkerToken {
-                            normalized: name.to_string(),
+                            normalized: name.clone(),
                             token_kind: MarkerTokenKind::Regular,
                         },
                         span,
@@ -721,13 +785,13 @@ impl<'a> CstParser<'a> {
             MarkerKind::Unknown => {
                 let id = self.open_structural(
                     CstKind::Unknown {
-                        marker: name.to_string(),
+                        marker: name.clone(),
                     },
                     span.clone(),
                 );
                 self.append_leaf_to(
                     CstKind::MarkerToken {
-                        normalized: name.to_string(),
+                        normalized: name,
                         token_kind: MarkerTokenKind::Regular,
                     },
                     span,
@@ -752,34 +816,34 @@ impl<'a> CstParser<'a> {
         self.append_leaf(CstKind::MilestoneEndToken, span, Some("\\*"));
     }
 
-    fn open_structural_from_name(&mut self, name: &str, span: Span) -> CstNodeId {
-        let kind = match markers::lookup_marker(name).kind {
+    fn open_structural_from_name(&mut self, name: &MarkerName, span: Span) -> CstNodeId {
+        let kind = match name.kind() {
             MarkerKind::Note => CstKind::Note {
-                marker: name.to_string(),
+                marker: name.clone(),
             },
             MarkerKind::Figure => CstKind::Figure {
-                marker: name.to_string(),
+                marker: name.clone(),
             },
             MarkerKind::TableRow => CstKind::TableRow {
-                marker: name.to_string(),
+                marker: name.clone(),
             },
             MarkerKind::TableCell => CstKind::TableCell {
-                marker: name.to_string(),
+                marker: name.clone(),
             },
             MarkerKind::SidebarStart => CstKind::Sidebar {
-                marker: name.to_string(),
+                marker: name.clone(),
             },
             MarkerKind::Periph => CstKind::Periph {
-                marker: name.to_string(),
+                marker: name.clone(),
             },
             MarkerKind::Paragraph | MarkerKind::Header | MarkerKind::Meta => CstKind::Para {
-                marker: name.to_string(),
+                marker: name.clone(),
             },
             MarkerKind::Unknown => CstKind::Unknown {
-                marker: name.to_string(),
+                marker: name.clone(),
             },
             _ => CstKind::Char {
-                marker: name.to_string(),
+                marker: name.clone(),
             },
         };
         self.open_structural(kind, span)
@@ -788,7 +852,7 @@ impl<'a> CstParser<'a> {
     fn open_structural(&mut self, kind: CstKind, span: Span) -> CstNodeId {
         let parent = self.current_parent();
         let id = self.push_node(kind, span, parent);
-        let marker = match &self.nodes[id.0].kind {
+        let marker = match &self.nodes[id.index()].kind {
             CstKind::Book { marker }
             | CstKind::Chapter { marker }
             | CstKind::Verse { marker }
@@ -802,17 +866,17 @@ impl<'a> CstParser<'a> {
             | CstKind::TableRow { marker }
             | CstKind::TableCell { marker }
             | CstKind::Unknown { marker } => marker.clone(),
-            CstKind::Ref => "ref".to_string(),
-            CstKind::Table => "table".to_string(),
-            _ => String::new(),
+            CstKind::Ref => MarkerName::from("ref"),
+            CstKind::Table => MarkerName::from("table"),
+            _ => MarkerName::from(""),
         };
         if !matches!(
-            self.nodes[id.0].kind,
+            self.nodes[id.index()].kind,
             CstKind::Chapter { .. } | CstKind::Verse { .. } | CstKind::Milestone { .. }
         ) {
-            let marker_kind = match &self.nodes[id.0].kind {
+            let marker_kind = match &self.nodes[id.index()].kind {
                 CstKind::Book { .. } => MarkerKind::Header,
-                CstKind::Para { marker } => markers::lookup_marker(marker).kind,
+                CstKind::Para { marker } => marker.kind(),
                 CstKind::Char { .. } | CstKind::Ref => MarkerKind::Character,
                 CstKind::Note { .. } => MarkerKind::Note,
                 CstKind::Figure { .. } => MarkerKind::Figure,
@@ -821,7 +885,7 @@ impl<'a> CstParser<'a> {
                 CstKind::TableRow { .. } => MarkerKind::TableRow,
                 CstKind::TableCell { .. } => MarkerKind::TableCell,
                 CstKind::Unknown { .. } => MarkerKind::Unknown,
-                _ => markers::lookup_marker(&marker).kind,
+                _ => marker.kind(),
             };
             self.stack.push(OpenNode {
                 id,
@@ -839,15 +903,15 @@ impl<'a> CstParser<'a> {
         } else {
             self.push_regular_node(kind, span, parent)
         };
-        if self.nodes[id.0].kind.is_leaf() {
+        if self.nodes[id.index()].kind.is_leaf() {
             self.leaf_ids.push(id);
         }
         id
     }
 
     fn push_regular_node(&mut self, kind: CstKind, span: Span, parent: CstNodeId) -> CstNodeId {
-        let id = CstNodeId(self.nodes.len());
-        let prev_sibling = self.nodes[parent.0].last_child;
+        let id = CstNodeId::from_index(self.nodes.len());
+        let prev_sibling = self.nodes[parent.index()].last_child;
         self.nodes.push(CstNode {
             kind,
             span,
@@ -858,18 +922,18 @@ impl<'a> CstParser<'a> {
             last_child: None,
         });
         if let Some(prev) = prev_sibling {
-            self.nodes[prev.0].next_sibling = Some(id);
+            self.nodes[prev.index()].next_sibling = Some(id);
         } else {
-            self.nodes[parent.0].first_child = Some(id);
+            self.nodes[parent.index()].first_child = Some(id);
         }
-        self.nodes[parent.0].last_child = Some(id);
+        self.nodes[parent.index()].last_child = Some(id);
         self.bump_span(parent, id);
         id
     }
 
     fn ensure_table_parent(&mut self, parent: CstNodeId, span: Span) -> CstNodeId {
-        if let Some(last_child) = self.nodes[parent.0].last_child
-            && matches!(self.nodes[last_child.0].kind, CstKind::Table)
+        if let Some(last_child) = self.nodes[parent.index()].last_child
+            && matches!(self.nodes[last_child.index()].kind, CstKind::Table)
         {
             return last_child;
         }
@@ -1041,7 +1105,7 @@ impl<'a> CstParser<'a> {
             let sidebar = self.stack.pop().unwrap();
             self.append_leaf_to(
                 CstKind::MarkerToken {
-                    normalized: normalized.to_string(),
+                    normalized: MarkerName::from(normalized),
                     token_kind: MarkerTokenKind::Regular,
                 },
                 span,
@@ -1053,7 +1117,7 @@ impl<'a> CstParser<'a> {
         }
         self.append_leaf(
             CstKind::MarkerToken {
-                normalized: normalized.to_string(),
+                normalized: MarkerName::from(normalized),
                 token_kind: MarkerTokenKind::Regular,
             },
             span,
@@ -1143,21 +1207,22 @@ impl<'a> CstParser<'a> {
     }
 
     fn refresh_span(&mut self, id: CstNodeId) {
-        let Some(first_child) = self.nodes[id.0].first_child else {
+        let Some(first_child) = self.nodes[id.index()].first_child else {
             return;
         };
-        let last_child = self.nodes[id.0].last_child.unwrap();
-        let new_span = self.nodes[first_child.0].span.start..self.nodes[last_child.0].span.end;
-        self.nodes[id.0].span = new_span.clone();
-        if let Some(parent) = self.nodes[id.0].parent {
+        let last_child = self.nodes[id.index()].last_child.unwrap();
+        let new_span =
+            self.nodes[first_child.index()].span.start..self.nodes[last_child.index()].span.end;
+        self.nodes[id.index()].span = new_span.clone();
+        if let Some(parent) = self.nodes[id.index()].parent {
             self.bump_span(parent, id);
         }
     }
 
     fn bump_span(&mut self, parent: CstNodeId, child: CstNodeId) {
-        let child_span = self.nodes[child.0].span.clone();
-        let is_first_child = self.nodes[parent.0].first_child == Some(child);
-        let parent_span = &mut self.nodes[parent.0].span;
+        let child_span = self.nodes[child.index()].span.clone();
+        let is_first_child = self.nodes[parent.index()].first_child == Some(child);
+        let parent_span = &mut self.nodes[parent.index()].span;
         if is_first_child {
             *parent_span = child_span;
         } else {
@@ -1175,26 +1240,34 @@ fn split_first_word(s: &str) -> (&str, &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builder;
 
     #[test]
     fn lossless_round_trip_preserves_source() {
         let input = "\\p  \\v 1  In the beginning\n";
         let parsed = parse(input);
-        assert_eq!(parsed.cst.to_source_string(), input);
+        assert_eq!(parsed.to_source_string(), input);
+    }
+
+    #[test]
+    fn parse_is_cst_only_and_does_not_lower() {
+        builder::reset_lower_invocations_for_tests();
+        let _ = parse("\\p \\v 1 In the beginning");
+        assert_eq!(builder::lower_invocations_for_tests(), 0);
     }
 
     #[test]
     fn leaf_lookup_covers_whitespace_gap() {
         let input = "\\p  \\v 1  In the beginning";
         let parsed = parse(input);
-        let first_gap = parsed.cst.leaf_at_offset(2).unwrap();
-        let second_gap = parsed.cst.leaf_at_offset(8).unwrap();
+        let first_gap = parsed.leaf_at_offset(2).unwrap();
+        let second_gap = parsed.leaf_at_offset(8).unwrap();
         assert!(matches!(
-            parsed.cst.node(first_gap).kind,
+            parsed.node(first_gap).kind,
             CstKind::WhitespaceToken
         ));
         assert!(matches!(
-            parsed.cst.node(second_gap).kind,
+            parsed.node(second_gap).kind,
             CstKind::WhitespaceToken
         ));
     }

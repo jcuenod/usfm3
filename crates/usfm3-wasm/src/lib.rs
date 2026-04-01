@@ -172,18 +172,12 @@ impl ParseResult {
 pub fn parse(usfm: &str, options: Option<ParseOptions>) -> Result<ParseResult, JsError> {
     let validate = options.is_none_or(|o| o.validate);
 
-    let result = usfm3_lib::builder::parse(usfm);
-
-    let validation_diags = if validate {
-        usfm3_lib::validation::validate(&result.ast)
-    } else {
-        usfm3_lib::diagnostics::DiagnosticList::new()
-    };
+    let result = usfm3_lib::parse_full(usfm, usfm3_lib::ParseOptions { validate });
 
     let diagnostics: Vec<Diagnostic> = result
-        .diagnostics
+        .parser_diagnostics
         .iter()
-        .chain(validation_diags.iter())
+        .chain(result.validation_diagnostics.iter())
         .map(convert_diagnostic)
         .collect();
 

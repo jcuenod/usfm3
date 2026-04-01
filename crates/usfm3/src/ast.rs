@@ -1,5 +1,7 @@
 use serde::Serialize;
 
+use crate::markers::MarkerName;
+
 /// Byte-offset range in the original USFM source.
 pub type Span = std::ops::Range<usize>;
 
@@ -86,7 +88,7 @@ impl Default for Document {
 pub enum Node {
     /// `\id` -- book identification.
     Book {
-        marker: String,
+        marker: MarkerName,
         code: String,
         content: Vec<Node>,
         spans: NodeSpans,
@@ -94,7 +96,7 @@ pub enum Node {
 
     /// `\c` -- chapter milestone (NOT a container).
     Chapter {
-        marker: String,
+        marker: MarkerName,
         number: String,
         sid: Option<String>,
         altnumber: Option<String>,
@@ -104,7 +106,7 @@ pub enum Node {
 
     /// `\v` -- verse milestone (NOT a container).
     Verse {
-        marker: String,
+        marker: MarkerName,
         number: String,
         sid: Option<String>,
         altnumber: Option<String>,
@@ -114,14 +116,14 @@ pub enum Node {
 
     /// `\p`, `\q1`, `\m`, `\li1`, `\b`, etc. -- paragraph-level container.
     Para {
-        marker: String,
+        marker: MarkerName,
         content: Vec<Node>,
         spans: NodeSpans,
     },
 
     /// `\nd`, `\bk`, `\add`, `\it`, etc. -- character-level container.
     Char {
-        marker: String,
+        marker: MarkerName,
         content: Vec<Node>,
         attributes: Vec<Attribute>,
         spans: NodeSpans,
@@ -129,7 +131,7 @@ pub enum Node {
 
     /// `\f`, `\x` -- footnote or cross-reference container.
     Note {
-        marker: String,
+        marker: MarkerName,
         caller: String,
         category: Option<String>,
         content: Vec<Node>,
@@ -138,14 +140,14 @@ pub enum Node {
 
     /// `\qt1-s`, `\qt1-e`, `\ts-s`, etc. -- milestone (empty element with attributes).
     Milestone {
-        marker: String,
+        marker: MarkerName,
         attributes: Vec<Attribute>,
         spans: NodeSpans,
     },
 
     /// `\fig` -- figure with attributes.
     Figure {
-        marker: String,
+        marker: MarkerName,
         content: Vec<Node>,
         attributes: Vec<Attribute>,
         spans: NodeSpans,
@@ -153,7 +155,7 @@ pub enum Node {
 
     /// `\esb` ... `\esbe` -- sidebar container.
     Sidebar {
-        marker: String,
+        marker: MarkerName,
         category: Option<String>,
         content: Vec<Node>,
         spans: NodeSpans,
@@ -175,14 +177,14 @@ pub enum Node {
 
     /// `\tr` -- table row container.
     TableRow {
-        marker: String,
+        marker: MarkerName,
         content: Vec<Node>,
         spans: NodeSpans,
     },
 
     /// `\th1`, `\tc2`, etc. -- table cell.
     TableCell {
-        marker: String,
+        marker: MarkerName,
         align: String,
         content: Vec<Node>,
         spans: NodeSpans,
@@ -198,7 +200,7 @@ pub enum Node {
     /// Unrecognized marker (from `\z` namespace or genuinely unknown).
     /// Preserved so no data is lost.
     Unknown {
-        marker: String,
+        marker: MarkerName,
         content: Vec<Node>,
         spans: NodeSpans,
     },
@@ -299,7 +301,7 @@ impl Node {
             | Node::Sidebar { marker, .. }
             | Node::TableRow { marker, .. }
             | Node::TableCell { marker, .. }
-            | Node::Unknown { marker, .. } => Some(marker),
+            | Node::Unknown { marker, .. } => Some(marker.as_str()),
             Node::Table { .. }
             | Node::Periph { .. }
             | Node::Ref { .. }

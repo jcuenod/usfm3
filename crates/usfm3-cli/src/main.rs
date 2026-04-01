@@ -25,17 +25,20 @@ fn main() {
         buf
     };
 
-    let result = usfm3::builder::parse(&input);
+    let result = usfm3::parse_full(
+        &input,
+        usfm3::ParseOptions {
+            validate: !no_validate,
+        },
+    );
 
     if !no_validate {
         // Print parser diagnostics
-        for diag in result.diagnostics.iter() {
+        for diag in result.parser_diagnostics.iter() {
             eprintln!("[{}:{}] {}", diag.span.start, diag.span.end, diag);
         }
 
-        // Run validation
-        let validation_diags = usfm3::validation::validate(&result.ast);
-        for diag in validation_diags.iter() {
+        for diag in result.validation_diagnostics.iter() {
             eprintln!("[{}:{}] {}", diag.span.start, diag.span.end, diag);
         }
     }

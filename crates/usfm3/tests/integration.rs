@@ -20,7 +20,11 @@ fn get_ast(usfm: &str) -> usfm3::ast::Document {
 }
 
 fn get_cst(usfm: &str) -> usfm3::cst::CstDocument {
-    cst::parse(usfm).cst
+    cst::parse(usfm)
+}
+
+fn get_full(usfm: &str) -> usfm3::ParseArtifacts {
+    usfm3::parse_full(usfm, usfm3::ParseOptions { validate: true })
 }
 
 /// Parse USFM and return the USJ JSON value.
@@ -123,6 +127,54 @@ fn cst_preserves_raw_marker_spelling() {
         .expect("expected nested marker leaf");
 
     assert_eq!(cst.source_text(nested_open), "\\+nd");
+}
+
+#[test]
+fn lowering_from_cst_matches_direct_parse() {
+    let usfm = "\\id GEN Genesis\n\\c 1\n\\p \\v 1 In the beginning\\nd Lord\\nd*\n";
+    let cst = get_cst(usfm);
+    let lowered = builder::lower(&cst);
+    let parsed = builder::parse(usfm);
+
+    assert_eq!(lowered.ast, parsed.ast);
+    assert_eq!(
+        lowered.diagnostics.into_inner(),
+        parsed.diagnostics.into_inner()
+    );
+}
+
+#[test]
+fn parser_diagnostics_capture_cst_anchor() {
+    let result = builder::parse("\\p \\notreal foo");
+    let diag = result
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::UnknownMarker)
+        .expect("expected unknown marker diagnostic");
+
+    assert!(
+        diag.anchor_cst.is_some(),
+        "parser diagnostic should be CST-anchored"
+    );
+}
+
+#[test]
+fn validation_diagnostics_resolve_cst_anchor_lazily() {
+    let result = get_full("\\id BAD Bad Book\n\\c 1\n\\p \\v 1 Text");
+    let diag = result
+        .validation_diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::InvalidBookCode)
+        .expect("expected invalid book code diagnostic");
+
+    assert!(
+        diag.anchor_cst.is_none(),
+        "validation diagnostics should stay lazy"
+    );
+    assert!(
+        diag.resolved_anchor_cst(&result.cst).is_some(),
+        "validation diagnostics should resolve back to a CST node"
+    );
 }
 
 /// Collect all nodes of a given USJ `type` from a JSON array, recursively.

@@ -1,9 +1,7 @@
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
-use usfm3::builder;
 use usfm3::usj;
-use usfm3::validation;
 
 const FIXTURE_ROOT: &str = "tests/fixtures/usfm-grammar";
 const EXPECTED_FAILURES_FILE: &str = "tests/bridgeconn_expected_failures.txt";
@@ -376,13 +374,12 @@ fn run_test_case(case: &TestCase) -> TestResult {
     };
 
     // Parse with our parser
-    let result = builder::parse(&usfm);
+    let result = usfm3::parse_full(&usfm, usfm3::ParseOptions { validate: true });
 
     // For "fail" tests, check that we produce diagnostics (from parsing or validation).
     if !case.validated_pass {
-        let has_parse_errors = result.diagnostics.has_errors();
-        let validation_diags = validation::validate(&result.ast);
-        let has_validation_errors = validation_diags.has_errors();
+        let has_parse_errors = result.parser_diagnostics.has_errors();
+        let has_validation_errors = result.validation_diagnostics.has_errors();
         if has_parse_errors || has_validation_errors {
             return TestResult::Pass;
         } else {

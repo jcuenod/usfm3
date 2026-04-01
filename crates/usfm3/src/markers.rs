@@ -1,5 +1,8 @@
+use serde::Serialize;
+use std::ops::Deref;
+
 /// Classification of USFM markers by structural role.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum MarkerKind {
     /// \p, \q1, \m, \li1, \b, \nb, \pi1, etc.
     /// Implicitly closed by the next paragraph marker.
@@ -57,6 +60,7 @@ pub enum MarkerKind {
 }
 
 /// Metadata about a single USFM marker.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub struct MarkerInfo {
     /// The structural classification of the marker.
     pub kind: MarkerKind,
@@ -78,6 +82,191 @@ impl MarkerInfo {
             valid_in_note: true,
         }
     }
+}
+
+/// An interned, exact known marker definition.
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
+pub struct KnownMarker {
+    name: Box<str>,
+    info: MarkerInfo,
+}
+
+impl KnownMarker {
+    fn new(name: impl Into<Box<str>>, info: MarkerInfo) -> Self {
+        Self {
+            name: name.into(),
+            info,
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.name.as_ref()
+    }
+
+    pub fn kind(&self) -> MarkerKind {
+        self.info.kind
+    }
+
+    pub fn valid_in_note(&self) -> bool {
+        self.info.valid_in_note
+    }
+
+    pub fn info(&self) -> MarkerInfo {
+        self.info
+    }
+}
+
+/// Marker names stored in hot-path CST/AST nodes.
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
+pub enum MarkerName {
+    Known(KnownMarker),
+    Custom(Box<str>),
+}
+
+impl MarkerName {
+    pub fn parse(name: &str) -> Self {
+        lookup_known_marker_exact(name)
+            .map(Self::Known)
+            .unwrap_or_else(|| Self::Custom(name.into()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            MarkerName::Known(marker) => marker.as_str(),
+            MarkerName::Custom(marker) => marker.as_ref(),
+        }
+    }
+
+    pub fn kind(&self) -> MarkerKind {
+        match self {
+            MarkerName::Known(marker) => marker.kind(),
+            MarkerName::Custom(marker) => lookup_marker(marker).kind,
+        }
+    }
+
+    pub fn valid_in_note(&self) -> bool {
+        match self {
+            MarkerName::Known(marker) => marker.valid_in_note(),
+            MarkerName::Custom(marker) => lookup_marker(marker).valid_in_note,
+        }
+    }
+
+    pub fn default_attribute(&self) -> Option<&'static str> {
+        default_attribute(self.as_str())
+    }
+
+    pub fn required_attributes(&self) -> &'static [&'static str] {
+        required_attributes(self.as_str())
+    }
+}
+
+impl Deref for MarkerName {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+impl AsRef<str> for MarkerName {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl std::fmt::Display for MarkerName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Serialize for MarkerName {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl From<&str> for MarkerName {
+    fn from(value: &str) -> Self {
+        Self::parse(value)
+    }
+}
+
+impl From<String> for MarkerName {
+    fn from(value: String) -> Self {
+        lookup_known_marker_exact(&value)
+            .map(Self::Known)
+            .unwrap_or_else(|| Self::Custom(value.into_boxed_str()))
+    }
+}
+
+impl From<&String> for MarkerName {
+    fn from(value: &String) -> Self {
+        Self::parse(value)
+    }
+}
+
+impl PartialEq<&str> for MarkerName {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+impl PartialEq<str> for MarkerName {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<MarkerName> for &str {
+    fn eq(&self, other: &MarkerName) -> bool {
+        *self == other.as_str()
+    }
+}
+
+fn lookup_known_marker_exact(name: &str) -> Option<KnownMarker> {
+    let info = match name {
+        "id" | "usfm" | "ide" | "h" | "h1" | "h2" | "h3" | "toc1" | "toc2" | "toc3" | "toca1"
+        | "toca2" | "toca3" | "mt" | "mt1" | "mt2" | "mt3" | "mt4" | "mte" | "mte1" | "mte2"
+        | "imt" | "imt1" | "imt2" | "imt3" | "imt4" | "imte" | "imte1" | "imte2" | "is" | "is1"
+        | "is2" | "is3" | "cl" | "cp" | "cd" => MarkerInfo::new(MarkerKind::Header),
+        "p" | "m" | "po" | "pr" | "cls" | "pmo" | "pm" | "pmc" | "pmr" | "pi" | "pi1" | "pi2"
+        | "pi3" | "mi" | "nb" | "pc" | "ph" | "ph1" | "ph2" | "ph3" | "b" | "pb" | "q" | "q1"
+        | "q2" | "q3" | "q4" | "qr" | "qc" | "qa" | "qm" | "qm1" | "qm2" | "qm3" | "qd" | "lh"
+        | "li" | "li1" | "li2" | "li3" | "li4" | "lf" | "lim" | "lim1" | "lim2" | "lim3" | "ms"
+        | "ms1" | "ms2" | "ms3" | "mr" | "s" | "s1" | "s2" | "s3" | "s4" | "sr" | "r" | "sp"
+        | "sd" | "sd1" | "sd2" | "sd3" | "sd4" | "d" | "ip" | "ipi" | "im" | "imi" | "ipq"
+        | "imq" | "ipr" | "ib" | "iq" | "iq1" | "iq2" | "iq3" | "iex" | "iot" | "io" | "io1"
+        | "io2" | "io3" | "io4" | "ili" | "ili1" | "ili2" | "ie" | "lit" => {
+            MarkerInfo::new(MarkerKind::Paragraph)
+        }
+        "periph" => MarkerInfo::new(MarkerKind::Periph),
+        "tr" => MarkerInfo::new(MarkerKind::TableRow),
+        "f" | "fe" | "x" | "ef" | "ex" => MarkerInfo::new(MarkerKind::Note),
+        "fr" | "ft" | "fk" | "fq" | "fqa" | "fl" | "fw" | "fp" | "fv" | "fdc" | "xop" | "xot"
+        | "xnt" | "xdc" | "xo" | "xt" | "xta" | "xk" | "xq" => {
+            MarkerInfo::note_sub(MarkerKind::Character)
+        }
+        "add" | "addpn" | "bk" | "dc" | "ior" | "iqt" | "k" | "litl" | "nd" | "ord" | "pn"
+        | "png" | "qs" | "qt" | "sig" | "sls" | "tl" | "wj" | "em" | "bd" | "bdit" | "it"
+        | "no" | "sc" | "sup" | "rb" | "pro" | "w" | "wg" | "wh" | "wa" | "rq" | "ca" | "va"
+        | "vp" | "fm" | "jmp" | "ref" => MarkerInfo::new(MarkerKind::Character),
+        "th" | "th1" | "th2" | "th3" | "tc" | "tc1" | "tc2" | "tc3" | "thr" | "thr1" | "thr2"
+        | "thr3" | "tcr" | "tcr1" | "tcr2" | "tcr3" | "thc" | "thc1" | "thc2" | "thc3" | "tcc"
+        | "tcc1" | "tcc2" | "tcc3" => MarkerInfo::new(MarkerKind::TableCell),
+        "c" => MarkerInfo::new(MarkerKind::Chapter),
+        "v" => MarkerInfo::new(MarkerKind::Verse),
+        "fig" => MarkerInfo::new(MarkerKind::Figure),
+        "esb" => MarkerInfo::new(MarkerKind::SidebarStart),
+        "esbe" => MarkerInfo::new(MarkerKind::SidebarEnd),
+        "rem" | "sts" | "restore" | "cat" => MarkerInfo::new(MarkerKind::Meta),
+        "ts" => MarkerInfo::new(MarkerKind::MilestoneStart),
+        _ => return None,
+    };
+    Some(KnownMarker::new(name, info))
 }
 
 /// Return the default attribute key for a marker, if any.

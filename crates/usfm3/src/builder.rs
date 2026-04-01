@@ -4,67 +4,65 @@
 //! a list of diagnostics.
 
 use crate::ast::{Attribute, Document, Node, NodeSpans, Span};
-use crate::cst::{self, ClosingTokenKind, CstDocument, CstKind, MarkerTokenKind};
+use crate::cst::{self, ClosingTokenKind, CstDocument, CstNodeId, LeafTokenKind, MarkerTokenKind};
 use crate::diagnostics::{Diagnostic, DiagnosticList};
-use crate::lexer::{self, Token};
-use crate::markers::{self, MarkerKind};
+use crate::markers::{self, MarkerKind, MarkerName};
+
+#[cfg(test)]
+use std::cell::Cell;
+
+#[cfg(test)]
+thread_local! {
+    static LOWER_INVOCATIONS: Cell<usize> = const { Cell::new(0) };
+}
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Result of parsing a USFM string.
-pub struct ParseResult {
+/// Result of lowering a CST into an AST plus parser diagnostics.
+pub struct LowerResult {
     pub ast: Document,
     pub diagnostics: DiagnosticList,
 }
 
+pub type ParseResult = LowerResult;
+
 /// Parse a USFM source string into a [`Document`] with diagnostics.
-pub fn parse(input: &str) -> ParseResult {
-    let cst = cst::get_cst(input);
-    parse_from_cst(&cst)
+pub fn parse(input: &str) -> LowerResult {
+    let cst = cst::parse(input);
+    lower(&cst)
 }
 
-pub(crate) fn parse_from_cst(document: &CstDocument) -> ParseResult {
-    parse_token_stream(cst_leaf_tokens(document))
+pub fn parse_owned(input: String) -> LowerResult {
+    let cst = cst::parse_owned(input);
+    lower(&cst)
 }
 
-fn cst_leaf_tokens<'a>(document: &'a CstDocument) -> Vec<(Token<'a>, Span)> {
-    let mut tokens = Vec::with_capacity(document.leaf_ids().len());
-    for &leaf_id in document.leaf_ids() {
-        let node = document.node(leaf_id);
-        let span = node.span.clone();
-        let text = document.source_text(leaf_id);
-        let token = match &node.kind {
-            CstKind::MarkerToken { token_kind, .. } => match token_kind {
-                MarkerTokenKind::Regular => Token::Marker(text),
-                MarkerTokenKind::Nested => Token::NestedMarker(text),
-                MarkerTokenKind::Chapter => Token::Chapter,
-                MarkerTokenKind::Verse => Token::Verse,
-                MarkerTokenKind::Milestone => Token::Milestone(text),
-            },
-            CstKind::ClosingMarkerToken { token_kind, .. } => match token_kind {
-                ClosingTokenKind::Regular => Token::ClosingMarker(text),
-                ClosingTokenKind::Nested => Token::NestedClosingMarker(text),
-            },
-            CstKind::MilestoneEndToken => Token::MilestoneEnd,
-            CstKind::AttributesToken => Token::Attributes(text),
-            CstKind::TextToken => Token::Text(text),
-            CstKind::WhitespaceToken => Token::Whitespace(text),
-            CstKind::NewlineToken => Token::Newline,
-            other => panic!("non-leaf CST node {:?} in leaf sequence", other),
-        };
-        tokens.push((token, span));
-    }
-    tokens
-}
+pub fn lower(document: &CstDocument) -> LowerResult {
+    #[cfg(test)]
+    LOWER_INVOCATIONS.with(|count| count.set(count.get() + 1));
 
-fn parse_token_stream(tokens: Vec<(Token<'_>, Span)>) -> ParseResult {
     let mut builder = TreeBuilder::new();
-    for (token, span) in tokens {
-        builder.handle_token(token, span);
+    for &leaf_id in document.leaf_ids() {
+        builder.handle_leaf(document, leaf_id);
     }
     builder.finish()
+}
+
+#[cfg(test)]
+pub(crate) fn parse_from_cst(document: &CstDocument) -> LowerResult {
+    lower(document)
+}
+
+#[cfg(test)]
+pub(crate) fn reset_lower_invocations_for_tests() {
+    LOWER_INVOCATIONS.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn lower_invocations_for_tests() -> usize {
+    LOWER_INVOCATIONS.with(Cell::get)
 }
 
 // ---------------------------------------------------------------------------
@@ -73,9 +71,10 @@ fn parse_token_stream(tokens: Vec<(Token<'_>, Span)>) -> ParseResult {
 
 /// A node that has been opened but not yet finalized.
 struct OpenNode {
-    marker: String,
+    marker: MarkerName,
     kind: MarkerKind,
     span: Span,
+    cst_anchor: CstNodeId,
     children: Vec<Node>,
     /// For Note nodes: the caller character extracted from the first text.
     caller: Option<String>,
@@ -117,8 +116,8 @@ struct TreeBuilder {
 
     // Pending milestones -- \c and \v consume the *next* text token as their
     // number argument.
-    pending_chapter: Option<Span>,
-    pending_verse: Option<Span>,
+    pending_chapter: Option<(Span, CstNodeId)>,
+    pending_verse: Option<(Span, CstNodeId)>,
 
     // \usfm marker — absorb the following text (version string) and discard.
     pending_usfm: bool,
@@ -143,7 +142,9 @@ struct TreeBuilder {
 
     // Tracks a milestone that expects a `\*` self-close.
     // Stores (marker_name, span) of the milestone awaiting `\*`.
-    pending_milestone_close: Option<(String, Span)>,
+    pending_milestone_close: Option<(MarkerName, Span, CstNodeId)>,
+
+    text_scratch: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -168,21 +169,26 @@ impl TreeBuilder {
             after_close_marker: false,
             pending_close_space: false,
             pending_milestone_close: None,
+            text_scratch: String::new(),
         }
     }
 
-    fn handle_token(&mut self, token: Token, span: Span) {
+    fn handle_leaf(&mut self, document: &CstDocument, leaf_id: CstNodeId) {
+        let leaf = document.leaf_token(leaf_id);
         // Clear after_open_marker for any non-Whitespace, non-Newline token.
         // Newlines right after an opening marker are structural (not content).
-        if !matches!(token, Token::Whitespace(_) | Token::Newline) {
+        if !matches!(
+            leaf.kind,
+            LeafTokenKind::Whitespace | LeafTokenKind::Newline
+        ) {
             self.after_open_marker = false;
             self.after_close_marker = false;
         }
         // Clear pending_close_space for non-WS/NL/Text tokens.  Text tokens
         // consume it in `append_text`; everything else discards it.
         if !matches!(
-            token,
-            Token::Whitespace(_) | Token::Newline | Token::Text(_)
+            leaf.kind,
+            LeafTokenKind::Whitespace | LeafTokenKind::Newline | LeafTokenKind::Text
         ) {
             self.pending_close_space = false;
         }
@@ -190,32 +196,59 @@ impl TreeBuilder {
         // after a milestone and see a non-whitespace/non-attributes/non-MilestoneEnd
         // token, emit a diagnostic.
         if !matches!(
-            token,
-            Token::Whitespace(_) | Token::Newline | Token::Attributes(_) | Token::MilestoneEnd
+            leaf.kind,
+            LeafTokenKind::Whitespace
+                | LeafTokenKind::Newline
+                | LeafTokenKind::Attributes
+                | LeafTokenKind::MilestoneEnd
         ) {
             self.flush_pending_milestone_close();
         }
-        match token {
-            Token::Whitespace(_) => self.handle_whitespace(),
-            Token::Chapter => self.handle_chapter(span),
-            Token::Verse => self.handle_verse(span),
-            Token::Milestone(m) => self.handle_milestone(m, span),
-            Token::NestedMarker(m) => self.handle_nested_open(m, span),
-            Token::NestedClosingMarker(m) => self.handle_nested_close(m, span),
-            Token::ClosingMarker(m) => self.handle_close(m, span),
-            Token::Marker(m) => self.handle_marker(m, span),
-            Token::Attributes(a) => self.handle_attributes(a, span),
-            Token::Text(t) => self.append_text(t, span),
-            Token::MilestoneEnd => self.handle_milestone_end(span),
-            Token::Newline => self.handle_newline(),
+        match leaf.kind {
+            LeafTokenKind::Whitespace => self.handle_whitespace(),
+            LeafTokenKind::Newline => self.handle_newline(),
+            LeafTokenKind::Attributes => {
+                self.handle_attributes(leaf.text, leaf.span.clone(), leaf.id)
+            }
+            LeafTokenKind::Text => self.append_text(leaf.text, leaf.span.clone()),
+            LeafTokenKind::MilestoneEnd => self.handle_milestone_end(leaf.span.clone()),
+            LeafTokenKind::Marker {
+                normalized,
+                token_kind,
+            } => match token_kind {
+                MarkerTokenKind::Regular => {
+                    self.handle_marker(normalized, leaf.span.clone(), leaf.parent)
+                }
+                MarkerTokenKind::Nested => {
+                    self.handle_nested_open(normalized, leaf.span.clone(), leaf.parent)
+                }
+                MarkerTokenKind::Chapter => self.handle_chapter(leaf.span.clone(), leaf.parent),
+                MarkerTokenKind::Verse => self.handle_verse(leaf.span.clone(), leaf.parent),
+                MarkerTokenKind::Milestone => {
+                    self.handle_milestone(normalized, leaf.span.clone(), leaf.parent)
+                }
+            },
+            LeafTokenKind::ClosingMarker {
+                normalized,
+                token_kind,
+            } => match token_kind {
+                ClosingTokenKind::Regular => {
+                    self.handle_close(normalized.as_str(), leaf.span.clone(), leaf.id)
+                }
+                ClosingTokenKind::Nested => {
+                    self.handle_nested_close(normalized.as_str(), leaf.span.clone(), leaf.id)
+                }
+            },
         }
     }
 
     /// If a milestone was expecting `\*` and didn't get one, emit a diagnostic.
     fn flush_pending_milestone_close(&mut self) {
-        if let Some((marker, span)) = self.pending_milestone_close.take() {
-            self.diagnostics
-                .push(Diagnostic::missing_milestone_self_close(&marker, span));
+        if let Some((marker, span, anchor)) = self.pending_milestone_close.take() {
+            self.diagnostics.push(
+                Diagnostic::missing_milestone_self_close(marker.as_str(), span)
+                    .with_anchor_cst(anchor),
+            );
         }
     }
 
@@ -259,9 +292,7 @@ impl TreeBuilder {
     // Marker handling
     // -----------------------------------------------------------------
 
-    fn handle_marker(&mut self, m: &str, span: Span) {
-        let name = lexer::strip_marker_backslash(m);
-
+    fn handle_marker(&mut self, name: &MarkerName, span: Span, cst_anchor: CstNodeId) {
         // \usfm marker — absorb the version string and discard.
         if name == "usfm" {
             self.pending_usfm = true;
@@ -271,24 +302,29 @@ impl TreeBuilder {
         // Duplicate \id — first one wins, skip subsequent ones.
         if name == "id" {
             if self.seen_id {
-                self.diagnostics.push(Diagnostic::duplicate_id(span));
+                self.diagnostics
+                    .push(Diagnostic::duplicate_id(span).with_anchor_cst(cst_anchor));
                 return;
             }
             self.seen_id = true;
         }
 
-        let info = markers::lookup_marker(name);
+        let info_kind = name.kind();
+        let valid_in_note = name.valid_in_note();
 
         if name == "addpn" {
-            self.diagnostics.push(Diagnostic::deprecated_marker(
-                name,
-                "nested \\pn ...\\pn* within \\add ...\\add*",
-                span.clone(),
-            ));
+            self.diagnostics.push(
+                Diagnostic::deprecated_marker(
+                    name.as_str(),
+                    "nested \\pn ...\\pn* within \\add ...\\add*",
+                    span.clone(),
+                )
+                .with_anchor_cst(cst_anchor),
+            );
         }
 
         if matches!(
-            info.kind,
+            info_kind,
             MarkerKind::Header
                 | MarkerKind::Paragraph
                 | MarkerKind::TableRow
@@ -301,26 +337,26 @@ impl TreeBuilder {
             self.consume_pending_newline();
         }
 
-        match info.kind {
+        match info_kind {
             MarkerKind::Header => {
                 // Close any open block context before starting a new header.
-                self.close_block_context(name);
-                self.push_open(name.to_string(), MarkerKind::Header, span);
+                self.close_block_context(name.as_str());
+                self.push_open(name.clone(), MarkerKind::Header, span, cst_anchor);
             }
 
             MarkerKind::Paragraph => {
-                self.close_block_context(name);
-                self.push_open(name.to_string(), MarkerKind::Paragraph, span);
+                self.close_block_context(name.as_str());
+                self.push_open(name.clone(), MarkerKind::Paragraph, span, cst_anchor);
             }
 
             MarkerKind::Note => {
-                self.push_open(name.to_string(), MarkerKind::Note, span);
+                self.push_open(name.clone(), MarkerKind::Note, span, cst_anchor);
             }
 
             MarkerKind::Character => {
                 let closed_sibling = if self.in_note_context()
-                    && info.valid_in_note
-                    && self.is_same_note_family(name)
+                    && valid_in_note
+                    && self.is_same_note_family(name.as_str())
                     && name != "fv"
                 {
                     // Note sub-markers (\fr, \ft, \fq, etc.) are siblings —
@@ -336,7 +372,7 @@ impl TreeBuilder {
                     // character markers naturally nest by stack order.
                     false
                 };
-                self.push_open(name.to_string(), MarkerKind::Character, span);
+                self.push_open(name.clone(), MarkerKind::Character, span, cst_anchor);
                 if closed_sibling {
                     // The structural space after this sub-marker also serves
                     // as the word boundary between the previous sub-marker's
@@ -348,70 +384,72 @@ impl TreeBuilder {
 
             MarkerKind::TableRow => {
                 // Table rows are paragraph-level: close notes and paragraphs first.
-                self.close_block_context(name);
-                self.push_open(name.to_string(), MarkerKind::TableRow, span);
+                self.close_block_context(name.as_str());
+                self.push_open(name.clone(), MarkerKind::TableRow, span, cst_anchor);
             }
 
             MarkerKind::TableCell => {
                 // Implicitly close the previous table cell (sibling, not nested).
                 self.close_table_cell_in_row();
-                self.push_open(name.to_string(), MarkerKind::TableCell, span);
+                self.push_open(name.clone(), MarkerKind::TableCell, span, cst_anchor);
             }
 
             MarkerKind::Periph => {
                 // Periph acts as a section-level container (like sidebar).
-                self.close_block_context(name);
-                self.push_open(name.to_string(), MarkerKind::Periph, span);
+                self.close_block_context(name.as_str());
+                self.push_open(name.clone(), MarkerKind::Periph, span, cst_anchor);
             }
 
             MarkerKind::Figure => {
-                self.push_open(name.to_string(), MarkerKind::Figure, span);
+                self.push_open(name.clone(), MarkerKind::Figure, span, cst_anchor);
             }
 
             MarkerKind::SidebarStart => {
-                self.close_block_context(name);
-                self.push_open(name.to_string(), MarkerKind::SidebarStart, span);
+                self.close_block_context(name.as_str());
+                self.push_open(name.clone(), MarkerKind::SidebarStart, span, cst_anchor);
             }
 
             MarkerKind::SidebarEnd => {
-                self.close_sidebar(name, &span);
+                self.close_sidebar(name.as_str(), &span, cst_anchor);
             }
 
             MarkerKind::Meta => {
                 if name == "cat" && self.in_note_or_sidebar_context() {
                     // \cat inside a note/sidebar: nest inside it.
                     // extract_category() will pull it out during finalization.
-                    self.push_open(name.to_string(), MarkerKind::Meta, span);
+                    self.push_open(name.clone(), MarkerKind::Meta, span, cst_anchor);
                 } else if name == "rem" && !self.in_note_context() && self.has_open_paragraph() {
                     // \rem inside a paragraph: nest inside it rather than
                     // closing the paragraph.  Close any open inline/meta
                     // markers above the paragraph first.
                     self.close_inline_above_paragraph();
-                    self.push_open(name.to_string(), MarkerKind::Meta, span);
+                    self.push_open(name.clone(), MarkerKind::Meta, span, cst_anchor);
                 } else {
-                    self.close_block_context(name);
-                    self.push_open(name.to_string(), MarkerKind::Meta, span);
+                    self.close_block_context(name.as_str());
+                    self.push_open(name.clone(), MarkerKind::Meta, span, cst_anchor);
                 }
             }
 
             MarkerKind::Unknown => {
                 // Don't emit diagnostics for \z-prefix markers (USFM 3.0 custom namespace).
-                if !name.starts_with('z') {
-                    self.diagnostics
-                        .push(Diagnostic::unknown_marker(name, span.clone()));
+                if !name.as_str().starts_with('z') {
+                    self.diagnostics.push(
+                        Diagnostic::unknown_marker(name.as_str(), span.clone())
+                            .with_anchor_cst(cst_anchor),
+                    );
                 }
-                self.push_open(name.to_string(), MarkerKind::Unknown, span);
+                self.push_open(name.clone(), MarkerKind::Unknown, span, cst_anchor);
             }
 
             // Chapter and Verse are handled via Token::Chapter / Token::Verse,
             // but the marker lookup might return them for edge cases. Treat them
             // the same as their dedicated token handlers.
-            MarkerKind::Chapter => self.handle_chapter(span),
-            MarkerKind::Verse => self.handle_verse(span),
+            MarkerKind::Chapter => self.handle_chapter(span, cst_anchor),
+            MarkerKind::Verse => self.handle_verse(span, cst_anchor),
 
             MarkerKind::MilestoneStart | MarkerKind::MilestoneEnd => {
                 // Should come through Token::Milestone, but handle gracefully.
-                self.handle_milestone(m, span);
+                self.handle_milestone(name, span, cst_anchor);
             }
         }
     }
@@ -420,17 +458,17 @@ impl TreeBuilder {
     // Chapter and verse
     // -----------------------------------------------------------------
 
-    fn handle_chapter(&mut self, span: Span) {
+    fn handle_chapter(&mut self, span: Span, cst_anchor: CstNodeId) {
         self.flush_pending_newline_at_block_boundary();
         // Flush any pending chapter/verse that never got a number.
         self.flush_pending_chapter();
         self.flush_pending_verse();
 
         self.close_block_context("c");
-        self.pending_chapter = Some(span);
+        self.pending_chapter = Some((span, cst_anchor));
     }
 
-    fn handle_verse(&mut self, span: Span) {
+    fn handle_verse(&mut self, span: Span, cst_anchor: CstNodeId) {
         self.consume_pending_newline(); // word boundary
         // Flush any prior pending verse that never got a number.
         self.flush_pending_verse();
@@ -439,19 +477,25 @@ impl TreeBuilder {
         self.close_open_meta();
         // If there's no open paragraph, this verse is outside of one — emit a diagnostic and open an implicit one to contain it.
         if self.stack.is_empty() {
-            self.diagnostics
-                .push(Diagnostic::verse_outside_paragraph(span.clone()));
-            self.push_open("p".to_string(), MarkerKind::Paragraph, span.clone());
+            self.diagnostics.push(
+                Diagnostic::verse_outside_paragraph(span.clone()).with_anchor_cst(cst_anchor),
+            );
+            self.push_open(
+                MarkerName::from("p"),
+                MarkerKind::Paragraph,
+                span.clone(),
+                cst_anchor,
+            );
         }
-        self.pending_verse = Some(span);
+        self.pending_verse = Some((span, cst_anchor));
     }
 
     /// If a pending chapter was set but never consumed by a text token,
     /// emit a diagnostic and create a Chapter node with an empty number.
     fn flush_pending_chapter(&mut self) {
-        if let Some(span) = self.pending_chapter.take() {
+        if let Some((span, cst_anchor)) = self.pending_chapter.take() {
             self.diagnostics
-                .push(Diagnostic::missing_chapter_number(span.clone()));
+                .push(Diagnostic::missing_chapter_number(span.clone()).with_anchor_cst(cst_anchor));
             let node = Node::Chapter {
                 marker: "c".into(),
                 number: String::new(),
@@ -467,9 +511,9 @@ impl TreeBuilder {
     /// If a pending verse was set but never consumed by a text token,
     /// emit a diagnostic and create a Verse node with an empty number.
     fn flush_pending_verse(&mut self) {
-        if let Some(span) = self.pending_verse.take() {
+        if let Some((span, cst_anchor)) = self.pending_verse.take() {
             self.diagnostics
-                .push(Diagnostic::missing_verse_number(span.clone()));
+                .push(Diagnostic::missing_verse_number(span.clone()).with_anchor_cst(cst_anchor));
             let node = Node::Verse {
                 marker: "v".into(),
                 number: String::new(),
@@ -486,19 +530,18 @@ impl TreeBuilder {
     // Milestone
     // -----------------------------------------------------------------
 
-    fn handle_milestone(&mut self, m: &str, span: Span) {
+    fn handle_milestone(&mut self, name: &MarkerName, span: Span, cst_anchor: CstNodeId) {
         // Flush any previous pending milestone close before starting a new one.
         self.flush_pending_milestone_close();
         self.consume_pending_newline();
-        let name = lexer::strip_marker_backslash(m);
         let node = Node::Milestone {
-            marker: name.to_string(),
+            marker: name.clone(),
             attributes: Vec::new(),
             spans: NodeSpans::node(span.clone()),
         };
         self.append_node(node);
         // Track this milestone as expecting `\*`.
-        self.pending_milestone_close = Some((name.to_string(), span));
+        self.pending_milestone_close = Some((name.clone(), span, cst_anchor));
         // Skip whitespace between milestone marker and its attributes.
         self.after_open_marker = true;
     }
@@ -533,22 +576,16 @@ impl TreeBuilder {
     // Nested markers
     // -----------------------------------------------------------------
 
-    fn handle_nested_open(&mut self, m: &str, span: Span) {
+    fn handle_nested_open(&mut self, name: &MarkerName, span: Span, cst_anchor: CstNodeId) {
         self.consume_pending_newline(); // inline
-        // Strip backslash to get "+marker", then skip the '+'.
-        let with_plus = lexer::strip_marker_backslash(m);
-        let name = &with_plus[1..]; // skip '+'
-        self.push_open(name.to_string(), MarkerKind::Character, span);
+        self.push_open(name.clone(), MarkerKind::Character, span, cst_anchor);
         // Mark as nested (\+ prefix).
         self.stack.last_mut().unwrap().nested = true;
     }
 
-    fn handle_nested_close(&mut self, m: &str, span: Span) {
+    fn handle_nested_close(&mut self, name: &str, span: Span, cst_anchor: CstNodeId) {
         self.consume_pending_newline();
-        // Strip backslash and star to get "+marker", then skip '+'.
-        let with_plus = lexer::strip_closing_star(m);
-        let name = &with_plus[1..]; // skip '+'
-        self.close_matching_marker(name, &span);
+        self.close_matching_marker(name, &span, cst_anchor);
         self.after_close_marker = true;
     }
 
@@ -556,17 +593,16 @@ impl TreeBuilder {
     // Closing markers
     // -----------------------------------------------------------------
 
-    fn handle_close(&mut self, m: &str, span: Span) {
+    fn handle_close(&mut self, name: &str, span: Span, cst_anchor: CstNodeId) {
         self.consume_pending_newline();
-        let name = lexer::strip_closing_star(m);
-        self.close_matching_marker(name, &span);
+        self.close_matching_marker(name, &span, cst_anchor);
         self.after_close_marker = true;
     }
 
     /// Walk the stack looking for a matching opener for `name`.
     /// Close everything above the match (emitting diagnostics).
     /// If no match is found, emit a stray-close diagnostic.
-    fn close_matching_marker(&mut self, name: &str, span: &Span) {
+    fn close_matching_marker(&mut self, name: &str, span: &Span, cst_anchor: CstNodeId) {
         // Is this a note-closing marker?
         let is_note_close = matches!(name, "f" | "fe" | "x" | "ef" | "ex");
 
@@ -592,11 +628,10 @@ impl TreeBuilder {
                             MarkerKind::Character | MarkerKind::Unknown | MarkerKind::TableCell
                         )
                     {
-                        self.diagnostics.push(Diagnostic::misnested_close(
-                            &top.marker,
-                            name,
-                            span.clone(),
-                        ));
+                        self.diagnostics.push(
+                            Diagnostic::misnested_close(top.marker.as_str(), name, span.clone())
+                                .with_anchor_cst(cst_anchor),
+                        );
                     }
                     let node = self.finalize_open_node(top);
                     // Append to new top or root.
@@ -610,7 +645,7 @@ impl TreeBuilder {
             }
             None => {
                 self.diagnostics
-                    .push(Diagnostic::stray_close(name, span.clone()));
+                    .push(Diagnostic::stray_close(name, span.clone()).with_anchor_cst(cst_anchor));
             }
         }
     }
@@ -619,7 +654,7 @@ impl TreeBuilder {
     // Attributes
     // -----------------------------------------------------------------
 
-    fn handle_attributes(&mut self, a: &str, span: Span) {
+    fn handle_attributes(&mut self, a: &str, span: Span, cst_anchor: CstNodeId) {
         self.consume_pending_newline();
         let attrs = match parse_attributes(a) {
             Some(attrs) => attrs,
@@ -627,7 +662,7 @@ impl TreeBuilder {
                 // Malformed attributes — emit diagnostic and treat the raw
                 // string (including |) as text content.
                 self.diagnostics
-                    .push(Diagnostic::malformed_attributes(span));
+                    .push(Diagnostic::malformed_attributes(span).with_anchor_cst(cst_anchor));
                 self.append_text_raw(a);
                 return;
             }
@@ -649,7 +684,7 @@ impl TreeBuilder {
             {
                 // Resolve bare "default" attribute keys to marker-specific names
                 // (e.g. "default" → "lemma" for \w).
-                let resolved = resolve_default_attr_keys(&open.marker, attrs);
+                let resolved = resolve_default_attr_keys(open.marker.as_str(), attrs);
                 open.attributes.extend(resolved);
                 return;
             }
@@ -668,7 +703,7 @@ impl TreeBuilder {
                 marker, attributes, ..
             } = last
         {
-            let resolved = resolve_default_attr_keys(marker, attrs);
+            let resolved = resolve_default_attr_keys(marker.as_str(), attrs);
             attributes.extend(resolved);
         }
     }
@@ -695,12 +730,13 @@ impl TreeBuilder {
         self.consume_pending_newline();
 
         // 1. Pending chapter consumes the first word as the chapter number.
-        if let Some(span) = self.pending_chapter.take() {
+        if let Some((span, cst_anchor)) = self.pending_chapter.take() {
             let (number, rest) = split_first_word(text);
             let number = number.to_string();
             if number.starts_with('0') && number.len() > 1 {
-                self.diagnostics
-                    .push(Diagnostic::leading_zeros(&number, span.clone()));
+                self.diagnostics.push(
+                    Diagnostic::leading_zeros(&number, span.clone()).with_anchor_cst(cst_anchor),
+                );
             }
             self.current_chapter = Some(number.clone());
             let book = self.current_book_code.as_deref().unwrap_or("");
@@ -727,12 +763,13 @@ impl TreeBuilder {
         }
 
         // 2. Pending verse consumes the first word as the verse number.
-        if let Some(span) = self.pending_verse.take() {
+        if let Some((span, cst_anchor)) = self.pending_verse.take() {
             let (number, rest) = split_first_word(text);
             let number = number.to_string();
             if number.starts_with('0') && number.len() > 1 {
-                self.diagnostics
-                    .push(Diagnostic::leading_zeros(&number, span.clone()));
+                self.diagnostics.push(
+                    Diagnostic::leading_zeros(&number, span.clone()).with_anchor_cst(cst_anchor),
+                );
             }
             let book = self.current_book_code.as_deref().unwrap_or("");
             let ch = self.current_chapter.as_deref().unwrap_or("");
@@ -883,55 +920,60 @@ impl TreeBuilder {
         if text.is_empty() {
             return;
         }
-        // Strip carriage returns (CRLF → LF normalisation).
-        let clean: std::borrow::Cow<str> = if text.contains('\r') {
-            text.replace('\r', "").into()
-        } else {
-            text.into()
-        };
-        if clean.is_empty() {
+        let mut prev_space = false;
+        let mut prev_slash = false;
+        let mut needs_normalization = false;
+        for ch in text.chars() {
+            if ch == '\r' || ch == '~' || (ch == ' ' && prev_space) || (ch == '/' && prev_slash) {
+                needs_normalization = true;
+                break;
+            }
+            prev_space = ch == ' ';
+            prev_slash = ch == '/';
+        }
+
+        if !needs_normalization {
+            self.append_text_fragment(text);
             return;
         }
-        // Collapse runs of multiple spaces into a single space.
-        let collapsed: std::borrow::Cow<str> = if clean.contains("  ") {
-            let mut result = String::with_capacity(clean.len());
-            let mut prev_space = false;
-            for ch in clean.chars() {
-                if ch == ' ' {
+
+        let mut scratch = std::mem::take(&mut self.text_scratch);
+        scratch.clear();
+        let mut chars = text.chars().peekable();
+        let mut prev_space = false;
+        while let Some(ch) = chars.next() {
+            match ch {
+                '\r' => {}
+                '~' => {
+                    scratch.push('\u{00a0}');
+                    prev_space = false;
+                }
+                ' ' => {
                     if !prev_space {
-                        result.push(' ');
+                        scratch.push(' ');
                     }
                     prev_space = true;
-                } else {
-                    prev_space = false;
-                    result.push(ch);
                 }
-            }
-            result.into()
-        } else {
-            clean
-        };
-        // Replace ~ with non-breaking space per USFM spec.
-        let final_text: String = if collapsed.contains('~') {
-            collapsed.replace('~', "\u{00a0}")
-        } else {
-            collapsed.into_owned()
-        };
-
-        // Split at `//` (optional line break) and interleave OptBreak nodes.
-        if final_text.contains("//") {
-            let parts: Vec<&str> = final_text.split("//").collect();
-            for (i, part) in parts.iter().enumerate() {
-                if !part.is_empty() {
-                    self.append_text_fragment(part);
-                }
-                if i < parts.len() - 1 {
+                '/' if chars.peek() == Some(&'/') => {
+                    if !scratch.is_empty() {
+                        self.append_text_fragment(&scratch);
+                        scratch.clear();
+                    }
+                    chars.next();
                     self.append_node(Node::OptBreak);
+                    prev_space = false;
+                }
+                _ => {
+                    scratch.push(ch);
+                    prev_space = false;
                 }
             }
-        } else {
-            self.append_text_fragment(&final_text);
         }
+
+        if !scratch.is_empty() {
+            self.append_text_fragment(&scratch);
+        }
+        self.text_scratch = scratch;
     }
 
     /// Append a text fragment, merging with previous text node if possible.
@@ -1027,11 +1069,18 @@ impl TreeBuilder {
     // -----------------------------------------------------------------
 
     /// Push a new open node onto the stack.
-    fn push_open(&mut self, marker: String, kind: MarkerKind, span: Span) {
+    fn push_open(
+        &mut self,
+        marker: MarkerName,
+        kind: MarkerKind,
+        span: Span,
+        cst_anchor: CstNodeId,
+    ) {
         self.stack.push(OpenNode {
             marker,
             kind,
             span,
+            cst_anchor,
             children: Vec::new(),
             caller: None,
             code_span: None,
@@ -1206,11 +1255,14 @@ impl TreeBuilder {
                 | Some(MarkerKind::Figure) => {
                     let top = self.stack.pop().unwrap();
                     if !top.marker.starts_with('z') {
-                        self.diagnostics.push(Diagnostic::implicitly_closed(
-                            &top.marker,
-                            top.span.clone(),
-                            trigger_marker,
-                        ));
+                        self.diagnostics.push(
+                            Diagnostic::implicitly_closed(
+                                top.marker.as_str(),
+                                top.span.clone(),
+                                trigger_marker,
+                            )
+                            .with_anchor_cst(top.cst_anchor),
+                        );
                     }
                     let node = self.finalize_open_node(top);
                     self.append_node(node);
@@ -1244,8 +1296,10 @@ impl TreeBuilder {
                     }
                     // Close the note itself.
                     let note = self.stack.pop().unwrap();
-                    self.diagnostics
-                        .push(Diagnostic::unclosed_note(&note.marker, note.span.clone()));
+                    self.diagnostics.push(
+                        Diagnostic::unclosed_note(note.marker.as_str(), note.span.clone())
+                            .with_anchor_cst(note.cst_anchor),
+                    );
                     let node = self.finalize_open_node(note);
                     self.append_node(node);
                 }
@@ -1256,7 +1310,7 @@ impl TreeBuilder {
 
     /// Close the sidebar: walk the stack for a `SidebarStart`, close everything
     /// in between, then finalize the sidebar node.
-    fn close_sidebar(&mut self, trigger_marker: &str, trigger_span: &Span) {
+    fn close_sidebar(&mut self, trigger_marker: &str, trigger_span: &Span, cst_anchor: CstNodeId) {
         let sidebar_idx = self
             .stack
             .iter()
@@ -1267,11 +1321,14 @@ impl TreeBuilder {
                 while self.stack.len() > idx + 1 {
                     let top = self.stack.pop().unwrap();
                     if !top.marker.starts_with('z') {
-                        self.diagnostics.push(Diagnostic::implicitly_closed(
-                            &top.marker,
-                            top.span.clone(),
-                            trigger_marker,
-                        ));
+                        self.diagnostics.push(
+                            Diagnostic::implicitly_closed(
+                                top.marker.as_str(),
+                                top.span.clone(),
+                                trigger_marker,
+                            )
+                            .with_anchor_cst(top.cst_anchor),
+                        );
                     }
                     let node = self.finalize_open_node(top);
                     self.append_node(node);
@@ -1284,8 +1341,10 @@ impl TreeBuilder {
             }
             None => {
                 // Stray \esbe with no matching \esb -- emit diagnostic.
-                self.diagnostics
-                    .push(Diagnostic::stray_close("esbe", trigger_span.clone()));
+                self.diagnostics.push(
+                    Diagnostic::stray_close("esbe", trigger_span.clone())
+                        .with_anchor_cst(cst_anchor),
+                );
             }
         }
     }
@@ -1565,15 +1624,19 @@ impl TreeBuilder {
         while let Some(open) = self.stack.pop() {
             // Notes get a specific diagnostic.
             if open.kind == MarkerKind::Note {
-                self.diagnostics
-                    .push(Diagnostic::unclosed_note(&open.marker, open.span.clone()));
+                self.diagnostics.push(
+                    Diagnostic::unclosed_note(open.marker.as_str(), open.span.clone())
+                        .with_anchor_cst(open.cst_anchor),
+                );
             } else if open.kind == MarkerKind::SidebarStart
                 || open.kind == MarkerKind::Figure
                 || ((open.kind == MarkerKind::Character || open.kind == MarkerKind::Unknown)
                     && !open.marker.starts_with('z'))
             {
-                self.diagnostics
-                    .push(Diagnostic::unclosed_at_eof(&open.marker, open.span.clone()));
+                self.diagnostics.push(
+                    Diagnostic::unclosed_at_eof(open.marker.as_str(), open.span.clone())
+                        .with_anchor_cst(open.cst_anchor),
+                );
             }
             // Paragraphs, headers, etc. are implicitly closed at EOF -- no
             // diagnostic needed for those.

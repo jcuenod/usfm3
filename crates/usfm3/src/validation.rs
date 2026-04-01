@@ -95,38 +95,34 @@ fn parse_table_cell_columns(marker: &str) -> Option<(u32, u32)> {
 
 struct Validator<'a> {
     diagnostics: &'a mut DiagnosticList,
+    expected_chapter: u32,
+    seen_chapters: HashSet<u32>,
+    expected_verse: u32,
+    saw_book: bool,
+    has_chapter: bool,
+    body_started: bool,
+    milestone_starts: HashMap<String, Vec<Span>>,
+    milestone_ends: HashMap<String, Vec<Span>>,
 }
 
 impl<'a> Validator<'a> {
     fn new(diagnostics: &'a mut DiagnosticList) -> Self {
-        Validator { diagnostics }
+        Validator {
+            diagnostics,
+            expected_chapter: 1,
+            seen_chapters: HashSet::new(),
+            expected_verse: 1,
+            saw_book: false,
+            has_chapter: false,
+            body_started: false,
+            milestone_starts: HashMap::new(),
+            milestone_ends: HashMap::new(),
+        }
     }
 
     fn validate(&mut self, doc: &Document) {
-        self.check_id_marker(doc);
-        self.check_duplicate_id(doc);
-        self.check_chapter_sequence(doc);
-        self.check_verse_sequence(doc);
-        self.check_text_before_id(doc);
-        self.check_headers_after_body(doc);
-        self.check_note_submarkers(doc);
-        self.check_milestone_pairs(doc);
-        self.check_missing_chapter(doc);
-        self.check_char_crosses_verse(doc);
-        self.check_empty_figure(doc);
-        self.check_attribute_rules(doc);
-        self.check_body_paragraph_before_chapter(doc);
-        self.check_non_empty_blank_line(doc);
-        self.check_empty_word_marker(doc);
-        self.check_table_column_sequence(doc);
-    }
-
-    // ── 1. \id must be the first marker ─────────────────────────────────
-
-    fn check_id_marker(&mut self, doc: &Document) {
         match doc.content.first() {
             Some(Node::Book { code, .. }) => {
-                // Validate the book code (check 2).
                 if !is_valid_book_code(code) {
                     self.diagnostics.push(Diagnostic::invalid_book_code(
                         code,
@@ -138,189 +134,235 @@ impl<'a> Validator<'a> {
                     ));
                 }
             }
+            Some(Node::Text(_)) => {
+                self.diagnostics.push(Diagnostic::text_before_id(0..0));
+                self.diagnostics.push(Diagnostic::missing_id_marker());
+            }
             _ => {
-                // Missing or non-Book first node.
                 self.diagnostics.push(Diagnostic::missing_id_marker());
             }
         }
-    }
 
-    // ── 2b. Duplicate \id marker ──────────────────────────────────────────
-
-    fn check_duplicate_id(&mut self, doc: &Document) {
-        let book_count = doc
-            .content
-            .iter()
-            .filter(|n| matches!(n, Node::Book { .. }))
-            .count();
-        if book_count > 1 {
-            // Find the second Book node and report it.
-            let mut seen = false;
-            for node in &doc.content {
-                if let Node::Book { .. } = node {
-                    if seen {
+        for node in &doc.content {
+            match node {
+                Node::Book { .. } => {
+                    if self.saw_book {
                         self.diagnostics.push(Diagnostic::duplicate_id(
                             node.span().cloned().unwrap_or(0..0),
                         ));
                     }
-                    seen = true;
+                    self.saw_book = true;
                 }
-            }
-        }
-    }
-
-    // ── 3. Chapter sequence ─────────────────────────────────────────────
-
-    fn check_chapter_sequence(&mut self, doc: &Document) {
-        let mut expected: u32 = 1;
-        let mut seen = HashSet::new();
-
-        for node in &doc.content {
-            if let Node::Chapter { number, .. } = node
-                && let Ok(num) = number.parse::<u32>()
-            {
-                // Duplicate check.
-                if !seen.insert(num) {
-                    self.diagnostics.push(Diagnostic::duplicate_chapter(
-                        num,
-                        node.span().cloned().unwrap_or(0..0),
-                    ));
-                }
-                // Sequence check.
-                if num != expected {
-                    self.diagnostics.push(Diagnostic::invalid_chapter_sequence(
-                        expected,
-                        num,
-                        node.span().cloned().unwrap_or(0..0),
-                    ));
-                }
-                expected = num + 1;
-            }
-        }
-    }
-
-    // ── 4. Verse sequence (per chapter scope) ───────────────────────────
-
-    fn check_verse_sequence(&mut self, doc: &Document) {
-        let mut expected_verse: u32 = 1;
-
-        for node in &doc.content {
-            match node {
                 Node::Chapter { .. } => {
-                    // Each new chapter is expected to begin with verse 1.
-                    expected_verse = 1;
-                }
-                _ => {
-                    self.check_verses_in_node(node, &mut expected_verse);
-                }
-            }
-        }
-    }
-
-    /// Recursively walk a node and its children looking for `Verse` nodes.
-    fn check_verses_in_node(&mut self, node: &Node, expected_verse: &mut u32) {
-        if let Node::Verse { number, .. } = node {
-            let start = parse_verse_start(number);
-            let end = parse_verse_end(number);
-            let span = node.span().cloned().unwrap_or(0..0);
-            if let Some(v_start) = start {
-                if v_start != *expected_verse {
-                    self.diagnostics.push(Diagnostic::invalid_verse_sequence(
-                        &expected_verse.to_string(),
-                        number,
-                        span.clone(),
-                    ));
-                }
-                // Next expected verse is end-of-range + 1 (or start + 1).
-                *expected_verse = end.unwrap_or(v_start) + 1;
-            }
-        }
-
-        for child in node.children() {
-            self.check_verses_in_node(child, expected_verse);
-        }
-    }
-
-    // ── 5. Text before \id ──────────────────────────────────────────────
-
-    fn check_text_before_id(&mut self, doc: &Document) {
-        if let Some(first) = doc.content.first()
-            && matches!(first, Node::Text(_))
-        {
-            self.diagnostics.push(Diagnostic::text_before_id(0..0));
-        }
-    }
-
-    // ── 6. Header markers after body content ────────────────────────────
-
-    fn check_headers_after_body(&mut self, doc: &Document) {
-        let mut body_started = false;
-
-        for node in &doc.content {
-            match node {
-                Node::Chapter { .. } => {
-                    body_started = true;
+                    self.body_started = true;
+                    self.has_chapter = true;
+                    self.expected_verse = 1;
+                    self.handle_chapter_sequence(node);
                 }
                 Node::Para { marker, .. } => {
-                    let info = markers::lookup_marker(marker);
-                    if info.kind == MarkerKind::Header
-                        && body_started
-                        && !is_body_header_marker(marker)
+                    if marker.kind() == MarkerKind::Header
+                        && self.body_started
+                        && !is_body_header_marker(marker.as_str())
                     {
                         self.diagnostics.push(Diagnostic::header_after_body(
-                            marker,
+                            marker.as_str(),
                             node.span().cloned().unwrap_or(0..0),
                         ));
+                    }
+                    if !self.has_chapter
+                        && marker.kind() == MarkerKind::Paragraph
+                        && !is_introduction_marker(marker.as_str())
+                    {
+                        self.diagnostics
+                            .push(Diagnostic::body_paragraph_before_chapter(
+                                marker.as_str(),
+                                node.span().cloned().unwrap_or(0..0),
+                            ));
                     }
                 }
                 _ => {}
             }
-        }
-    }
 
-    // ── 7. Note sub-markers outside notes ───────────────────────────────
-
-    fn check_note_submarkers(&mut self, doc: &Document) {
-        for node in &doc.content {
-            self.walk_note_submarkers(node, false);
-        }
-    }
-
-    fn walk_note_submarkers(&mut self, node: &Node, inside_note: bool) {
-        if let Node::Char { marker, .. } = node
-            && !inside_note
-            && is_note_only_marker(marker)
-        {
-            self.diagnostics
-                .push(Diagnostic::note_submarker_outside_note(
-                    marker,
-                    node.span().cloned().unwrap_or(0..0),
-                ));
-        }
-
-        let is_note = matches!(node, Node::Note { .. });
-        for child in node.children() {
-            self.walk_note_submarkers(child, inside_note || is_note);
-        }
-    }
-
-    // ── 7b. Table columns progress contiguously within a row ─────────────
-
-    fn check_table_column_sequence(&mut self, doc: &Document) {
-        for node in &doc.content {
-            self.walk_tables(node);
-        }
-    }
-
-    fn walk_tables(&mut self, node: &Node) {
-        if let Node::Table { content, .. } = node {
-            for row in content {
-                self.check_table_row_columns(row);
+            if !matches!(node, Node::Chapter { .. }) {
+                self.walk(node, false);
             }
         }
 
+        if self.saw_book && !self.has_chapter {
+            self.diagnostics.push(Diagnostic::missing_chapter_marker());
+        }
+
+        self.finish_milestone_pairs();
+    }
+
+    fn handle_chapter_sequence(&mut self, node: &Node) {
+        let Node::Chapter { number, .. } = node else {
+            return;
+        };
+        let Ok(num) = number.parse::<u32>() else {
+            return;
+        };
+        if !self.seen_chapters.insert(num) {
+            self.diagnostics.push(Diagnostic::duplicate_chapter(
+                num,
+                node.span().cloned().unwrap_or(0..0),
+            ));
+        }
+        if num != self.expected_chapter {
+            self.diagnostics.push(Diagnostic::invalid_chapter_sequence(
+                self.expected_chapter,
+                num,
+                node.span().cloned().unwrap_or(0..0),
+            ));
+        }
+        self.expected_chapter = num + 1;
+    }
+
+    fn walk(&mut self, node: &Node, inside_note: bool) {
+        match node {
+            Node::Verse { number, .. } => {
+                let start = parse_verse_start(number);
+                let end = parse_verse_end(number);
+                let span = node.span().cloned().unwrap_or(0..0);
+                if let Some(v_start) = start {
+                    if v_start != self.expected_verse {
+                        self.diagnostics.push(Diagnostic::invalid_verse_sequence(
+                            &self.expected_verse.to_string(),
+                            number,
+                            span.clone(),
+                        ));
+                    }
+                    self.expected_verse = end.unwrap_or(v_start) + 1;
+                }
+            }
+            Node::Char {
+                marker,
+                content,
+                attributes,
+                ..
+            } => {
+                if !inside_note && is_note_only_marker(marker.as_str()) {
+                    self.diagnostics
+                        .push(Diagnostic::note_submarker_outside_note(
+                            marker.as_str(),
+                            node.span().cloned().unwrap_or(0..0),
+                        ));
+                }
+                if content.iter().any(|n| matches!(n, Node::Verse { .. })) {
+                    self.diagnostics.push(Diagnostic::char_crosses_verse(
+                        marker.as_str(),
+                        node.span().cloned().unwrap_or(0..0),
+                    ));
+                }
+
+                let clean_marker = marker.strip_prefix('+').unwrap_or(marker.as_str());
+                for &req in markers::required_attributes(clean_marker) {
+                    if !attributes.iter().any(|a| a.key == req) {
+                        self.diagnostics
+                            .push(Diagnostic::missing_required_attribute(
+                                clean_marker,
+                                req,
+                                node.span().cloned().unwrap_or(0..0),
+                            ));
+                    }
+                }
+                if attributes.iter().any(|a| a.key == "default")
+                    && markers::default_attribute(clean_marker).is_none()
+                {
+                    self.diagnostics
+                        .push(Diagnostic::default_attribute_not_defined(
+                            clean_marker,
+                            node.span().cloned().unwrap_or(0..0),
+                        ));
+                }
+                for attr in attributes {
+                    if !attr.value.is_empty() && attr.value.trim().is_empty() {
+                        self.diagnostics.push(Diagnostic::malformed_attributes(
+                            node.span().cloned().unwrap_or(0..0),
+                        ));
+                        break;
+                    }
+                }
+                if clean_marker == "w" {
+                    let has_text = content.iter().any(|n| {
+                        if let Node::Text(s) = n {
+                            !s.trim().is_empty()
+                        } else {
+                            true
+                        }
+                    });
+                    if !has_text && attributes.is_empty() {
+                        self.diagnostics.push(Diagnostic::empty_word_marker(
+                            node.span().cloned().unwrap_or(0..0),
+                        ));
+                    }
+                }
+            }
+            Node::Figure {
+                content,
+                attributes,
+                marker,
+                ..
+            } => {
+                let has_text = content.iter().any(|n| {
+                    if let Node::Text(s) = n {
+                        !s.trim().is_empty()
+                    } else {
+                        false
+                    }
+                });
+                let has_meaningful_attrs = attributes
+                    .iter()
+                    .any(|a| a.value.chars().any(|c| c != '|' && !c.is_whitespace()));
+                if !has_text && !has_meaningful_attrs {
+                    self.diagnostics.push(Diagnostic::empty_figure(
+                        node.span().cloned().unwrap_or(0..0),
+                    ));
+                }
+
+                let clean_marker = marker.strip_prefix('+').unwrap_or(marker.as_str());
+                if attributes.iter().any(|a| a.key == "default")
+                    && markers::default_attribute(clean_marker).is_none()
+                {
+                    self.diagnostics
+                        .push(Diagnostic::default_attribute_not_defined(
+                            clean_marker,
+                            node.span().cloned().unwrap_or(0..0),
+                        ));
+                }
+            }
+            Node::Milestone { marker, .. } => {
+                if let Some(base) = marker.strip_suffix("-s") {
+                    self.milestone_starts
+                        .entry(base.to_string())
+                        .or_default()
+                        .push(node.span().cloned().unwrap_or(0..0));
+                } else if let Some(base) = marker.strip_suffix("-e") {
+                    self.milestone_ends
+                        .entry(base.to_string())
+                        .or_default()
+                        .push(node.span().cloned().unwrap_or(0..0));
+                }
+            }
+            Node::Para {
+                marker, content, ..
+            } => {
+                if marker == "b" && !content.is_empty() {
+                    self.diagnostics.push(Diagnostic::non_empty_blank_line(
+                        node.span().cloned().unwrap_or(0..0),
+                    ));
+                }
+            }
+            Node::Table { content, .. } => {
+                for row in content {
+                    self.check_table_row_columns(row);
+                }
+            }
+            _ => {}
+        }
+        let is_note = matches!(node, Node::Note { .. });
         for child in node.children() {
-            self.walk_tables(child);
+            self.walk(child, inside_note || is_note);
         }
     }
 
@@ -334,11 +376,9 @@ impl<'a> Validator<'a> {
             let Node::TableCell { marker, .. } = cell else {
                 continue;
             };
-
-            let Some((start_col, end_col)) = parse_table_cell_columns(marker) else {
+            let Some((start_col, end_col)) = parse_table_cell_columns(marker.as_str()) else {
                 continue;
             };
-
             if start_col != expected_col {
                 self.diagnostics
                     .push(Diagnostic::invalid_table_column_sequence(
@@ -347,24 +387,14 @@ impl<'a> Validator<'a> {
                         cell.span().cloned().unwrap_or(0..0),
                     ));
             }
-
             expected_col = end_col + 1;
         }
     }
 
-    // ── 8. Milestone pair matching ──────────────────────────────────────
-
-    fn check_milestone_pairs(&mut self, doc: &Document) {
-        let mut starts: HashMap<String, Vec<Span>> = HashMap::new();
-        let mut ends: HashMap<String, Vec<Span>> = HashMap::new();
-
-        self.collect_milestones(&doc.content, &mut starts, &mut ends);
-
-        // For each start marker, check that there is a matching end.
-        for (base, spans) in &starts {
-            let end_count = ends.get(base).map_or(0, |v| v.len());
+    fn finish_milestone_pairs(&mut self) {
+        for (base, spans) in &self.milestone_starts {
+            let end_count = self.milestone_ends.get(base).map_or(0, |v| v.len());
             if spans.len() > end_count {
-                // More starts than ends -- report unmatched starts.
                 for span in spans.iter().skip(end_count) {
                     let marker = format!("{}-s", base);
                     self.diagnostics
@@ -372,272 +402,14 @@ impl<'a> Validator<'a> {
                 }
             }
         }
-
-        // For each end marker, check that there is a matching start.
-        for (base, spans) in &ends {
-            let start_count = starts.get(base).map_or(0, |v| v.len());
+        for (base, spans) in &self.milestone_ends {
+            let start_count = self.milestone_starts.get(base).map_or(0, |v| v.len());
             if spans.len() > start_count {
                 for span in spans.iter().skip(start_count) {
                     let marker = format!("{}-e", base);
                     self.diagnostics
                         .push(Diagnostic::milestone_mismatch(&marker, span.clone()));
                 }
-            }
-        }
-    }
-
-    /// Recursively collect all milestone nodes, split into start and end
-    /// buckets by their base marker name.
-    fn collect_milestones(
-        &self,
-        nodes: &[Node],
-        starts: &mut HashMap<String, Vec<Span>>,
-        ends: &mut HashMap<String, Vec<Span>>,
-    ) {
-        for node in nodes {
-            if let Node::Milestone { marker, .. } = node {
-                if let Some(base) = marker.strip_suffix("-s") {
-                    starts
-                        .entry(base.to_string())
-                        .or_default()
-                        .push(node.span().cloned().unwrap_or(0..0));
-                } else if let Some(base) = marker.strip_suffix("-e") {
-                    ends.entry(base.to_string())
-                        .or_default()
-                        .push(node.span().cloned().unwrap_or(0..0));
-                }
-            }
-            self.collect_milestones(node.children(), starts, ends);
-        }
-    }
-
-    // ── 9. Missing chapter marker ───────────────────────────────────────
-
-    fn check_missing_chapter(&mut self, doc: &Document) {
-        let has_book = doc.content.iter().any(|n| matches!(n, Node::Book { .. }));
-        let has_chapter = doc
-            .content
-            .iter()
-            .any(|n| matches!(n, Node::Chapter { .. }));
-        if has_book && !has_chapter {
-            self.diagnostics.push(Diagnostic::missing_chapter_marker());
-        }
-    }
-
-    // ── 10. Character marker crossing verse boundary ────────────────────
-
-    fn check_char_crosses_verse(&mut self, doc: &Document) {
-        for node in &doc.content {
-            self.walk_char_crosses_verse(node);
-        }
-    }
-
-    fn walk_char_crosses_verse(&mut self, node: &Node) {
-        if let Node::Char {
-            marker, content, ..
-        } = node
-        {
-            let has_verse = content.iter().any(|n| matches!(n, Node::Verse { .. }));
-            if has_verse {
-                self.diagnostics.push(Diagnostic::char_crosses_verse(
-                    marker,
-                    node.span().cloned().unwrap_or(0..0),
-                ));
-            }
-        }
-        for child in node.children() {
-            self.walk_char_crosses_verse(child);
-        }
-    }
-
-    // ── 11. Empty figure ────────────────────────────────────────────────
-
-    fn check_empty_figure(&mut self, doc: &Document) {
-        for node in &doc.content {
-            self.walk_empty_figure(node);
-        }
-    }
-
-    fn walk_empty_figure(&mut self, node: &Node) {
-        if let Node::Figure {
-            content,
-            attributes,
-            ..
-        } = node
-        {
-            let has_text = content.iter().any(|n| {
-                if let Node::Text(s) = n {
-                    !s.trim().is_empty()
-                } else {
-                    false
-                }
-            });
-            // Check for meaningful attributes (ignore attributes whose values
-            // are only pipe characters and whitespace — legacy USFM2 format).
-            let has_meaningful_attrs = attributes
-                .iter()
-                .any(|a| a.value.chars().any(|c| c != '|' && !c.is_whitespace()));
-            if !has_text && !has_meaningful_attrs {
-                self.diagnostics.push(Diagnostic::empty_figure(
-                    node.span().cloned().unwrap_or(0..0),
-                ));
-            }
-        }
-        for child in node.children() {
-            self.walk_empty_figure(child);
-        }
-    }
-
-    // ── 12. Attribute rules (required attrs, default attr resolution) ───
-
-    fn check_attribute_rules(&mut self, doc: &Document) {
-        for node in &doc.content {
-            self.walk_attribute_rules(node);
-        }
-    }
-
-    fn walk_attribute_rules(&mut self, node: &Node) {
-        match node {
-            Node::Char {
-                marker, attributes, ..
-            } => {
-                let clean_marker = marker.strip_prefix('+').unwrap_or(marker);
-
-                // Check for required attributes.
-                for &req in markers::required_attributes(clean_marker) {
-                    if !attributes.iter().any(|a| a.key == req) {
-                        self.diagnostics
-                            .push(Diagnostic::missing_required_attribute(
-                                clean_marker,
-                                req,
-                                node.span().cloned().unwrap_or(0..0),
-                            ));
-                    }
-                }
-
-                // Check for unresolved "default" key (marker has no default attribute).
-                if attributes.iter().any(|a| a.key == "default")
-                    && markers::default_attribute(clean_marker).is_none()
-                {
-                    self.diagnostics
-                        .push(Diagnostic::default_attribute_not_defined(
-                            clean_marker,
-                            node.span().cloned().unwrap_or(0..0),
-                        ));
-                }
-
-                // Check for whitespace-only attribute values.
-                for attr in attributes {
-                    if !attr.value.is_empty() && attr.value.trim().is_empty() {
-                        self.diagnostics.push(Diagnostic::malformed_attributes(
-                            node.span().cloned().unwrap_or(0..0),
-                        ));
-                        break;
-                    }
-                }
-            }
-            Node::Figure {
-                marker, attributes, ..
-            } => {
-                let clean_marker = marker.strip_prefix('+').unwrap_or(marker);
-                if attributes.iter().any(|a| a.key == "default")
-                    && markers::default_attribute(clean_marker).is_none()
-                {
-                    self.diagnostics
-                        .push(Diagnostic::default_attribute_not_defined(
-                            clean_marker,
-                            node.span().cloned().unwrap_or(0..0),
-                        ));
-                }
-            }
-            _ => {}
-        }
-        for child in node.children() {
-            self.walk_attribute_rules(child);
-        }
-    }
-
-    // ── 13. Non-empty blank line ────────────────────────────────────
-
-    fn check_non_empty_blank_line(&mut self, doc: &Document) {
-        for node in &doc.content {
-            self.walk_non_empty_blank_line(node);
-        }
-    }
-
-    fn walk_non_empty_blank_line(&mut self, node: &Node) {
-        if let Node::Para {
-            marker, content, ..
-        } = node
-            && marker == "b"
-            && !content.is_empty()
-        {
-            self.diagnostics.push(Diagnostic::non_empty_blank_line(
-                node.span().cloned().unwrap_or(0..0),
-            ));
-        }
-        for child in node.children() {
-            self.walk_non_empty_blank_line(child);
-        }
-    }
-
-    // ── 15. Empty \w word marker ─────────────────────────────────────
-
-    fn check_empty_word_marker(&mut self, doc: &Document) {
-        for node in &doc.content {
-            self.walk_empty_word_marker(node);
-        }
-    }
-
-    fn walk_empty_word_marker(&mut self, node: &Node) {
-        if let Node::Char {
-            marker,
-            content,
-            attributes,
-            ..
-        } = node
-        {
-            let clean_marker = marker.strip_prefix('+').unwrap_or(marker);
-            if clean_marker == "w" {
-                let has_text = content.iter().any(|n| {
-                    if let Node::Text(s) = n {
-                        !s.trim().is_empty()
-                    } else {
-                        true // non-text children count as content
-                    }
-                });
-                if !has_text && attributes.is_empty() {
-                    self.diagnostics.push(Diagnostic::empty_word_marker(
-                        node.span().cloned().unwrap_or(0..0),
-                    ));
-                }
-            }
-        }
-        for child in node.children() {
-            self.walk_empty_word_marker(child);
-        }
-    }
-
-    // ── 14. Body paragraph before first chapter ──────────────────────
-
-    fn check_body_paragraph_before_chapter(&mut self, doc: &Document) {
-        for node in &doc.content {
-            match node {
-                Node::Chapter { .. } => {
-                    // Reached the first chapter — stop checking.
-                    return;
-                }
-                Node::Para { marker, .. } => {
-                    let info = markers::lookup_marker(marker);
-                    if info.kind == MarkerKind::Paragraph && !is_introduction_marker(marker) {
-                        self.diagnostics
-                            .push(Diagnostic::body_paragraph_before_chapter(
-                                marker,
-                                node.span().cloned().unwrap_or(0..0),
-                            ));
-                    }
-                }
-                _ => {}
             }
         }
     }

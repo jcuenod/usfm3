@@ -83,23 +83,18 @@ pub enum Token<'a> {
 /// Logos errors (unrecognised byte sequences) are folded into [`Token::Text`]
 /// so that the function **never** fails -- every byte of the input is accounted
 /// for in the returned vector.
+pub fn spanned_tokens(input: &str) -> impl Iterator<Item = (Token<'_>, Span)> + '_ {
+    let mut lexer = Token::lexer(input).spanned();
+    std::iter::from_fn(move || {
+        lexer.next().map(|(result, span)| match result {
+            Ok(token) => (token, span),
+            Err(()) => (Token::Text(&input[span.clone()]), span),
+        })
+    })
+}
+
 pub fn tokenize(input: &str) -> Vec<(Token<'_>, Span)> {
-    let lexer = Token::lexer(input);
-    let mut tokens: Vec<(Token<'_>, Span)> = Vec::new();
-
-    for (result, span) in lexer.spanned() {
-        match result {
-            Ok(token) => tokens.push((token, span)),
-            Err(()) => {
-                // Unrecognised bytes -- wrap them in a Text token so that no
-                // information is lost and the tokenizer never panics.
-                let slice = &input[span.clone()];
-                tokens.push((Token::Text(slice), span));
-            }
-        }
-    }
-
-    tokens
+    spanned_tokens(input).collect()
 }
 
 /// Strip the leading backslash from a marker string.

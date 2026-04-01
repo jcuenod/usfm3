@@ -110,13 +110,9 @@ fn convert_diagnostics(
 #[pyfunction]
 #[pyo3(signature = (usfm, validate=true))]
 fn parse(usfm: &str, validate: bool) -> ParseResult {
-    let result = usfm3_lib::builder::parse(usfm);
-    let validation_diags = if validate {
-        usfm3_lib::validation::validate(&result.ast)
-    } else {
-        usfm3_lib::diagnostics::DiagnosticList::new()
-    };
-    let diagnostics = convert_diagnostics(&result.diagnostics, &validation_diags);
+    let result = usfm3_lib::parse_full(usfm, usfm3_lib::ParseOptions { validate });
+    let diagnostics =
+        convert_diagnostics(&result.parser_diagnostics, &result.validation_diagnostics);
     ParseResult {
         ast: result.ast,
         diagnostics,

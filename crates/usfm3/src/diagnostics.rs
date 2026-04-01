@@ -1,3 +1,5 @@
+use crate::cst::{CstDocument, CstNodeId};
+
 /// Diagnostics and error reporting for the USFM 3.x parser.
 ///
 /// This module provides structured diagnostic messages with source locations,
@@ -75,6 +77,7 @@ pub struct Diagnostic {
     pub span: Span,
     pub message: String,
     pub code: DiagnosticCode,
+    pub anchor_cst: Option<CstNodeId>,
 }
 
 impl std::fmt::Display for Diagnostic {
@@ -84,24 +87,44 @@ impl std::fmt::Display for Diagnostic {
 }
 
 impl Diagnostic {
+    fn new(severity: Severity, span: Span, message: String, code: DiagnosticCode) -> Self {
+        Self {
+            severity,
+            span,
+            message,
+            code,
+            anchor_cst: None,
+        }
+    }
+
+    pub fn with_anchor_cst(mut self, anchor_cst: CstNodeId) -> Self {
+        self.anchor_cst = Some(anchor_cst);
+        self
+    }
+
+    pub fn resolved_anchor_cst(&self, cst: &CstDocument) -> Option<CstNodeId> {
+        self.anchor_cst
+            .or_else(|| cst.covering_node_range(self.span.start, self.span.end))
+    }
+
     /// Unknown/unrecognized marker encountered.
     pub fn unknown_marker(marker: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: format!("unknown marker \\{marker}"),
-            code: DiagnosticCode::UnknownMarker,
-        }
+            format!("unknown marker \\{marker}"),
+            DiagnosticCode::UnknownMarker,
+        )
     }
 
     /// A recognized marker is deprecated and should be replaced.
     pub fn deprecated_marker(marker: &str, replacement: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Warning,
+        Self::new(
+            Severity::Warning,
             span,
-            message: format!("\\{marker} is deprecated; prefer {replacement}"),
-            code: DiagnosticCode::DeprecatedMarker,
-        }
+            format!("\\{marker} is deprecated; prefer {replacement}"),
+            DiagnosticCode::DeprecatedMarker,
+        )
     }
 
     /// A marker was implicitly closed (e.g., character marker closed by next
@@ -111,335 +134,328 @@ impl Diagnostic {
     /// The diagnostic highlights the opener that remained unclosed, while the
     /// message still reports where it was opened.
     pub fn implicitly_closed(marker: &str, open_span: Span, close_marker: &str) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
-            span: open_span.clone(),
-            message: format!(
+        Self::new(
+            Severity::Error,
+            open_span.clone(),
+            format!(
                 "\\{marker} is missing explicit close (\\{marker}*). It was closed implicitly by \\{close_marker}.",
             ),
-            code: DiagnosticCode::ImplicitClose,
-        }
+            DiagnosticCode::ImplicitClose,
+        )
     }
 
     /// A closing marker was found that doesn't match the expected nesting.
     ///
     /// For example, `\add` was closed by `\nd*` instead of `\add*`.
     pub fn misnested_close(open_marker: &str, close_marker: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: format!("expected \\{open_marker}* but found \\{close_marker}*"),
-            code: DiagnosticCode::MisnestedMarker,
-        }
+            format!("expected \\{open_marker}* but found \\{close_marker}*"),
+            DiagnosticCode::MisnestedMarker,
+        )
     }
 
     /// A closing marker with no matching opener (e.g., stray `\nd*` with no `\nd`).
     pub fn stray_close(marker: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: format!("closing marker \\{marker}* has no matching opener"),
-            code: DiagnosticCode::StrayCloseMarker,
-        }
+            format!("closing marker \\{marker}* has no matching opener"),
+            DiagnosticCode::StrayCloseMarker,
+        )
     }
 
     /// A character marker used inside another character context without the `\+` prefix.
     pub fn missing_nesting_prefix(marker: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Warning,
+        Self::new(
+            Severity::Warning,
             span,
-            message: format!(
-                "\\{marker} is nested inside another character marker without \\+ prefix"
-            ),
-            code: DiagnosticCode::MissingNestingPrefix,
-        }
+            format!("\\{marker} is nested inside another character marker without \\+ prefix"),
+            DiagnosticCode::MissingNestingPrefix,
+        )
     }
 
     /// Malformed attribute string (e.g. unquoted values, missing `=`).
     pub fn malformed_attributes(span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: "malformed attribute string (values must be quoted)".to_string(),
-            code: DiagnosticCode::InvalidAttributes,
-        }
+            "malformed attribute string (values must be quoted)".to_string(),
+            DiagnosticCode::InvalidAttributes,
+        )
     }
 
     /// Leading zeros in a chapter or verse number (e.g. `\c 091`, `\v 01`).
     pub fn leading_zeros(number: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: format!("leading zeros in number '{number}'"),
-            code: DiagnosticCode::LeadingZeros,
-        }
+            format!("leading zeros in number '{number}'"),
+            DiagnosticCode::LeadingZeros,
+        )
     }
 
     /// A note (`\f` or `\x`) was not properly closed before a paragraph/chapter boundary.
     pub fn unclosed_note(marker: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: format!("note \\{marker} was not closed before paragraph or chapter boundary"),
-            code: DiagnosticCode::UnclosedNote,
-        }
+            format!("note \\{marker} was not closed before paragraph or chapter boundary"),
+            DiagnosticCode::UnclosedNote,
+        )
     }
 
     /// A marker was still open at end of file.
     pub fn unclosed_at_eof(marker: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: format!("\\{marker} was still open at end of file"),
-            code: DiagnosticCode::UnclosedAtEof,
-        }
+            format!("\\{marker} was still open at end of file"),
+            DiagnosticCode::UnclosedAtEof,
+        )
     }
 
     // ── Validation diagnostics ──────────────────────────────────────────
 
     /// The required `\id` marker is missing from the document.
     pub fn missing_id_marker() -> Self {
-        Diagnostic {
-            severity: Severity::Error,
-            span: 0..0,
-            message: "document is missing required \\id marker".to_string(),
-            code: DiagnosticCode::MissingIdMarker,
-        }
+        Self::new(
+            Severity::Error,
+            0..0,
+            "document is missing required \\id marker".to_string(),
+            DiagnosticCode::MissingIdMarker,
+        )
     }
 
     /// The book code provided in the `\id` marker is invalid.
     pub fn invalid_book_code(code: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: format!("invalid book code \"{code}\""),
-            code: DiagnosticCode::InvalidBookCode,
-        }
+            format!("invalid book code \"{code}\""),
+            DiagnosticCode::InvalidBookCode,
+        )
     }
 
     /// Chapter numbers are not in the expected sequential order.
     pub fn invalid_chapter_sequence(expected: u32, got: u32, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Warning,
+        Self::new(
+            Severity::Warning,
             span,
-            message: format!("expected chapter {expected} but found chapter {got}"),
-            code: DiagnosticCode::InvalidChapterSequence,
-        }
+            format!("expected chapter {expected} but found chapter {got}"),
+            DiagnosticCode::InvalidChapterSequence,
+        )
     }
 
     /// Verse numbers are not in the expected sequential order.
     pub fn invalid_verse_sequence(expected: &str, got: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Warning,
+        Self::new(
+            Severity::Warning,
             span,
-            message: format!("expected verse {expected} but found verse {got}"),
-            code: DiagnosticCode::InvalidVerseSequence,
-        }
+            format!("expected verse {expected} but found verse {got}"),
+            DiagnosticCode::InvalidVerseSequence,
+        )
     }
 
     /// A chapter number appears more than once in the document.
     pub fn duplicate_chapter(number: u32, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: format!("duplicate chapter {number}"),
-            code: DiagnosticCode::DuplicateChapter,
-        }
+            format!("duplicate chapter {number}"),
+            DiagnosticCode::DuplicateChapter,
+        )
     }
 
     /// A footnote/cross-reference sub-marker appears outside of a note.
     pub fn note_submarker_outside_note(marker: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: format!("\\{marker} can only appear inside a footnote or cross-reference"),
-            code: DiagnosticCode::NoteSubmarkerOutsideNote,
-        }
+            format!("\\{marker} can only appear inside a footnote or cross-reference"),
+            DiagnosticCode::NoteSubmarkerOutsideNote,
+        )
     }
 
     /// Text content appears before the `\id` marker.
     pub fn text_before_id(span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: "text content is not allowed before \\id marker".to_string(),
-            code: DiagnosticCode::TextBeforeId,
-        }
+            "text content is not allowed before \\id marker".to_string(),
+            DiagnosticCode::TextBeforeId,
+        )
     }
 
     /// A header marker appears after body content has begun.
     pub fn header_after_body(marker: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Warning,
+        Self::new(
+            Severity::Warning,
             span,
-            message: format!("header marker \\{marker} appears after body content has started"),
-            code: DiagnosticCode::HeaderAfterBody,
-        }
+            format!("header marker \\{marker} appears after body content has started"),
+            DiagnosticCode::HeaderAfterBody,
+        )
     }
 
     /// A milestone marker has no matching start or end counterpart.
     pub fn milestone_mismatch(marker: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: format!("milestone \\{marker} has no matching counterpart"),
-            code: DiagnosticCode::MilestoneMismatch,
-        }
+            format!("milestone \\{marker} has no matching counterpart"),
+            DiagnosticCode::MilestoneMismatch,
+        )
     }
 
     /// A duplicate `\id` marker was found in the document.
     pub fn duplicate_id(span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: "duplicate \\id marker found".to_string(),
-            code: DiagnosticCode::DuplicateId,
-        }
+            "duplicate \\id marker found".to_string(),
+            DiagnosticCode::DuplicateId,
+        )
     }
 
     /// A `\c` marker is missing its chapter number.
     pub fn missing_chapter_number(span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: "\\c marker is missing a chapter number".to_string(),
-            code: DiagnosticCode::MissingChapterNumber,
-        }
+            "\\c marker is missing a chapter number".to_string(),
+            DiagnosticCode::MissingChapterNumber,
+        )
     }
 
     /// A `\v` marker is missing its verse number.
     pub fn missing_verse_number(span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: "\\v marker is missing a verse number".to_string(),
-            code: DiagnosticCode::MissingVerseNumber,
-        }
+            "\\v marker is missing a verse number".to_string(),
+            DiagnosticCode::MissingVerseNumber,
+        )
     }
 
     /// A `\v` marker appeared at document root instead of inside a paragraph.
     pub fn verse_outside_paragraph(span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Warning,
+        Self::new(
+            Severity::Warning,
             span,
-            message: "\\v must appear inside a paragraph; inserted implicit \\p for recovery"
-                .to_string(),
-            code: DiagnosticCode::VerseOutsideParagraph,
-        }
+            "\\v must appear inside a paragraph; inserted implicit \\p for recovery".to_string(),
+            DiagnosticCode::VerseOutsideParagraph,
+        )
     }
 
     /// The document has no `\c` chapter marker.
     pub fn missing_chapter_marker() -> Self {
-        Diagnostic {
-            severity: Severity::Error,
-            span: 0..0,
-            message: "document has no \\c chapter marker".to_string(),
-            code: DiagnosticCode::MissingChapterMarker,
-        }
+        Self::new(
+            Severity::Error,
+            0..0,
+            "document has no \\c chapter marker".to_string(),
+            DiagnosticCode::MissingChapterMarker,
+        )
     }
 
     /// A character marker spans across a verse boundary.
     pub fn char_crosses_verse(marker: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: format!("\\{marker} spans across a verse boundary"),
-            code: DiagnosticCode::CharCrossesVerseBoundary,
-        }
+            format!("\\{marker} spans across a verse boundary"),
+            DiagnosticCode::CharCrossesVerseBoundary,
+        )
     }
 
     /// A `\fig` marker has no content or attributes.
     pub fn empty_figure(span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: "\\fig has no content or attributes".to_string(),
-            code: DiagnosticCode::EmptyFigure,
-        }
+            "\\fig has no content or attributes".to_string(),
+            DiagnosticCode::EmptyFigure,
+        )
     }
 
     /// An attribute value is not properly quoted.
     pub fn unquoted_attribute_value(attr: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: format!("attribute value for \"{attr}\" must be quoted"),
-            code: DiagnosticCode::UnquotedAttributeValue,
-        }
+            format!("attribute value for \"{attr}\" must be quoted"),
+            DiagnosticCode::UnquotedAttributeValue,
+        )
     }
 
     /// A required attribute is missing.
     pub fn missing_required_attribute(marker: &str, attr: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: format!("\\{marker} is missing required attribute \"{attr}\""),
-            code: DiagnosticCode::MissingRequiredAttribute,
-        }
+            format!("\\{marker} is missing required attribute \"{attr}\""),
+            DiagnosticCode::MissingRequiredAttribute,
+        )
     }
 
     /// A default attribute was used on a marker that has no default attribute defined.
     pub fn default_attribute_not_defined(marker: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: format!(
-                "\\{marker} does not define a default attribute; value after | is invalid"
-            ),
-            code: DiagnosticCode::DefaultAttributeNotDefined,
-        }
+            format!("\\{marker} does not define a default attribute; value after | is invalid"),
+            DiagnosticCode::DefaultAttributeNotDefined,
+        )
     }
 
     /// A `\b` blank line marker contains content when it should be empty.
     pub fn non_empty_blank_line(span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: "\\b marker should not contain content".to_string(),
-            code: DiagnosticCode::NonEmptyBlankLine,
-        }
+            "\\b marker should not contain content".to_string(),
+            DiagnosticCode::NonEmptyBlankLine,
+        )
     }
 
     /// A body paragraph marker appears before the first chapter.
     pub fn body_paragraph_before_chapter(marker: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: format!(
-                "body paragraph \\{marker} is not allowed before the first \\c marker"
-            ),
-            code: DiagnosticCode::BodyParagraphBeforeChapter,
-        }
+            format!("body paragraph \\{marker} is not allowed before the first \\c marker"),
+            DiagnosticCode::BodyParagraphBeforeChapter,
+        )
     }
 
     /// A `\w` word marker with no content and no attributes.
     pub fn empty_word_marker(span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: "\\w marker has no content or attributes".to_string(),
-            code: DiagnosticCode::EmptyWordMarker,
-        }
+            "\\w marker has no content or attributes".to_string(),
+            DiagnosticCode::EmptyWordMarker,
+        )
     }
 
     /// A milestone marker (e.g., `\k-s`) is missing its self-closing `\*`.
     pub fn missing_milestone_self_close(marker: &str, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: format!("milestone \\{marker} is missing closing \\*"),
-            code: DiagnosticCode::MissingMilestoneSelfClose,
-        }
+            format!("milestone \\{marker} is missing closing \\*"),
+            DiagnosticCode::MissingMilestoneSelfClose,
+        )
     }
 
     /// A table row skips or reorders numbered columns.
     pub fn invalid_table_column_sequence(expected: u32, found: u32, span: Span) -> Self {
-        Diagnostic {
-            severity: Severity::Error,
+        Self::new(
+            Severity::Error,
             span,
-            message: format!("expected table column {expected} but found column {found}"),
-            code: DiagnosticCode::InvalidTableColumnSequence,
-        }
+            format!("expected table column {expected} but found column {found}"),
+            DiagnosticCode::InvalidTableColumnSequence,
+        )
     }
 }
 
