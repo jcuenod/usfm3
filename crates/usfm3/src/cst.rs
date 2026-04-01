@@ -40,21 +40,47 @@ pub struct CstNode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CstKind {
     Document,
-    Book { marker: String },
-    Chapter { marker: String },
-    Verse { marker: String },
-    Para { marker: String },
-    Char { marker: String },
-    Note { marker: String },
-    Milestone { marker: String },
-    Figure { marker: String },
-    Sidebar { marker: String },
-    Periph { marker: String },
+    Book {
+        marker: String,
+    },
+    Chapter {
+        marker: String,
+    },
+    Verse {
+        marker: String,
+    },
+    Para {
+        marker: String,
+    },
+    Char {
+        marker: String,
+    },
+    Note {
+        marker: String,
+    },
+    Milestone {
+        marker: String,
+    },
+    Figure {
+        marker: String,
+    },
+    Sidebar {
+        marker: String,
+    },
+    Periph {
+        marker: String,
+    },
     Table,
-    TableRow { marker: String },
-    TableCell { marker: String },
+    TableRow {
+        marker: String,
+    },
+    TableCell {
+        marker: String,
+    },
     Ref,
-    Unknown { marker: String },
+    Unknown {
+        marker: String,
+    },
     MarkerToken {
         normalized: String,
         token_kind: MarkerTokenKind,
@@ -178,10 +204,7 @@ impl CstDocument {
 pub fn parse(input: &str) -> CstParseResult {
     let cst = get_cst(input);
     let diagnostics = crate::builder::parse_from_cst(&cst).diagnostics;
-    CstParseResult {
-        cst,
-        diagnostics,
-    }
+    CstParseResult { cst, diagnostics }
 }
 
 pub(crate) fn get_cst(input: &str) -> CstDocument {
@@ -714,7 +737,9 @@ impl<'a> CstParser<'a> {
             }
             MarkerKind::Chapter => self.handle_chapter(span),
             MarkerKind::Verse => self.handle_verse(span),
-            MarkerKind::MilestoneStart | MarkerKind::MilestoneEnd => self.handle_milestone(span, marker),
+            MarkerKind::MilestoneStart | MarkerKind::MilestoneEnd => {
+                self.handle_milestone(span, marker)
+            }
         }
     }
 
@@ -883,7 +908,11 @@ impl<'a> CstParser<'a> {
                         break;
                     }
                 }
-                self.append_leaf(CstKind::WhitespaceToken, segment_start..start + end_rel, None);
+                self.append_leaf(
+                    CstKind::WhitespaceToken,
+                    segment_start..start + end_rel,
+                    None,
+                );
                 continue;
             }
             let mut end_rel = idx + ch.len_utf8();
@@ -1034,17 +1063,13 @@ impl<'a> CstParser<'a> {
 
     fn close_character_in_note(&mut self) -> bool {
         let mut closed_any = false;
-        loop {
-            match self.stack.last().map(|open| open.kind) {
-                Some(MarkerKind::Character)
-                | Some(MarkerKind::Unknown)
-                | Some(MarkerKind::TableCell) => {
-                    let open = self.stack.pop().unwrap();
-                    self.refresh_span(open.id);
-                    closed_any = true;
-                }
-                _ => break,
-            }
+        while let Some(MarkerKind::Character)
+        | Some(MarkerKind::Unknown)
+        | Some(MarkerKind::TableCell) = self.stack.last().map(|open| open.kind)
+        {
+            let open = self.stack.pop().unwrap();
+            self.refresh_span(open.id);
+            closed_any = true;
         }
         closed_any
     }

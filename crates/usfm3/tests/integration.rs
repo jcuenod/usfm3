@@ -56,12 +56,19 @@ fn cst_leaf_spans_are_gap_free_and_ordered() {
     let mut expected_start = 0;
     for &leaf_id in cst.leaf_ids() {
         let span = cst.node(leaf_id).span.clone();
-        assert_eq!(span.start, expected_start, "leaf spans should be contiguous");
+        assert_eq!(
+            span.start, expected_start,
+            "leaf spans should be contiguous"
+        );
         assert!(span.end >= span.start, "leaf spans should be ordered");
         expected_start = span.end;
     }
 
-    assert_eq!(expected_start, usfm.len(), "leaf spans should cover the full source");
+    assert_eq!(
+        expected_start,
+        usfm.len(),
+        "leaf spans should cover the full source"
+    );
 }
 
 #[test]
@@ -73,7 +80,10 @@ fn cst_cursor_mapping_finds_preserved_trivia() {
     let second_gap = cst.leaf_at_offset(8).unwrap();
 
     assert!(matches!(cst.node(first_gap).kind, CstKind::WhitespaceToken));
-    assert!(matches!(cst.node(second_gap).kind, CstKind::WhitespaceToken));
+    assert!(matches!(
+        cst.node(second_gap).kind,
+        CstKind::WhitespaceToken
+    ));
 
     let range = cst.covering_node_range(4, 8).unwrap();
     assert!(matches!(cst.node(range).kind, CstKind::Verse { .. }));

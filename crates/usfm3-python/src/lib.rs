@@ -30,7 +30,7 @@ impl Diagnostic {
 
 #[pyclass]
 struct ParseResult {
-    document: usfm3_lib::ast::Document,
+    ast: usfm3_lib::ast::Document,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -40,7 +40,7 @@ impl ParseResult {
     #[pyo3(signature = (spans=false))]
     fn to_usj(&self, py: Python<'_>, spans: bool) -> PyResult<PyObject> {
         let value = usfm3_lib::usj::to_usj_value_with_options(
-            &self.document,
+            &self.ast,
             usfm3_lib::usj::UsjOptions {
                 include_spans: spans,
             },
@@ -53,18 +53,18 @@ impl ParseResult {
 
     /// Returns USX XML as a string.
     fn to_usx(&self) -> PyResult<String> {
-        usfm3_lib::usx::to_usx_string(&self.document)
+        usfm3_lib::usx::to_usx_string(&self.ast)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 
     /// Returns normalized USFM as a string.
     fn to_usfm(&self) -> String {
-        usfm3_lib::usfm::to_usfm_string(&self.document)
+        usfm3_lib::usfm::to_usfm_string(&self.ast)
     }
 
     /// Returns verse reference map as a Python dict.
     fn to_vref(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let map = usfm3_lib::vref::to_vref_map(&self.document);
+        let map = usfm3_lib::vref::to_vref_map(&self.ast);
         let dict = PyDict::new(py);
         for (k, v) in &map {
             let val: String = v.as_str().unwrap_or_default().to_string();
@@ -112,13 +112,13 @@ fn convert_diagnostics(
 fn parse(usfm: &str, validate: bool) -> ParseResult {
     let result = usfm3_lib::builder::parse(usfm);
     let validation_diags = if validate {
-        usfm3_lib::validation::validate(&result.document)
+        usfm3_lib::validation::validate(&result.ast)
     } else {
         usfm3_lib::diagnostics::DiagnosticList::new()
     };
     let diagnostics = convert_diagnostics(&result.diagnostics, &validation_diags);
     ParseResult {
-        document: result.document,
+        ast: result.ast,
         diagnostics,
     }
 }

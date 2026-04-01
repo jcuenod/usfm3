@@ -45,13 +45,12 @@ fn main() {
 
     match format {
         "usj" => {
-            let json = usfm3::usj::to_usj_string_pretty(&result.ast)
-                .expect("USJ serialization failed");
+            let json =
+                usfm3::usj::to_usj_string_pretty(&result.ast).expect("USJ serialization failed");
             println!("{json}");
         }
         "usx" => {
-            let xml =
-                usfm3::usx::to_usx_string(&result.ast).expect("USX serialization failed");
+            let xml = usfm3::usx::to_usx_string(&result.ast).expect("USX serialization failed");
             println!("{xml}");
         }
         "usfm" => {

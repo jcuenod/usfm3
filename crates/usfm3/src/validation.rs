@@ -225,12 +225,12 @@ impl<'a> Validator<'a> {
             let span = node.span().cloned().unwrap_or(0..0);
             if let Some(v_start) = start {
                 if v_start != *expected_verse {
-                        self.diagnostics.push(Diagnostic::invalid_verse_sequence(
-                            &expected_verse.to_string(),
-                            number,
-                            span.clone(),
-                        ));
-                    }
+                    self.diagnostics.push(Diagnostic::invalid_verse_sequence(
+                        &expected_verse.to_string(),
+                        number,
+                        span.clone(),
+                    ));
+                }
                 // Next expected verse is end-of-range + 1 (or start + 1).
                 *expected_verse = end.unwrap_or(v_start) + 1;
             }
