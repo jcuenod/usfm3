@@ -85,22 +85,19 @@ impl MarkerInfo {
 }
 
 /// An interned, exact known marker definition.
-#[derive(Clone, PartialEq, Eq, Debug, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub struct KnownMarker {
-    name: Box<str>,
+    name: &'static str,
     info: MarkerInfo,
 }
 
 impl KnownMarker {
-    fn new(name: impl Into<Box<str>>, info: MarkerInfo) -> Self {
-        Self {
-            name: name.into(),
-            info,
-        }
+    const fn new(name: &'static str, info: MarkerInfo) -> Self {
+        Self { name, info }
     }
 
     pub fn as_str(&self) -> &str {
-        self.name.as_ref()
+        self.name
     }
 
     pub fn kind(&self) -> MarkerKind {
@@ -228,45 +225,236 @@ impl PartialEq<MarkerName> for &str {
 }
 
 fn lookup_known_marker_exact(name: &str) -> Option<KnownMarker> {
-    let info = match name {
-        "id" | "usfm" | "ide" | "h" | "h1" | "h2" | "h3" | "toc1" | "toc2" | "toc3" | "toca1"
-        | "toca2" | "toca3" | "mt" | "mt1" | "mt2" | "mt3" | "mt4" | "mte" | "mte1" | "mte2"
-        | "imt" | "imt1" | "imt2" | "imt3" | "imt4" | "imte" | "imte1" | "imte2" | "is" | "is1"
-        | "is2" | "is3" | "cl" | "cp" | "cd" => MarkerInfo::new(MarkerKind::Header),
-        "p" | "m" | "po" | "pr" | "cls" | "pmo" | "pm" | "pmc" | "pmr" | "pi" | "pi1" | "pi2"
-        | "pi3" | "mi" | "nb" | "pc" | "ph" | "ph1" | "ph2" | "ph3" | "b" | "pb" | "q" | "q1"
-        | "q2" | "q3" | "q4" | "qr" | "qc" | "qa" | "qm" | "qm1" | "qm2" | "qm3" | "qd" | "lh"
-        | "li" | "li1" | "li2" | "li3" | "li4" | "lf" | "lim" | "lim1" | "lim2" | "lim3" | "ms"
-        | "ms1" | "ms2" | "ms3" | "mr" | "s" | "s1" | "s2" | "s3" | "s4" | "sr" | "r" | "sp"
-        | "sd" | "sd1" | "sd2" | "sd3" | "sd4" | "d" | "ip" | "ipi" | "im" | "imi" | "ipq"
-        | "imq" | "ipr" | "ib" | "iq" | "iq1" | "iq2" | "iq3" | "iex" | "iot" | "io" | "io1"
-        | "io2" | "io3" | "io4" | "ili" | "ili1" | "ili2" | "ie" | "lit" => {
-            MarkerInfo::new(MarkerKind::Paragraph)
-        }
-        "periph" => MarkerInfo::new(MarkerKind::Periph),
-        "tr" => MarkerInfo::new(MarkerKind::TableRow),
-        "f" | "fe" | "x" | "ef" | "ex" => MarkerInfo::new(MarkerKind::Note),
-        "fr" | "ft" | "fk" | "fq" | "fqa" | "fl" | "fw" | "fp" | "fv" | "fdc" | "xop" | "xot"
-        | "xnt" | "xdc" | "xo" | "xt" | "xta" | "xk" | "xq" => {
-            MarkerInfo::note_sub(MarkerKind::Character)
-        }
-        "add" | "addpn" | "bk" | "dc" | "ior" | "iqt" | "k" | "litl" | "nd" | "ord" | "pn"
-        | "png" | "qs" | "qt" | "sig" | "sls" | "tl" | "wj" | "em" | "bd" | "bdit" | "it"
-        | "no" | "sc" | "sup" | "rb" | "pro" | "w" | "wg" | "wh" | "wa" | "rq" | "ca" | "va"
-        | "vp" | "fm" | "jmp" | "ref" => MarkerInfo::new(MarkerKind::Character),
-        "th" | "th1" | "th2" | "th3" | "tc" | "tc1" | "tc2" | "tc3" | "thr" | "thr1" | "thr2"
-        | "thr3" | "tcr" | "tcr1" | "tcr2" | "tcr3" | "thc" | "thc1" | "thc2" | "thc3" | "tcc"
-        | "tcc1" | "tcc2" | "tcc3" => MarkerInfo::new(MarkerKind::TableCell),
-        "c" => MarkerInfo::new(MarkerKind::Chapter),
-        "v" => MarkerInfo::new(MarkerKind::Verse),
-        "fig" => MarkerInfo::new(MarkerKind::Figure),
-        "esb" => MarkerInfo::new(MarkerKind::SidebarStart),
-        "esbe" => MarkerInfo::new(MarkerKind::SidebarEnd),
-        "rem" | "sts" | "restore" | "cat" => MarkerInfo::new(MarkerKind::Meta),
-        "ts" => MarkerInfo::new(MarkerKind::MilestoneStart),
+    // Returns (static_name, info) so KnownMarker stores a &'static str
+    // and avoids any heap allocation.  Each arm must produce a string
+    // literal so the borrow checker sees &'static str.
+    let (s, info): (&'static str, MarkerInfo) = match name {
+        "id" => ("id", MarkerInfo::new(MarkerKind::Header)),
+        "usfm" => ("usfm", MarkerInfo::new(MarkerKind::Header)),
+        "ide" => ("ide", MarkerInfo::new(MarkerKind::Header)),
+        "h" => ("h", MarkerInfo::new(MarkerKind::Header)),
+        "h1" => ("h1", MarkerInfo::new(MarkerKind::Header)),
+        "h2" => ("h2", MarkerInfo::new(MarkerKind::Header)),
+        "h3" => ("h3", MarkerInfo::new(MarkerKind::Header)),
+        "toc1" => ("toc1", MarkerInfo::new(MarkerKind::Header)),
+        "toc2" => ("toc2", MarkerInfo::new(MarkerKind::Header)),
+        "toc3" => ("toc3", MarkerInfo::new(MarkerKind::Header)),
+        "toca1" => ("toca1", MarkerInfo::new(MarkerKind::Header)),
+        "toca2" => ("toca2", MarkerInfo::new(MarkerKind::Header)),
+        "toca3" => ("toca3", MarkerInfo::new(MarkerKind::Header)),
+        "mt" => ("mt", MarkerInfo::new(MarkerKind::Header)),
+        "mt1" => ("mt1", MarkerInfo::new(MarkerKind::Header)),
+        "mt2" => ("mt2", MarkerInfo::new(MarkerKind::Header)),
+        "mt3" => ("mt3", MarkerInfo::new(MarkerKind::Header)),
+        "mt4" => ("mt4", MarkerInfo::new(MarkerKind::Header)),
+        "mte" => ("mte", MarkerInfo::new(MarkerKind::Header)),
+        "mte1" => ("mte1", MarkerInfo::new(MarkerKind::Header)),
+        "mte2" => ("mte2", MarkerInfo::new(MarkerKind::Header)),
+        "imt" => ("imt", MarkerInfo::new(MarkerKind::Header)),
+        "imt1" => ("imt1", MarkerInfo::new(MarkerKind::Header)),
+        "imt2" => ("imt2", MarkerInfo::new(MarkerKind::Header)),
+        "imt3" => ("imt3", MarkerInfo::new(MarkerKind::Header)),
+        "imt4" => ("imt4", MarkerInfo::new(MarkerKind::Header)),
+        "imte" => ("imte", MarkerInfo::new(MarkerKind::Header)),
+        "imte1" => ("imte1", MarkerInfo::new(MarkerKind::Header)),
+        "imte2" => ("imte2", MarkerInfo::new(MarkerKind::Header)),
+        "is" => ("is", MarkerInfo::new(MarkerKind::Header)),
+        "is1" => ("is1", MarkerInfo::new(MarkerKind::Header)),
+        "is2" => ("is2", MarkerInfo::new(MarkerKind::Header)),
+        "is3" => ("is3", MarkerInfo::new(MarkerKind::Header)),
+        "cl" => ("cl", MarkerInfo::new(MarkerKind::Header)),
+        "cp" => ("cp", MarkerInfo::new(MarkerKind::Header)),
+        "cd" => ("cd", MarkerInfo::new(MarkerKind::Header)),
+        "p" => ("p", MarkerInfo::new(MarkerKind::Paragraph)),
+        "m" => ("m", MarkerInfo::new(MarkerKind::Paragraph)),
+        "po" => ("po", MarkerInfo::new(MarkerKind::Paragraph)),
+        "pr" => ("pr", MarkerInfo::new(MarkerKind::Paragraph)),
+        "cls" => ("cls", MarkerInfo::new(MarkerKind::Paragraph)),
+        "pmo" => ("pmo", MarkerInfo::new(MarkerKind::Paragraph)),
+        "pm" => ("pm", MarkerInfo::new(MarkerKind::Paragraph)),
+        "pmc" => ("pmc", MarkerInfo::new(MarkerKind::Paragraph)),
+        "pmr" => ("pmr", MarkerInfo::new(MarkerKind::Paragraph)),
+        "pi" => ("pi", MarkerInfo::new(MarkerKind::Paragraph)),
+        "pi1" => ("pi1", MarkerInfo::new(MarkerKind::Paragraph)),
+        "pi2" => ("pi2", MarkerInfo::new(MarkerKind::Paragraph)),
+        "pi3" => ("pi3", MarkerInfo::new(MarkerKind::Paragraph)),
+        "mi" => ("mi", MarkerInfo::new(MarkerKind::Paragraph)),
+        "nb" => ("nb", MarkerInfo::new(MarkerKind::Paragraph)),
+        "pc" => ("pc", MarkerInfo::new(MarkerKind::Paragraph)),
+        "ph" => ("ph", MarkerInfo::new(MarkerKind::Paragraph)),
+        "ph1" => ("ph1", MarkerInfo::new(MarkerKind::Paragraph)),
+        "ph2" => ("ph2", MarkerInfo::new(MarkerKind::Paragraph)),
+        "ph3" => ("ph3", MarkerInfo::new(MarkerKind::Paragraph)),
+        "b" => ("b", MarkerInfo::new(MarkerKind::Paragraph)),
+        "pb" => ("pb", MarkerInfo::new(MarkerKind::Paragraph)),
+        "q" => ("q", MarkerInfo::new(MarkerKind::Paragraph)),
+        "q1" => ("q1", MarkerInfo::new(MarkerKind::Paragraph)),
+        "q2" => ("q2", MarkerInfo::new(MarkerKind::Paragraph)),
+        "q3" => ("q3", MarkerInfo::new(MarkerKind::Paragraph)),
+        "q4" => ("q4", MarkerInfo::new(MarkerKind::Paragraph)),
+        "qr" => ("qr", MarkerInfo::new(MarkerKind::Paragraph)),
+        "qc" => ("qc", MarkerInfo::new(MarkerKind::Paragraph)),
+        "qa" => ("qa", MarkerInfo::new(MarkerKind::Paragraph)),
+        "qm" => ("qm", MarkerInfo::new(MarkerKind::Paragraph)),
+        "qm1" => ("qm1", MarkerInfo::new(MarkerKind::Paragraph)),
+        "qm2" => ("qm2", MarkerInfo::new(MarkerKind::Paragraph)),
+        "qm3" => ("qm3", MarkerInfo::new(MarkerKind::Paragraph)),
+        "qd" => ("qd", MarkerInfo::new(MarkerKind::Paragraph)),
+        "lh" => ("lh", MarkerInfo::new(MarkerKind::Paragraph)),
+        "li" => ("li", MarkerInfo::new(MarkerKind::Paragraph)),
+        "li1" => ("li1", MarkerInfo::new(MarkerKind::Paragraph)),
+        "li2" => ("li2", MarkerInfo::new(MarkerKind::Paragraph)),
+        "li3" => ("li3", MarkerInfo::new(MarkerKind::Paragraph)),
+        "li4" => ("li4", MarkerInfo::new(MarkerKind::Paragraph)),
+        "lf" => ("lf", MarkerInfo::new(MarkerKind::Paragraph)),
+        "lim" => ("lim", MarkerInfo::new(MarkerKind::Paragraph)),
+        "lim1" => ("lim1", MarkerInfo::new(MarkerKind::Paragraph)),
+        "lim2" => ("lim2", MarkerInfo::new(MarkerKind::Paragraph)),
+        "lim3" => ("lim3", MarkerInfo::new(MarkerKind::Paragraph)),
+        "ms" => ("ms", MarkerInfo::new(MarkerKind::Paragraph)),
+        "ms1" => ("ms1", MarkerInfo::new(MarkerKind::Paragraph)),
+        "ms2" => ("ms2", MarkerInfo::new(MarkerKind::Paragraph)),
+        "ms3" => ("ms3", MarkerInfo::new(MarkerKind::Paragraph)),
+        "mr" => ("mr", MarkerInfo::new(MarkerKind::Paragraph)),
+        "s" => ("s", MarkerInfo::new(MarkerKind::Paragraph)),
+        "s1" => ("s1", MarkerInfo::new(MarkerKind::Paragraph)),
+        "s2" => ("s2", MarkerInfo::new(MarkerKind::Paragraph)),
+        "s3" => ("s3", MarkerInfo::new(MarkerKind::Paragraph)),
+        "s4" => ("s4", MarkerInfo::new(MarkerKind::Paragraph)),
+        "sr" => ("sr", MarkerInfo::new(MarkerKind::Paragraph)),
+        "r" => ("r", MarkerInfo::new(MarkerKind::Paragraph)),
+        "sp" => ("sp", MarkerInfo::new(MarkerKind::Paragraph)),
+        "sd" => ("sd", MarkerInfo::new(MarkerKind::Paragraph)),
+        "sd1" => ("sd1", MarkerInfo::new(MarkerKind::Paragraph)),
+        "sd2" => ("sd2", MarkerInfo::new(MarkerKind::Paragraph)),
+        "sd3" => ("sd3", MarkerInfo::new(MarkerKind::Paragraph)),
+        "sd4" => ("sd4", MarkerInfo::new(MarkerKind::Paragraph)),
+        "d" => ("d", MarkerInfo::new(MarkerKind::Paragraph)),
+        "ip" => ("ip", MarkerInfo::new(MarkerKind::Paragraph)),
+        "ipi" => ("ipi", MarkerInfo::new(MarkerKind::Paragraph)),
+        "im" => ("im", MarkerInfo::new(MarkerKind::Paragraph)),
+        "imi" => ("imi", MarkerInfo::new(MarkerKind::Paragraph)),
+        "ipq" => ("ipq", MarkerInfo::new(MarkerKind::Paragraph)),
+        "imq" => ("imq", MarkerInfo::new(MarkerKind::Paragraph)),
+        "ipr" => ("ipr", MarkerInfo::new(MarkerKind::Paragraph)),
+        "ib" => ("ib", MarkerInfo::new(MarkerKind::Paragraph)),
+        "iq" => ("iq", MarkerInfo::new(MarkerKind::Paragraph)),
+        "iq1" => ("iq1", MarkerInfo::new(MarkerKind::Paragraph)),
+        "iq2" => ("iq2", MarkerInfo::new(MarkerKind::Paragraph)),
+        "iq3" => ("iq3", MarkerInfo::new(MarkerKind::Paragraph)),
+        "iex" => ("iex", MarkerInfo::new(MarkerKind::Paragraph)),
+        "iot" => ("iot", MarkerInfo::new(MarkerKind::Paragraph)),
+        "io" => ("io", MarkerInfo::new(MarkerKind::Paragraph)),
+        "io1" => ("io1", MarkerInfo::new(MarkerKind::Paragraph)),
+        "io2" => ("io2", MarkerInfo::new(MarkerKind::Paragraph)),
+        "io3" => ("io3", MarkerInfo::new(MarkerKind::Paragraph)),
+        "io4" => ("io4", MarkerInfo::new(MarkerKind::Paragraph)),
+        "ili" => ("ili", MarkerInfo::new(MarkerKind::Paragraph)),
+        "ili1" => ("ili1", MarkerInfo::new(MarkerKind::Paragraph)),
+        "ili2" => ("ili2", MarkerInfo::new(MarkerKind::Paragraph)),
+        "ie" => ("ie", MarkerInfo::new(MarkerKind::Paragraph)),
+        "lit" => ("lit", MarkerInfo::new(MarkerKind::Paragraph)),
+        "periph" => ("periph", MarkerInfo::new(MarkerKind::Periph)),
+        "tr" => ("tr", MarkerInfo::new(MarkerKind::TableRow)),
+        "f" => ("f", MarkerInfo::new(MarkerKind::Note)),
+        "fe" => ("fe", MarkerInfo::new(MarkerKind::Note)),
+        "x" => ("x", MarkerInfo::new(MarkerKind::Note)),
+        "ef" => ("ef", MarkerInfo::new(MarkerKind::Note)),
+        "ex" => ("ex", MarkerInfo::new(MarkerKind::Note)),
+        "fr" => ("fr", MarkerInfo::note_sub(MarkerKind::Character)),
+        "ft" => ("ft", MarkerInfo::note_sub(MarkerKind::Character)),
+        "fk" => ("fk", MarkerInfo::note_sub(MarkerKind::Character)),
+        "fq" => ("fq", MarkerInfo::note_sub(MarkerKind::Character)),
+        "fqa" => ("fqa", MarkerInfo::note_sub(MarkerKind::Character)),
+        "fl" => ("fl", MarkerInfo::note_sub(MarkerKind::Character)),
+        "fw" => ("fw", MarkerInfo::note_sub(MarkerKind::Character)),
+        "fp" => ("fp", MarkerInfo::note_sub(MarkerKind::Character)),
+        "fv" => ("fv", MarkerInfo::note_sub(MarkerKind::Character)),
+        "fdc" => ("fdc", MarkerInfo::note_sub(MarkerKind::Character)),
+        "xop" => ("xop", MarkerInfo::note_sub(MarkerKind::Character)),
+        "xot" => ("xot", MarkerInfo::note_sub(MarkerKind::Character)),
+        "xnt" => ("xnt", MarkerInfo::note_sub(MarkerKind::Character)),
+        "xdc" => ("xdc", MarkerInfo::note_sub(MarkerKind::Character)),
+        "xo" => ("xo", MarkerInfo::note_sub(MarkerKind::Character)),
+        "xt" => ("xt", MarkerInfo::note_sub(MarkerKind::Character)),
+        "xta" => ("xta", MarkerInfo::note_sub(MarkerKind::Character)),
+        "xk" => ("xk", MarkerInfo::note_sub(MarkerKind::Character)),
+        "xq" => ("xq", MarkerInfo::note_sub(MarkerKind::Character)),
+        "add" => ("add", MarkerInfo::new(MarkerKind::Character)),
+        "addpn" => ("addpn", MarkerInfo::new(MarkerKind::Character)),
+        "bk" => ("bk", MarkerInfo::new(MarkerKind::Character)),
+        "dc" => ("dc", MarkerInfo::new(MarkerKind::Character)),
+        "ior" => ("ior", MarkerInfo::new(MarkerKind::Character)),
+        "iqt" => ("iqt", MarkerInfo::new(MarkerKind::Character)),
+        "k" => ("k", MarkerInfo::new(MarkerKind::Character)),
+        "litl" => ("litl", MarkerInfo::new(MarkerKind::Character)),
+        "nd" => ("nd", MarkerInfo::new(MarkerKind::Character)),
+        "ord" => ("ord", MarkerInfo::new(MarkerKind::Character)),
+        "pn" => ("pn", MarkerInfo::new(MarkerKind::Character)),
+        "png" => ("png", MarkerInfo::new(MarkerKind::Character)),
+        "qs" => ("qs", MarkerInfo::new(MarkerKind::Character)),
+        "qt" => ("qt", MarkerInfo::new(MarkerKind::Character)),
+        "sig" => ("sig", MarkerInfo::new(MarkerKind::Character)),
+        "sls" => ("sls", MarkerInfo::new(MarkerKind::Character)),
+        "tl" => ("tl", MarkerInfo::new(MarkerKind::Character)),
+        "wj" => ("wj", MarkerInfo::new(MarkerKind::Character)),
+        "em" => ("em", MarkerInfo::new(MarkerKind::Character)),
+        "bd" => ("bd", MarkerInfo::new(MarkerKind::Character)),
+        "bdit" => ("bdit", MarkerInfo::new(MarkerKind::Character)),
+        "it" => ("it", MarkerInfo::new(MarkerKind::Character)),
+        "no" => ("no", MarkerInfo::new(MarkerKind::Character)),
+        "sc" => ("sc", MarkerInfo::new(MarkerKind::Character)),
+        "sup" => ("sup", MarkerInfo::new(MarkerKind::Character)),
+        "rb" => ("rb", MarkerInfo::new(MarkerKind::Character)),
+        "pro" => ("pro", MarkerInfo::new(MarkerKind::Character)),
+        "w" => ("w", MarkerInfo::new(MarkerKind::Character)),
+        "wg" => ("wg", MarkerInfo::new(MarkerKind::Character)),
+        "wh" => ("wh", MarkerInfo::new(MarkerKind::Character)),
+        "wa" => ("wa", MarkerInfo::new(MarkerKind::Character)),
+        "rq" => ("rq", MarkerInfo::new(MarkerKind::Character)),
+        "ca" => ("ca", MarkerInfo::new(MarkerKind::Character)),
+        "va" => ("va", MarkerInfo::new(MarkerKind::Character)),
+        "vp" => ("vp", MarkerInfo::new(MarkerKind::Character)),
+        "fm" => ("fm", MarkerInfo::new(MarkerKind::Character)),
+        "jmp" => ("jmp", MarkerInfo::new(MarkerKind::Character)),
+        "ref" => ("ref", MarkerInfo::new(MarkerKind::Character)),
+        "th" => ("th", MarkerInfo::new(MarkerKind::TableCell)),
+        "th1" => ("th1", MarkerInfo::new(MarkerKind::TableCell)),
+        "th2" => ("th2", MarkerInfo::new(MarkerKind::TableCell)),
+        "th3" => ("th3", MarkerInfo::new(MarkerKind::TableCell)),
+        "tc" => ("tc", MarkerInfo::new(MarkerKind::TableCell)),
+        "tc1" => ("tc1", MarkerInfo::new(MarkerKind::TableCell)),
+        "tc2" => ("tc2", MarkerInfo::new(MarkerKind::TableCell)),
+        "tc3" => ("tc3", MarkerInfo::new(MarkerKind::TableCell)),
+        "thr" => ("thr", MarkerInfo::new(MarkerKind::TableCell)),
+        "thr1" => ("thr1", MarkerInfo::new(MarkerKind::TableCell)),
+        "thr2" => ("thr2", MarkerInfo::new(MarkerKind::TableCell)),
+        "thr3" => ("thr3", MarkerInfo::new(MarkerKind::TableCell)),
+        "tcr" => ("tcr", MarkerInfo::new(MarkerKind::TableCell)),
+        "tcr1" => ("tcr1", MarkerInfo::new(MarkerKind::TableCell)),
+        "tcr2" => ("tcr2", MarkerInfo::new(MarkerKind::TableCell)),
+        "tcr3" => ("tcr3", MarkerInfo::new(MarkerKind::TableCell)),
+        "thc" => ("thc", MarkerInfo::new(MarkerKind::TableCell)),
+        "thc1" => ("thc1", MarkerInfo::new(MarkerKind::TableCell)),
+        "thc2" => ("thc2", MarkerInfo::new(MarkerKind::TableCell)),
+        "thc3" => ("thc3", MarkerInfo::new(MarkerKind::TableCell)),
+        "tcc" => ("tcc", MarkerInfo::new(MarkerKind::TableCell)),
+        "tcc1" => ("tcc1", MarkerInfo::new(MarkerKind::TableCell)),
+        "tcc2" => ("tcc2", MarkerInfo::new(MarkerKind::TableCell)),
+        "tcc3" => ("tcc3", MarkerInfo::new(MarkerKind::TableCell)),
+        "c" => ("c", MarkerInfo::new(MarkerKind::Chapter)),
+        "v" => ("v", MarkerInfo::new(MarkerKind::Verse)),
+        "fig" => ("fig", MarkerInfo::new(MarkerKind::Figure)),
+        "esb" => ("esb", MarkerInfo::new(MarkerKind::SidebarStart)),
+        "esbe" => ("esbe", MarkerInfo::new(MarkerKind::SidebarEnd)),
+        "rem" => ("rem", MarkerInfo::new(MarkerKind::Meta)),
+        "sts" => ("sts", MarkerInfo::new(MarkerKind::Meta)),
+        "restore" => ("restore", MarkerInfo::new(MarkerKind::Meta)),
+        "cat" => ("cat", MarkerInfo::new(MarkerKind::Meta)),
+        "ts" => ("ts", MarkerInfo::new(MarkerKind::MilestoneStart)),
         _ => return None,
     };
-    Some(KnownMarker::new(name, info))
+    Some(KnownMarker::new(s, info))
 }
 
 /// Return the default attribute key for a marker, if any.

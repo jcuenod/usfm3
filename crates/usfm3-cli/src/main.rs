@@ -25,8 +25,8 @@ fn main() {
         buf
     };
 
-    let result = usfm3::parse_full(
-        &input,
+    let result = usfm3::parse_full_owned(
+        input,
         usfm3::ParseOptions {
             validate: !no_validate,
         },

@@ -30,7 +30,7 @@ pub enum Token<'a> {
 
     // ── Milestones ──────────────────────────────────────────────────────
     /// Milestone markers such as `\qt1-s`, `\qt-e`, `\ts-s`, etc.
-    #[regex(r"\\[a-z]+[0-9]*-[se]")]
+    #[regex(r"\\[a-z]+[0-9]*-[se]", priority = 6)]
     Milestone(&'a str),
 
     // ── Nested markers (USFM 2.4+) ─────────────────────────────────────
@@ -49,13 +49,13 @@ pub enum Token<'a> {
 
     // ── Regular markers ─────────────────────────────────────────────────
     /// `\marker*` -- character / note closing marker.
-    #[regex(r"\\[a-z]+[0-9]*(-[0-9]+)?\*")]
+    #[regex(r"\\[a-z]+[0-9]*(-[a-z0-9]+)?\*")]
     ClosingMarker(&'a str),
 
     /// `\marker` -- paragraph or character opening marker (catch-all).
-    /// The optional `-[0-9]+` suffix handles column-spanning table markers
-    /// like `\tcr1-2` (spanning columns 1-2).
-    #[regex(r"\\[a-z]+[0-9]*(-[0-9]+)?", priority = 2)]
+    /// The optional hyphen suffix handles column-spanning table markers
+    /// like `\tcr1-2` and user-defined markers like `\zpa-xb`.
+    #[regex(r"\\[a-z]+[0-9]*(-[a-z0-9]+)?", priority = 2)]
     Marker(&'a str),
 
     // ── Attributes ──────────────────────────────────────────────────────

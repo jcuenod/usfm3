@@ -307,20 +307,25 @@ struct CstParser<'a> {
 impl<'a> CstParser<'a> {
     fn new(source: &'a str) -> Self {
         let root = CstNodeId::from_index(0);
+        // Estimate ~1 node per 8 source bytes; ~70% are leaves.
+        let estimated_nodes = (source.len() / 8).max(16);
+        let estimated_leaves = estimated_nodes * 7 / 10;
+        let mut nodes = Vec::with_capacity(estimated_nodes);
+        nodes.push(CstNode {
+            kind: CstKind::Document,
+            span: 0..source.len(),
+            parent: None,
+            prev_sibling: None,
+            next_sibling: None,
+            first_child: None,
+            last_child: None,
+        });
         Self {
             source,
-            nodes: vec![CstNode {
-                kind: CstKind::Document,
-                span: 0..source.len(),
-                parent: None,
-                prev_sibling: None,
-                next_sibling: None,
-                first_child: None,
-                last_child: None,
-            }],
-            leaf_ids: Vec::new(),
+            nodes,
+            leaf_ids: Vec::with_capacity(estimated_leaves),
             root,
-            stack: Vec::new(),
+            stack: Vec::with_capacity(16),
             pending_chapter: None,
             pending_verse: None,
             pending_milestone: None,
@@ -783,6 +788,16 @@ impl<'a> CstParser<'a> {
                 }
             }
             MarkerKind::Unknown => {
+                // Close any existing Unknown or Character siblings on the
+                // stack to prevent unbounded nesting of sequential unknown
+                // markers (e.g. thousands of \t in a concordance file).
+                while matches!(
+                    self.stack.last().map(|open| open.kind),
+                    Some(MarkerKind::Character) | Some(MarkerKind::Unknown)
+                ) {
+                    let open = self.stack.pop().unwrap();
+                    self.refresh_span(open.id);
+                }
                 let id = self.open_structural(
                     CstKind::Unknown {
                         marker: name.clone(),
@@ -812,6 +827,37 @@ impl<'a> CstParser<'a> {
             self.append_leaf_to(CstKind::MilestoneEndToken, span, id, Some("\\*"));
             self.refresh_span(id);
             return;
+        }
+        // \zms\* pattern: unknown/char on stack with no content children → close it
+        if let Some(top) = self.stack.last()
+            && matches!(top.kind, MarkerKind::Unknown | MarkerKind::Character)
+        {
+            let top_id = top.id;
+            let has_content = self.nodes[top_id.index()]
+                .first_child
+                .map(|fc| {
+                    let mut cid = Some(fc);
+                    while let Some(c) = cid {
+                        if !matches!(
+                            self.nodes[c.index()].kind,
+                            CstKind::MarkerToken { .. }
+                                | CstKind::WhitespaceToken
+                                | CstKind::NewlineToken
+                                | CstKind::AttributesToken
+                        ) {
+                            return true;
+                        }
+                        cid = self.nodes[c.index()].next_sibling;
+                    }
+                    false
+                })
+                .unwrap_or(false);
+            if !has_content {
+                self.append_leaf_to(CstKind::MilestoneEndToken, span, top_id, Some("\\*"));
+                let open = self.stack.pop().unwrap();
+                self.refresh_span(open.id);
+                return;
+            }
         }
         self.append_leaf(CstKind::MilestoneEndToken, span, Some("\\*"));
     }
