@@ -1452,14 +1452,25 @@ impl<'a> LowerCtx<'a> {
                         if let CstKind::ClosingMarkerToken { normalized, .. } = &next.kind
                             && normalized != marker
                         {
-                            self.push_diagnostic(
-                                Diagnostic::misnested_close(
-                                    marker.as_str(),
-                                    normalized.as_str(),
-                                    next.span.clone(),
-                                )
-                                .with_anchor_cst(id.index()),
-                            );
+                            let parent = self.doc.node(parent_id);
+                            let is_parent_note_closer = match &parent.kind {
+                                CstKind::Note { marker: p_marker } => {
+                                    normalized.as_str().trim_start_matches('+')
+                                        == p_marker.as_str().trim_start_matches('+')
+                                }
+                                _ => false,
+                            };
+
+                            if !is_parent_note_closer {
+                                self.push_diagnostic(
+                                    Diagnostic::misnested_close(
+                                        marker.as_str(),
+                                        normalized.as_str(),
+                                        next.span.clone(),
+                                    )
+                                    .with_anchor_cst(id.index()),
+                                );
+                            }
                         }
                     } else if node.span.end >= self.doc.source().len() {
                         self.push_diagnostic(
