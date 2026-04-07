@@ -267,7 +267,8 @@ impl<'a> LowerCtx<'a> {
                 }
                 // Table row grouping (only when parent is not already a Table)
                 if !parent_is_table && matches!(&ast_node.node, Node::TableRow { .. }) {
-                    if let Some(Node::Table { content, .. }) = result.last_mut().map(|node| &mut node.node)
+                    if let Some(Node::Table { content, .. }) =
+                        result.last_mut().map(|node| &mut node.node)
                     {
                         content.push(ast_node.node);
                         if let Some(last) = result.last_mut() {
@@ -566,7 +567,11 @@ impl<'a> LowerCtx<'a> {
                         self.current_book_code = Some(code.clone());
                         code_span = Some(child.span.start..child.span.start + c.len());
                         if !rest.is_empty() {
-                            let rest = rest.replace('~', "\u{00a0}");
+                            let rest = if rest.contains('~') {
+                                rest.replace('~', "\u{00a0}")
+                            } else {
+                                rest.to_string()
+                            };
                             children.push(SpannedNode::text(&rest));
                         }
                     } else {
@@ -720,7 +725,11 @@ impl<'a> LowerCtx<'a> {
                 marker: marker.clone(),
                 content,
             },
-            SourceNode::structural(SourceSpans::node(node.span.clone()), children, Some(id.index())),
+            SourceNode::structural(
+                SourceSpans::node(node.span.clone()),
+                children,
+                Some(id.index()),
+            ),
         ))
     }
 
@@ -767,15 +776,16 @@ impl<'a> LowerCtx<'a> {
         if clean_marker_str == "ref" {
             let (content, children) = split_nodes(children);
             return Some(SpannedNode::new(
-                Node::Ref { content, attributes },
+                Node::Ref {
+                    content,
+                    attributes,
+                },
                 SourceNode::structural(spans, children, Some(id.index())),
             ));
         }
 
         if clean_marker_str == "xt" && nested {
-            let has_ref_child = children
-                .iter()
-                .any(|n| matches!(&n.node, Node::Ref { .. }));
+            let has_ref_child = children.iter().any(|n| matches!(&n.node, Node::Ref { .. }));
             let href_value = attributes
                 .iter()
                 .find(|a| a.key == "link-href")
@@ -841,7 +851,10 @@ impl<'a> LowerCtx<'a> {
 
         let (content, children) = split_nodes(children);
         Some(SpannedNode::new(
-            Node::Ref { content, attributes },
+            Node::Ref {
+                content,
+                attributes,
+            },
             SourceNode::structural(spans, children, Some(id.index())),
         ))
     }
@@ -930,7 +943,7 @@ impl<'a> LowerCtx<'a> {
                             let (c, rest) = split_first_word(trimmed);
                             caller = Some(c.to_string());
                             if !rest.is_empty() {
-                                let rest = rest.replace('~', "\u{00a0}");
+                                let rest = if rest.contains('~') { rest.replace('~', "\u{00a0}") } else { rest.to_string() };
                                 children.push(SpannedNode::text(&rest));
                             }
                             continue;
@@ -1692,7 +1705,10 @@ impl<'a> Iterator for ChildIter<'a> {
 }
 
 fn split_nodes(nodes: Vec<SpannedNode>) -> (Vec<Node>, Vec<SourceNode>) {
-    nodes.into_iter().map(|node| (node.node, node.source)).unzip()
+    nodes
+        .into_iter()
+        .map(|node| (node.node, node.source))
+        .unzip()
 }
 
 fn split_document(nodes: Vec<SpannedNode>) -> (Document, SourceMap) {
@@ -1941,9 +1957,12 @@ fn split_first_word(s: &str) -> (&str, &str) {
 /// Strip leading zeros from a numeric string for SID generation.
 /// Ranges like "03-04" and non-numeric strings like "1a" are preserved as-is.
 fn strip_leading_zeros(s: &str) -> String {
-    s.parse::<u64>()
-        .map(|n| n.to_string())
-        .unwrap_or_else(|_| s.to_string())
+    let trimmed = s.trim_start_matches('0');
+    if trimmed.is_empty() {
+        "0".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2021,9 +2040,11 @@ mod tests {
     #[test]
     fn test_stray_close_marker() {
         let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 1 text\\nd* stray");
-        assert!(diagnostics(&result)
-            .iter()
-            .any(|diagnostic| diagnostic.severity == crate::diagnostics::Severity::Error));
+        assert!(
+            diagnostics(&result)
+                .iter()
+                .any(|diagnostic| diagnostic.severity == crate::diagnostics::Severity::Error)
+        );
     }
 
     #[test]

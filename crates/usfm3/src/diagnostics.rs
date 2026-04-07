@@ -106,11 +106,10 @@ impl Diagnostic {
     }
 
     pub fn resolved_anchor_cst(&self, cst: &CstDocument) -> Option<usize> {
-        self.anchor_cst
-            .or_else(|| {
-                cst.covering_node_range(self.span.start, self.span.end)
-                    .map(|id| id.index())
-            })
+        self.anchor_cst.or_else(|| {
+            cst.covering_node_range(self.span.start, self.span.end)
+                .map(|id| id.index())
+        })
     }
 
     /// Unknown/unrecognized marker encountered.
@@ -527,17 +526,12 @@ impl DiagnosticList {
 
     /// Sort diagnostics in document order with stable tie-breaking.
     pub fn sort_in_document_order(&mut self) {
-        let mut indexed = self
-            .diagnostics
-            .drain(..)
-            .enumerate()
-            .map(|(idx, diagnostic)| (idx, diagnostic))
-            .collect::<Vec<_>>();
-        indexed.sort_by_key(|(idx, diagnostic)| (diagnostic.span.start, diagnostic.span.end, *idx));
-        self.diagnostics = indexed
-            .drain(..)
-            .map(|(_, diagnostic)| diagnostic)
-            .collect();
+        self.diagnostics.sort_by(|a, b| {
+            a.span
+                .start
+                .cmp(&b.span.start)
+                .then_with(|| a.span.end.cmp(&b.span.end))
+        });
     }
 
     /// Consume the list and return the underlying `Vec<Diagnostic>`.
