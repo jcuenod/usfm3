@@ -1,6 +1,6 @@
-use crate::ast::{Document, Node, NodeSpans};
-use serde::Serialize;
-use serde::ser::{SerializeMap, SerializeSeq, Serializer};
+use crate::ast::{Document, Node};
+use crate::source_map::{SourceMap, SourceNode, SourceSpans};
+use serde_json::{Map, Value, json};
 
 /// Options controlling USJ serialization.
 #[derive(Debug, Clone, Copy, Default)]
@@ -8,380 +8,318 @@ pub struct UsjOptions {
     pub include_spans: bool,
 }
 
-struct UsjDocumentView<'a> {
-    doc: &'a Document,
-    options: UsjOptions,
+#[derive(Debug)]
+pub enum UsjError {
+    MissingSourceMapForSpans,
+    SourceMapShapeMismatch,
+    Serialization(serde_json::Error),
 }
 
-impl<'a> UsjDocumentView<'a> {
-    fn new(doc: &'a Document, options: UsjOptions) -> Self {
-        Self { doc, options }
-    }
-}
-
-impl Serialize for UsjDocumentView<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map = serializer.serialize_map(Some(3))?;
-        map.serialize_entry("type", "USJ")?;
-        map.serialize_entry("version", "3.1")?;
-        map.serialize_entry(
-            "content",
-            &NodeListView {
-                nodes: &self.doc.content,
-                options: self.options,
-            },
-        )?;
-        map.end()
-    }
-}
-
-struct NodeListView<'a> {
-    nodes: &'a [Node],
-    options: UsjOptions,
-}
-
-impl Serialize for NodeListView<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut seq = serializer.serialize_seq(Some(self.nodes.len()))?;
-        for node in self.nodes {
-            seq.serialize_element(&NodeView {
-                node,
-                options: self.options,
-            })?;
-        }
-        seq.end()
-    }
-}
-
-struct NodeView<'a> {
-    node: &'a Node,
-    options: UsjOptions,
-}
-
-impl NodeView<'_> {
-    fn serialize_spans<S>(&self, map: &mut S, spans: &NodeSpans) -> Result<(), S::Error>
-    where
-        S: SerializeMap,
-    {
-        if self.options.include_spans {
-            map.serialize_entry("spans", spans)?;
-        }
-        Ok(())
-    }
-
-    fn serialize_content<S>(&self, map: &mut S, content: &[Node]) -> Result<(), S::Error>
-    where
-        S: SerializeMap,
-    {
-        if !content.is_empty() {
-            map.serialize_entry(
-                "content",
-                &NodeListView {
-                    nodes: content,
-                    options: self.options,
-                },
-            )?;
-        }
-        Ok(())
-    }
-}
-
-impl Serialize for NodeView<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match self.node {
-            Node::Text(text) => serializer.serialize_str(text),
-            Node::OptBreak => {
-                let mut map = serializer.serialize_map(Some(1))?;
-                map.serialize_entry("type", "optbreak")?;
-                map.end()
+impl std::fmt::Display for UsjError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UsjError::MissingSourceMapForSpans => {
+                write!(f, "USJ span output requires a source map")
             }
-            Node::Book {
-                marker,
-                code,
-                content,
-                spans,
-            } => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "book")?;
-                map.serialize_entry("marker", marker)?;
-                map.serialize_entry("code", code)?;
-                self.serialize_content(&mut map, content)?;
-                self.serialize_spans(&mut map, spans)?;
-                map.end()
+            UsjError::SourceMapShapeMismatch => {
+                write!(f, "source map does not match AST shape")
             }
-            Node::Chapter {
-                marker,
-                number,
-                sid,
-                altnumber,
-                pubnumber,
-                spans,
-            } => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "chapter")?;
-                map.serialize_entry("marker", marker)?;
-                map.serialize_entry("number", number)?;
-                if let Some(sid) = sid {
-                    map.serialize_entry("sid", sid)?;
-                }
-                if let Some(altnumber) = altnumber {
-                    map.serialize_entry("altnumber", altnumber)?;
-                }
-                if let Some(pubnumber) = pubnumber {
-                    map.serialize_entry("pubnumber", pubnumber)?;
-                }
-                self.serialize_spans(&mut map, spans)?;
-                map.end()
-            }
-            Node::Verse {
-                marker,
-                number,
-                sid,
-                altnumber,
-                pubnumber,
-                spans,
-            } => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "verse")?;
-                map.serialize_entry("marker", marker)?;
-                map.serialize_entry("number", number)?;
-                if let Some(sid) = sid {
-                    map.serialize_entry("sid", sid)?;
-                }
-                if let Some(altnumber) = altnumber {
-                    map.serialize_entry("altnumber", altnumber)?;
-                }
-                if let Some(pubnumber) = pubnumber {
-                    map.serialize_entry("pubnumber", pubnumber)?;
-                }
-                self.serialize_spans(&mut map, spans)?;
-                map.end()
-            }
-            Node::Para {
-                marker,
-                content,
-                spans,
-            } => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "para")?;
-                map.serialize_entry("marker", marker)?;
-                self.serialize_content(&mut map, content)?;
-                self.serialize_spans(&mut map, spans)?;
-                map.end()
-            }
-            Node::Char {
-                marker,
-                content,
-                attributes,
-                spans,
-            } => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "char")?;
-                map.serialize_entry("marker", marker)?;
-                self.serialize_content(&mut map, content)?;
-                if !attributes.is_empty() {
-                    map.serialize_entry("attributes", attributes)?;
-                }
-                self.serialize_spans(&mut map, spans)?;
-                map.end()
-            }
-            Node::Note {
-                marker,
-                caller,
-                category,
-                content,
-                spans,
-            } => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "note")?;
-                map.serialize_entry("marker", marker)?;
-                map.serialize_entry("caller", caller)?;
-                if let Some(category) = category {
-                    map.serialize_entry("category", category)?;
-                }
-                self.serialize_content(&mut map, content)?;
-                self.serialize_spans(&mut map, spans)?;
-                map.end()
-            }
-            Node::Milestone {
-                marker,
-                attributes,
-                spans,
-            } => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "ms")?;
-                map.serialize_entry("marker", marker)?;
-                if !attributes.is_empty() {
-                    map.serialize_entry("attributes", attributes)?;
-                }
-                self.serialize_spans(&mut map, spans)?;
-                map.end()
-            }
-            Node::Figure {
-                marker,
-                content,
-                attributes,
-                spans,
-            } => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "figure")?;
-                map.serialize_entry("marker", marker)?;
-                self.serialize_content(&mut map, content)?;
-                if !attributes.is_empty() {
-                    map.serialize_entry("attributes", attributes)?;
-                }
-                self.serialize_spans(&mut map, spans)?;
-                map.end()
-            }
-            Node::Sidebar {
-                marker,
-                category,
-                content,
-                spans,
-            } => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "sidebar")?;
-                map.serialize_entry("marker", marker)?;
-                if let Some(category) = category {
-                    map.serialize_entry("category", category)?;
-                }
-                self.serialize_content(&mut map, content)?;
-                self.serialize_spans(&mut map, spans)?;
-                map.end()
-            }
-            Node::Periph {
-                alt,
-                content,
-                attributes,
-                spans,
-            } => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "periph")?;
-                if let Some(alt) = alt {
-                    map.serialize_entry("alt", alt)?;
-                }
-                self.serialize_content(&mut map, content)?;
-                if !attributes.is_empty() {
-                    map.serialize_entry("attributes", attributes)?;
-                }
-                self.serialize_spans(&mut map, spans)?;
-                map.end()
-            }
-            Node::Table { content, spans } => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "table")?;
-                self.serialize_content(&mut map, content)?;
-                self.serialize_spans(&mut map, spans)?;
-                map.end()
-            }
-            Node::TableRow {
-                marker,
-                content,
-                spans,
-            } => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "table:row")?;
-                map.serialize_entry("marker", marker)?;
-                self.serialize_content(&mut map, content)?;
-                self.serialize_spans(&mut map, spans)?;
-                map.end()
-            }
-            Node::TableCell {
-                marker,
-                align,
-                content,
-                spans,
-            } => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "table:cell")?;
-                map.serialize_entry("marker", marker)?;
-                map.serialize_entry("align", align)?;
-                self.serialize_content(&mut map, content)?;
-                self.serialize_spans(&mut map, spans)?;
-                map.end()
-            }
-            Node::Ref {
-                content,
-                attributes,
-                spans,
-            } => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "ref")?;
-                self.serialize_content(&mut map, content)?;
-                if !attributes.is_empty() {
-                    map.serialize_entry("attributes", attributes)?;
-                }
-                self.serialize_spans(&mut map, spans)?;
-                map.end()
-            }
-            Node::Unknown {
-                marker,
-                content,
-                spans,
-            } => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "unknown")?;
-                map.serialize_entry("marker", marker)?;
-                self.serialize_content(&mut map, content)?;
-                self.serialize_spans(&mut map, spans)?;
-                map.end()
-            }
+            UsjError::Serialization(err) => err.fmt(f),
         }
     }
 }
 
-/// Serialize a Document to a USJ JSON string.
-pub fn to_usj_string(doc: &Document) -> Result<String, serde_json::Error> {
-    to_usj_string_with_options(doc, UsjOptions::default())
+impl std::error::Error for UsjError {}
+
+impl From<serde_json::Error> for UsjError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::Serialization(value)
+    }
 }
 
-/// Serialize a Document to a USJ JSON string with explicit options.
+pub fn to_usj_string(doc: &Document) -> Result<String, UsjError> {
+    to_usj_string_with_options(doc, None, UsjOptions::default())
+}
+
 pub fn to_usj_string_with_options(
     doc: &Document,
+    source_map: Option<&SourceMap>,
     options: UsjOptions,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(&UsjDocumentView::new(doc, options))
+) -> Result<String, UsjError> {
+    Ok(serde_json::to_string(&to_usj_value_with_options(doc, source_map, options)?)?)
 }
 
-/// Serialize a Document to a pretty-printed USJ JSON string.
-pub fn to_usj_string_pretty(doc: &Document) -> Result<String, serde_json::Error> {
-    to_usj_string_pretty_with_options(doc, UsjOptions::default())
+pub fn to_usj_string_pretty(doc: &Document) -> Result<String, UsjError> {
+    to_usj_string_pretty_with_options(doc, None, UsjOptions::default())
 }
 
-/// Serialize a Document to a pretty-printed USJ JSON string with explicit options.
 pub fn to_usj_string_pretty_with_options(
     doc: &Document,
+    source_map: Option<&SourceMap>,
     options: UsjOptions,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string_pretty(&UsjDocumentView::new(doc, options))
+) -> Result<String, UsjError> {
+    Ok(serde_json::to_string_pretty(&to_usj_value_with_options(
+        doc, source_map, options,
+    )?)?)
 }
 
-/// Serialize a Document to a serde_json::Value.
-pub fn to_usj_value(doc: &Document) -> Result<serde_json::Value, serde_json::Error> {
-    to_usj_value_with_options(doc, UsjOptions::default())
+pub fn to_usj_value(doc: &Document) -> Result<Value, UsjError> {
+    to_usj_value_with_options(doc, None, UsjOptions::default())
 }
 
-/// Serialize a Document to a serde_json::Value with explicit options.
 pub fn to_usj_value_with_options(
     doc: &Document,
+    source_map: Option<&SourceMap>,
     options: UsjOptions,
-) -> Result<serde_json::Value, serde_json::Error> {
-    serde_json::to_value(UsjDocumentView::new(doc, options))
+) -> Result<Value, UsjError> {
+    if options.include_spans && source_map.is_none() {
+        return Err(UsjError::MissingSourceMapForSpans);
+    }
+    let content = serialize_nodes(
+        &doc.content,
+        source_map.map(|map| map.content.as_slice()),
+        options,
+    )?;
+    Ok(json!({
+        "type": "USJ",
+        "version": "3.1",
+        "content": content,
+    }))
+}
+
+fn serialize_nodes(
+    nodes: &[Node],
+    source_nodes: Option<&[SourceNode]>,
+    options: UsjOptions,
+) -> Result<Vec<Value>, UsjError> {
+    if let Some(source_nodes) = source_nodes
+        && source_nodes.len() != nodes.len()
+    {
+        return Err(UsjError::SourceMapShapeMismatch);
+    }
+
+    nodes
+        .iter()
+        .enumerate()
+        .map(|(idx, node)| {
+            let source_node = source_nodes.and_then(|nodes| nodes.get(idx));
+            serialize_node(node, source_node, options)
+        })
+        .collect()
+}
+
+fn serialize_node(
+    node: &Node,
+    source: Option<&SourceNode>,
+    options: UsjOptions,
+) -> Result<Value, UsjError> {
+    let mut map = Map::new();
+    match node {
+        Node::Text(text) => return Ok(Value::String(text.clone())),
+        Node::OptBreak => {
+            map.insert("type".into(), Value::String("optbreak".into()));
+        }
+        Node::Book {
+            marker,
+            code,
+            content,
+        } => {
+            map.insert("type".into(), Value::String("book".into()));
+            map.insert("marker".into(), Value::String(marker.to_string()));
+            map.insert("code".into(), Value::String(code.clone()));
+            insert_content(&mut map, content, source, options)?;
+        }
+        Node::Chapter {
+            marker,
+            number,
+            sid,
+            altnumber,
+            pubnumber,
+        } => {
+            map.insert("type".into(), Value::String("chapter".into()));
+            map.insert("marker".into(), Value::String(marker.to_string()));
+            map.insert("number".into(), Value::String(number.clone()));
+            insert_optional_string(&mut map, "sid", sid.as_ref());
+            insert_optional_string(&mut map, "altnumber", altnumber.as_ref());
+            insert_optional_string(&mut map, "pubnumber", pubnumber.as_ref());
+        }
+        Node::Verse {
+            marker,
+            number,
+            sid,
+            altnumber,
+            pubnumber,
+        } => {
+            map.insert("type".into(), Value::String("verse".into()));
+            map.insert("marker".into(), Value::String(marker.to_string()));
+            map.insert("number".into(), Value::String(number.clone()));
+            insert_optional_string(&mut map, "sid", sid.as_ref());
+            insert_optional_string(&mut map, "altnumber", altnumber.as_ref());
+            insert_optional_string(&mut map, "pubnumber", pubnumber.as_ref());
+        }
+        Node::Para { marker, content } => {
+            map.insert("type".into(), Value::String("para".into()));
+            map.insert("marker".into(), Value::String(marker.to_string()));
+            insert_content(&mut map, content, source, options)?;
+        }
+        Node::Char {
+            marker,
+            content,
+            attributes,
+        } => {
+            map.insert("type".into(), Value::String("char".into()));
+            map.insert("marker".into(), Value::String(marker.to_string()));
+            insert_content(&mut map, content, source, options)?;
+            insert_attributes(&mut map, attributes)?;
+        }
+        Node::Note {
+            marker,
+            caller,
+            category,
+            content,
+        } => {
+            map.insert("type".into(), Value::String("note".into()));
+            map.insert("marker".into(), Value::String(marker.to_string()));
+            map.insert("caller".into(), Value::String(caller.clone()));
+            insert_optional_string(&mut map, "category", category.as_ref());
+            insert_content(&mut map, content, source, options)?;
+        }
+        Node::Milestone { marker, attributes } => {
+            map.insert("type".into(), Value::String("ms".into()));
+            map.insert("marker".into(), Value::String(marker.to_string()));
+            insert_attributes(&mut map, attributes)?;
+        }
+        Node::Figure {
+            marker,
+            content,
+            attributes,
+        } => {
+            map.insert("type".into(), Value::String("figure".into()));
+            map.insert("marker".into(), Value::String(marker.to_string()));
+            insert_content(&mut map, content, source, options)?;
+            insert_attributes(&mut map, attributes)?;
+        }
+        Node::Sidebar {
+            marker,
+            category,
+            content,
+        } => {
+            map.insert("type".into(), Value::String("sidebar".into()));
+            map.insert("marker".into(), Value::String(marker.to_string()));
+            insert_optional_string(&mut map, "category", category.as_ref());
+            insert_content(&mut map, content, source, options)?;
+        }
+        Node::Periph {
+            alt,
+            content,
+            attributes,
+        } => {
+            map.insert("type".into(), Value::String("periph".into()));
+            insert_optional_string(&mut map, "alt", alt.as_ref());
+            insert_content(&mut map, content, source, options)?;
+            insert_attributes(&mut map, attributes)?;
+        }
+        Node::Table { content } => {
+            map.insert("type".into(), Value::String("table".into()));
+            insert_content(&mut map, content, source, options)?;
+        }
+        Node::TableRow { marker, content } => {
+            map.insert("type".into(), Value::String("table:row".into()));
+            map.insert("marker".into(), Value::String(marker.to_string()));
+            insert_content(&mut map, content, source, options)?;
+        }
+        Node::TableCell {
+            marker,
+            align,
+            content,
+        } => {
+            map.insert("type".into(), Value::String("table:cell".into()));
+            map.insert("marker".into(), Value::String(marker.to_string()));
+            map.insert("align".into(), Value::String(align.clone()));
+            insert_content(&mut map, content, source, options)?;
+        }
+        Node::Ref {
+            content,
+            attributes,
+        } => {
+            map.insert("type".into(), Value::String("ref".into()));
+            insert_content(&mut map, content, source, options)?;
+            insert_attributes(&mut map, attributes)?;
+        }
+        Node::Unknown { marker, content } => {
+            map.insert("type".into(), Value::String("unknown".into()));
+            map.insert("marker".into(), Value::String(marker.to_string()));
+            insert_content(&mut map, content, source, options)?;
+        }
+    }
+
+    if options.include_spans {
+        let Some(source) = source else {
+            return Err(UsjError::MissingSourceMapForSpans);
+        };
+        if let Some(spans) = &source.spans {
+            map.insert("spans".into(), serialize_spans(spans));
+        }
+    }
+
+    Ok(Value::Object(map))
+}
+
+fn insert_content(
+    map: &mut Map<String, Value>,
+    content: &[Node],
+    source: Option<&SourceNode>,
+    options: UsjOptions,
+) -> Result<(), UsjError> {
+    if !content.is_empty() {
+        map.insert(
+            "content".into(),
+            Value::Array(serialize_nodes(
+                content,
+                source.map(|source| source.children.as_slice()),
+                options,
+            )?),
+        );
+    }
+    Ok(())
+}
+
+fn insert_optional_string(map: &mut Map<String, Value>, key: &str, value: Option<&String>) {
+    if let Some(value) = value {
+        map.insert(key.into(), Value::String(value.clone()));
+    }
+}
+
+fn insert_attributes(
+    map: &mut Map<String, Value>,
+    attributes: &[crate::ast::Attribute],
+) -> Result<(), UsjError> {
+    if !attributes.is_empty() {
+        map.insert("attributes".into(), serde_json::to_value(attributes)?);
+    }
+    Ok(())
+}
+
+fn serialize_spans(spans: &SourceSpans) -> Value {
+    let mut map = Map::new();
+    map.insert("node".into(), json!([spans.node.start, spans.node.end]));
+    if let Some(code) = &spans.code {
+        map.insert("code".into(), json!([code.start, code.end]));
+    }
+    if let Some(number) = &spans.number {
+        map.insert("number".into(), json!([number.start, number.end]));
+    }
+    if let Some(close) = &spans.close {
+        map.insert("close".into(), json!([close.start, close.end]));
+    }
+    Value::Object(map)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::*;
+    use crate::ast::{Attribute, Document, Node};
+    use crate::source_map::{SourceMap, SourceNode, SourceSpans};
     use serde_json::json;
 
     fn sample_document() -> Document {
@@ -391,7 +329,6 @@ mod tests {
                     marker: "id".into(),
                     code: "GEN".into(),
                     content: vec![Node::text("Genesis")],
-                    spans: NodeSpans::node(0..20).with_code(0..3),
                 },
                 Node::Chapter {
                     marker: "c".into(),
@@ -399,7 +336,6 @@ mod tests {
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                    spans: NodeSpans::node(20..25).with_number(22..23),
                 },
                 Node::Para {
                     marker: "p".into(),
@@ -410,41 +346,70 @@ mod tests {
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                            spans: NodeSpans::node(30..33).with_number(32..33),
                         },
                         Node::text("In the beginning God created the heavens and the earth."),
                     ],
-                    spans: NodeSpans::node(25..90),
                 },
             ],
         }
     }
 
-    #[test]
-    fn test_usj_string() {
-        let doc = sample_document();
-        let json_str = to_usj_string(&doc).unwrap();
-        assert!(json_str.contains("\"type\":\"USJ\""));
-        assert!(json_str.contains("\"version\":\"3.1\""));
-        assert!(json_str.contains("\"type\":\"book\""));
-        assert!(json_str.contains("\"code\":\"GEN\""));
+    fn sample_source_map() -> SourceMap {
+        SourceMap {
+            content: vec![
+                SourceNode::structural(
+                    SourceSpans::node(0..20).with_code(4..7),
+                    vec![SourceNode::leaf()],
+                    Some(0),
+                ),
+                SourceNode::structural(
+                    SourceSpans::node(21..25).with_number(24..25),
+                    Vec::new(),
+                    Some(1),
+                ),
+                SourceNode::structural(
+                    SourceSpans::node(26..90),
+                    vec![
+                        SourceNode::structural(
+                            SourceSpans::node(29..33).with_number(32..33),
+                            Vec::new(),
+                            Some(2),
+                        ),
+                        SourceNode::leaf(),
+                    ],
+                    Some(3),
+                ),
+            ],
+        }
     }
 
     #[test]
-    fn test_usj_pretty() {
+    fn usj_string_contains_envelope_and_book_data() {
         let doc = sample_document();
-        let json_str = to_usj_string_pretty(&doc).unwrap();
-        assert!(json_str.contains('\n'));
-        assert!(json_str.contains("\"type\": \"USJ\""));
+        let json = to_usj_string(&doc).unwrap();
+
+        assert!(json.contains("\"type\":\"USJ\""));
+        assert!(json.contains("\"version\":\"3.1\""));
+        assert!(json.contains("\"type\":\"book\""));
+        assert!(json.contains("\"code\":\"GEN\""));
     }
 
     #[test]
-    fn test_usj_value() {
+    fn usj_pretty_prints() {
+        let doc = sample_document();
+        let json = to_usj_string_pretty(&doc).unwrap();
+
+        assert!(json.contains('\n'));
+        assert!(json.contains("\"type\": \"USJ\""));
+    }
+
+    #[test]
+    fn usj_value_preserves_structure() {
         let doc = sample_document();
         let value = to_usj_value(&doc).unwrap();
+
         assert_eq!(value["type"], "USJ");
         assert_eq!(value["version"], "3.1");
-        assert!(value["content"].is_array());
         assert_eq!(value["content"][0]["type"], "book");
         assert_eq!(value["content"][0]["code"], "GEN");
         assert_eq!(value["content"][0]["content"][0], "Genesis");
@@ -459,83 +424,137 @@ mod tests {
     }
 
     #[test]
-    fn test_usj_no_spans() {
-        let doc = sample_document();
-        let json_str = to_usj_string(&doc).unwrap();
-        assert!(!json_str.contains("\"spans\""));
+    fn usj_omits_spans_by_default() {
+        let value = to_usj_value(&sample_document()).unwrap();
+
+        assert!(value["content"][0].get("spans").is_none());
     }
 
     #[test]
-    fn test_usj_with_spans() {
+    fn usj_with_spans_uses_source_map() {
         let doc = sample_document();
+        let source_map = sample_source_map();
         let value = to_usj_value_with_options(
             &doc,
+            Some(&source_map),
             UsjOptions {
                 include_spans: true,
             },
         )
         .unwrap();
-        let spans = &value["content"][0]["spans"];
-        assert_eq!(spans["node"]["start"], 0);
-        assert_eq!(spans["node"]["end"], 20);
-        assert_eq!(spans["code"]["start"], 0);
-        assert_eq!(spans["code"]["end"], 3);
+
+        assert_eq!(value["content"][0]["spans"]["node"], json!([0, 20]));
+        assert_eq!(value["content"][0]["spans"]["code"], json!([4, 7]));
+        assert_eq!(value["content"][1]["spans"]["number"], json!([24, 25]));
         assert!(value["content"][2]["content"][1].is_string());
     }
 
     #[test]
-    fn test_usj_empty_document() {
-        let doc = Document::new();
-        let value = to_usj_value(&doc).unwrap();
+    fn usj_with_spans_requires_source_map() {
+        let error = to_usj_value_with_options(
+            &sample_document(),
+            None,
+            UsjOptions {
+                include_spans: true,
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, UsjError::MissingSourceMapForSpans));
+    }
+
+    #[test]
+    fn usj_rejects_shape_mismatches_between_ast_and_source_map() {
+        let doc = sample_document();
+        let source_map = SourceMap {
+            content: vec![SourceNode::structural(
+                SourceSpans::node(0..1),
+                Vec::new(),
+                None,
+            )],
+        };
+
+        let error = to_usj_value_with_options(
+            &doc,
+            Some(&source_map),
+            UsjOptions {
+                include_spans: true,
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, UsjError::SourceMapShapeMismatch));
+    }
+
+    #[test]
+    fn usj_empty_document_is_valid() {
+        let value = to_usj_value(&Document::new()).unwrap();
         assert_eq!(value["type"], "USJ");
         assert_eq!(value["content"], json!([]));
     }
 
     #[test]
-    fn test_usj_text_is_bare_string() {
+    fn usj_text_nodes_serialize_as_bare_strings() {
         let doc = Document {
             content: vec![Node::Para {
                 marker: "p".into(),
                 content: vec![Node::text("hello world")],
-                spans: NodeSpans::node(0..20),
             }],
         };
+
         let value = to_usj_value(&doc).unwrap();
         assert_eq!(value["content"][0]["content"][0], "hello world");
     }
 
     #[test]
-    fn test_usj_note() {
+    fn usj_serializes_note_and_attributes() {
         let doc = Document {
             content: vec![Node::Para {
                 marker: "p".into(),
                 content: vec![Node::Note {
                     marker: "f".into(),
                     caller: "+".into(),
-                    category: None,
+                    category: Some("ex".into()),
                     content: vec![
                         Node::Char {
                             marker: "fr".into(),
                             content: vec![Node::text("1.1")],
                             attributes: vec![],
-                            spans: NodeSpans::node(5..10),
                         },
                         Node::Char {
                             marker: "ft".into(),
                             content: vec![Node::text("A footnote")],
-                            attributes: vec![],
-                            spans: NodeSpans::node(10..25),
+                            attributes: vec![Attribute {
+                                key: "style".into(),
+                                value: "plain".into(),
+                            }],
                         },
                     ],
-                    spans: NodeSpans::node(0..30),
                 }],
-                spans: NodeSpans::node(0..35),
             }],
         };
+
         let value = to_usj_value(&doc).unwrap();
         let note = &value["content"][0]["content"][0];
         assert_eq!(note["type"], "note");
         assert_eq!(note["marker"], "f");
         assert_eq!(note["caller"], "+");
+        assert_eq!(note["category"], "ex");
+        assert_eq!(note["content"][1]["attributes"][0]["key"], "style");
+    }
+
+    #[test]
+    fn usj_omits_empty_content_arrays() {
+        let doc = Document {
+            content: vec![Node::Para {
+                marker: "b".into(),
+                content: vec![],
+            }],
+        };
+
+        let value = to_usj_value(&doc).unwrap();
+        assert_eq!(value["content"][0]["type"], "para");
+        assert_eq!(value["content"][0]["marker"], "b");
+        assert!(value["content"][0].get("content").is_none());
     }
 }

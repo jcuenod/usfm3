@@ -419,6 +419,8 @@ dependencies = [
 name = "usfm3-cli"
 version = "0.1.9"
 dependencies = [
+ "serde",
+ "serde_json",
  "usfm3",
 ]
 
@@ -428,6 +430,7 @@ version = "0.1.9"
 dependencies = [
  "pyo3",
  "pythonize",
+ "serde",
  "serde_json",
  "usfm3",
 ]

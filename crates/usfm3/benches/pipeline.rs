@@ -3,7 +3,7 @@ use std::hint::black_box;
 use std::path::Path;
 use std::time::Instant;
 
-use usfm3::{ParseOptions, builder, cst, validation};
+use usfm3::ParseOptions;
 
 fn main() {
     let scenarios = load_scenarios();
@@ -13,29 +13,40 @@ fn main() {
         let total_bytes: usize = docs.iter().map(|doc| doc.len()).sum();
         let iters = iterations_for_bytes(total_bytes.max(1));
 
-        bench_stage("cst::parse", &name, iters, total_bytes, || {
+        bench_stage("tokenize", &name, iters, total_bytes, || {
             for doc in &docs {
-                black_box(cst::parse(doc));
+                black_box(usfm3::tokenize(doc));
             }
         });
 
-        let csts: Vec<_> = docs.iter().map(|doc| cst::parse(doc)).collect();
-        bench_stage("builder::lower", &name, iters, total_bytes, || {
+        bench_stage("parse_cst", &name, iters, total_bytes, || {
+            for doc in &docs {
+                black_box(usfm3::parse_cst(doc));
+            }
+        });
+
+        let csts: Vec<_> = docs.iter().map(|doc| usfm3::parse_cst(doc)).collect();
+        bench_stage("lower_cst", &name, iters, total_bytes, || {
             for cst in &csts {
-                black_box(builder::lower(cst));
+                black_box(usfm3::lower_cst(cst, ParseOptions::default()));
             }
         });
 
-        let lowered: Vec<_> = csts.iter().map(builder::lower).collect();
-        bench_stage("validation::validate", &name, iters, total_bytes, || {
-            for lowered in &lowered {
-                black_box(validation::validate(&lowered.ast));
-            }
-        });
-
-        bench_stage("parse_full", &name, iters, total_bytes, || {
+        bench_stage("parse_ast", &name, iters, total_bytes, || {
             for doc in &docs {
-                black_box(usfm3::parse_full(doc, ParseOptions { validate: true }));
+                black_box(usfm3::parse_ast(doc, ParseOptions::default()));
+            }
+        });
+
+        bench_stage("parse_ast_with_diagnostics", &name, iters, total_bytes, || {
+            for doc in &docs {
+                black_box(usfm3::parse_ast(doc, ParseOptions { diagnostics: true }));
+            }
+        });
+
+        bench_stage("parse_lazy", &name, iters, total_bytes, || {
+            for doc in &docs {
+                black_box(usfm3::parse(doc, ParseOptions::default()));
             }
         });
     }

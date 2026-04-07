@@ -1,17 +1,8 @@
 # usfm3
 
-`usfm3` is a Python parser for [USFM 3.x](https://docs.usfm.bible/usfm/3.1.1/index.html).
-It turns USFM into Python-friendly outputs:
+`usfm3` is a Python binding for the Rust `usfm3` parser.
 
-- `to_usj(spans=False)`: [USJ](https://docs.usfm.bible/usfm/3.1.1/usj/index.html) as a `dict`
-- `to_usx()`: [USX](https://docs.usfm.bible/usfm/3.1.1/usx/index.html) as an XML `str`
-- `to_usfm()`: normalized USFM as a `str`
-- `to_vref()`: a verse-text map like `{"GEN 1:1": "In the beginning..."}`
-
-The parser is error-tolerant, so malformed input still produces a parse result with
-structured diagnostics.
-
-Built in Rust for speed, with native Python bindings via [PyO3](https://pyo3.rs).
+It exposes a staged API so live-editor code can stay on tokens/CST until it actually needs AST-backed output.
 
 ## Installation
 
@@ -19,85 +10,71 @@ Built in Rust for speed, with native Python bindings via [PyO3](https://pyo3.rs)
 pip install usfm3
 ```
 
-Requires Python 3.9+.
-
 ## Quick Start
 
 ```python
 import usfm3
 
-text = r"""\id GEN
-\c 1
-\p
-\v 1 In the beginning God created the heavens and the earth.
-"""
+parsed = usfm3.parse(text)
 
-result = usfm3.parse(text)
+tokens = usfm3.tokenize(text)
+cst = usfm3.parse_cst(text)
+ast_document = usfm3.parse_ast(text, diagnostics=True)
 
-print(result.to_vref()["GEN 1:1"])
+ast = parsed.ast()
+source_map = parsed.source_map()
+diagnostics = parsed.diagnostics
 
-for diagnostic in result.diagnostics:
-    print(
-        f"[{diagnostic.severity}] {diagnostic.code}: "
-        f"{diagnostic.message} ({diagnostic.start}..{diagnostic.end})"
-    )
-
-usj = result.to_usj()
-usj_with_spans = result.to_usj(spans=True)
-usx = result.to_usx()
-normalized_usfm = result.to_usfm()
+usj = parsed.to_usj()
+usj_with_spans = parsed.to_usj(spans=True)
+usx = parsed.to_usx()
+usfm = parsed.to_usfm()
+vref = parsed.to_vref()
 ```
 
-## Validation
+## API
 
-`parse()` runs semantic validation by default, so diagnostics can include issues such as
-chapter and verse sequencing, invalid attributes, or mismatched milestones.
+### `usfm3.parse(usfm: str, diagnostics: bool = False) -> ParsedDocument`
 
-If you only want parsing, disable validation:
+Returns a lazy parsed handle.
+
+### `usfm3.parse_cst(usfm: str) -> dict`
+
+Returns a JSON-friendly CST tree.
+
+### `usfm3.parse_ast(usfm: str, diagnostics: bool = False) -> dict`
+
+Returns:
 
 ```python
-result = usfm3.parse(text, validate=False)
+{
+    "ast": ...,
+    "source_map": ...,
+    "diagnostics": list | None,
+}
 ```
 
-## API Summary
+### `usfm3.tokenize(usfm: str) -> list[dict]`
 
-### `usfm3.parse(usfm: str, validate: bool = True) -> ParseResult`
+Returns token spans suitable for editor tooling.
 
-Parses a USFM string and returns a `ParseResult`.
+### `ParsedDocument`
 
-### `ParseResult`
-
+- `cst() -> dict`
+- `ast() -> dict`
+- `source_map() -> dict`
 - `to_usj(spans: bool = False) -> dict`
 - `to_usx() -> str`
 - `to_usfm() -> str`
 - `to_vref() -> dict[str, str]`
-- `has_errors() -> bool`
-- `diagnostics -> list[Diagnostic]`
-
-### `Diagnostic`
-
-Each diagnostic has:
-
-- `severity`: `"error"`, `"warning"`, or `"info"`
-- `code`: machine-readable code such as `"UnknownMarker"`
-- `message`: human-readable message
-- `start`
-- `end`
-
-`start` and `end` are byte offsets into the original source.
+- `diagnostics -> list[dict] | None`
 
 ## Notes
 
-- `to_vref()` returns plain verse text keyed by references such as `"GEN 1:1"`.
-- `to_usfm()` returns normalized USFM, so whitespace may be regularized.
-- When `spans=True`, structural USJ nodes include a nested `spans` object with `node` and optional `code`, `number`, and `close` ranges.
-- Invalid USFM is reported through `diagnostics`; `parse()` still returns a result.
-
-## Related Packages
-
-- Rust crate: [crates.io/crates/usfm3](https://crates.io/crates/usfm3)
-- JavaScript/TypeScript package: [npmjs.com/package/usfm3](https://www.npmjs.com/package/usfm3)
-- Source code: [github.com/jcuenod/usfm3](https://github.com/jcuenod/usfm3)
+- Diagnostics are only computed when `diagnostics=True`.
+- Diagnostics are a flat list with `severity`, `code`, `message`, `span`, and optional `anchor_cst`.
+- AST nodes do not include spans.
+- `spans=True` on `to_usj()` derives inline span data from the source map.
 
 ## License
 

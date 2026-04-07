@@ -1,128 +1,96 @@
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use serde::Serialize;
 
 use ::usfm3 as usfm3_lib;
 
-#[pyclass]
-#[derive(Clone)]
-struct Diagnostic {
-    #[pyo3(get)]
-    severity: String,
-    #[pyo3(get)]
-    message: String,
-    #[pyo3(get)]
-    code: String,
-    #[pyo3(get)]
-    start: usize,
-    #[pyo3(get)]
-    end: usize,
+#[pyclass(unsendable)]
+struct ParsedDocument {
+    inner: usfm3_lib::ParsedDocument,
 }
 
 #[pymethods]
-impl Diagnostic {
-    fn __repr__(&self) -> String {
-        format!(
-            "Diagnostic(severity='{}', code='{}', message='{}', span={}..{})",
-            self.severity, self.code, self.message, self.start, self.end
-        )
+impl ParsedDocument {
+    fn cst(&self, py: Python<'_>) -> PyResult<PyObject> {
+        to_py_object(py, &usfm3_lib::cst::export(self.inner.cst()))
     }
-}
 
-#[pyclass]
-struct ParseResult {
-    ast: usfm3_lib::ast::Document,
-    diagnostics: Vec<Diagnostic>,
-}
+    fn ast(&self, py: Python<'_>) -> PyResult<PyObject> {
+        to_py_object(py, self.inner.ast())
+    }
 
-#[pymethods]
-impl ParseResult {
-    /// Returns USJ as a native Python dict.
+    fn source_map(&self, py: Python<'_>) -> PyResult<PyObject> {
+        to_py_object(py, self.inner.source_map())
+    }
+
+    #[getter]
+    fn diagnostics(&self, py: Python<'_>) -> PyResult<PyObject> {
+        to_py_object(py, &self.inner.diagnostics())
+    }
+
     #[pyo3(signature = (spans=false))]
     fn to_usj(&self, py: Python<'_>, spans: bool) -> PyResult<PyObject> {
-        let value = usfm3_lib::usj::to_usj_value_with_options(
-            &self.ast,
-            usfm3_lib::usj::UsjOptions {
+        let value = self
+            .inner
+            .to_usj(usfm3_lib::usj::UsjOptions {
                 include_spans: spans,
-            },
-        )
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        pythonize::pythonize(py, &value)
-            .map(|obj| obj.unbind())
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+            })
+            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))?;
+        to_py_object(py, &value)
     }
 
-    /// Returns USX XML as a string.
     fn to_usx(&self) -> PyResult<String> {
-        usfm3_lib::usx::to_usx_string(&self.ast)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        self.inner
+            .to_usx()
+            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
     }
 
-    /// Returns normalized USFM as a string.
     fn to_usfm(&self) -> String {
-        usfm3_lib::usfm::to_usfm_string(&self.ast)
+        self.inner.to_usfm()
     }
 
-    /// Returns verse reference map as a Python dict.
     fn to_vref(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let map = usfm3_lib::vref::to_vref_map(&self.ast);
-        let dict = PyDict::new(py);
-        for (k, v) in &map {
-            let val: String = v.as_str().unwrap_or_default().to_string();
-            dict.set_item(k, val)?;
-        }
-        Ok(dict.into_any().unbind())
-    }
-
-    /// Returns parsing + validation diagnostics.
-    #[getter]
-    fn diagnostics(&self) -> Vec<Diagnostic> {
-        self.diagnostics.clone()
-    }
-
-    /// True if any diagnostics have Error severity.
-    fn has_errors(&self) -> bool {
-        self.diagnostics.iter().any(|d| d.severity == "error")
+        to_py_object(py, &self.inner.to_vref())
     }
 }
 
-fn convert_diagnostics(
-    parse_diags: &usfm3_lib::diagnostics::DiagnosticList,
-    validation_diags: &usfm3_lib::diagnostics::DiagnosticList,
-) -> Vec<Diagnostic> {
-    parse_diags
-        .iter()
-        .chain(validation_diags.iter())
-        .map(|d| Diagnostic {
-            severity: format!("{}", d.severity),
-            message: d.message.clone(),
-            code: format!("{:?}", d.code),
-            start: d.span.start,
-            end: d.span.end,
-        })
-        .collect()
-}
-
-/// Parse a USFM string and return a ParseResult.
-///
-/// Args:
-///     usfm: The USFM source text.
-///     validate: Whether to run semantic validation (default: True).
 #[pyfunction]
-#[pyo3(signature = (usfm, validate=true))]
-fn parse(usfm: &str, validate: bool) -> ParseResult {
-    let result = usfm3_lib::parse_full(usfm, usfm3_lib::ParseOptions { validate });
-    let diagnostics =
-        convert_diagnostics(&result.parser_diagnostics, &result.validation_diagnostics);
-    ParseResult {
-        ast: result.ast,
-        diagnostics,
+#[pyo3(signature = (usfm, diagnostics=false))]
+fn parse(usfm: &str, diagnostics: bool) -> ParsedDocument {
+    ParsedDocument {
+        inner: usfm3_lib::parse(usfm, usfm3_lib::ParseOptions { diagnostics }),
     }
+}
+
+#[pyfunction]
+fn parse_cst(py: Python<'_>, usfm: &str) -> PyResult<PyObject> {
+    let cst = usfm3_lib::parse_cst(usfm);
+    to_py_object(py, &usfm3_lib::cst::export(&cst))
+}
+
+#[pyfunction]
+#[pyo3(signature = (usfm, diagnostics=false))]
+fn parse_ast(py: Python<'_>, usfm: &str, diagnostics: bool) -> PyResult<PyObject> {
+    let ast_document = usfm3_lib::parse_ast(usfm, usfm3_lib::ParseOptions { diagnostics });
+    to_py_object(py, &ast_document)
+}
+
+#[pyfunction]
+fn tokenize(py: Python<'_>, usfm: &str) -> PyResult<PyObject> {
+    to_py_object(py, &usfm3_lib::tokenize(usfm))
 }
 
 #[pymodule]
 fn usfm3(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse, m)?)?;
-    m.add_class::<ParseResult>()?;
-    m.add_class::<Diagnostic>()?;
+    m.add_function(wrap_pyfunction!(parse_cst, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_ast, m)?)?;
+    m.add_function(wrap_pyfunction!(tokenize, m)?)?;
+    m.add_class::<ParsedDocument>()?;
     Ok(())
+}
+
+fn to_py_object<T: Serialize>(py: Python<'_>, value: &T) -> PyResult<PyObject> {
+    pythonize::pythonize(py, value)
+        .map(|object| object.unbind())
+        .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
 }

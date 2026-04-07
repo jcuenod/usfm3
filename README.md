@@ -1,199 +1,151 @@
 # usfm3
 
-An error-tolerant [USFM 3.x](https://docs.usfm.bible/usfm/3.1.1/index.html) parser written in Rust. Outputs [USJ](https://docs.usfm.bible/usfm/3.1.1/usj/index.html) (JSON), [USX](https://docs.usfm.bible/usfm/3.1.1/usx/index.html) (XML), normalized USFM, and vref format (a key-value map of verse references to text).
+An error-tolerant USFM 3.x parser written in Rust, with CLI, Python, and WebAssembly bindings.
 
-Available as a Rust library, CLI tool, Python package, and WebAssembly module.
+The public API is staged:
 
-## Features
+`tokenize -> parse_cst -> parse_ast / lower_cst -> serialize`
 
-- Parses all USFM 3.x markers including tables, milestones, sidebars, figures, and nested character styles
-- Error-tolerant: always produces a document tree, even from malformed input
-- Structured diagnostics with source locations, severity levels, and machine-readable codes
-- Semantic validation (chapter/verse sequence, attribute rules, milestone pairing, etc.)
-- Multiple output formats: USJ, USX, USFM, and verse-reference maps
+That lets editor-style integrations stay on the cheap token/CST path, while AST-dependent work like USJ, USX, USFM, vref, and diagnostics is only paid for when requested.
 
 ## Packages
 
-| Crate | Description |
-|---|---|
-| [`usfm3`](crates/usfm3/) | Core Rust library |
-| [`usfm3-cli`](crates/usfm3-cli/) | Command-line tool |
-| [`usfm3-python`](crates/usfm3-python/) | Python bindings (PyO3) |
-| [`usfm3-wasm`](crates/usfm3-wasm/) | WebAssembly bindings (works in browsers and Node.js) |
+| Package | Description |
+| --- | --- |
+| [`usfm3`](crates/usfm3/) | Core Rust crate |
+| [`usfm3-cli`](crates/usfm3-cli/) | CLI |
+| [`usfm3-python`](crates/usfm3-python/) | PyPI package |
+| [`usfm3-wasm`](crates/usfm3-wasm/) | npm package / WASM bindings |
 
-## Quick Start
-
-### CLI
+## CLI
 
 ```sh
-# From a file (defaults to USJ output)
-usfm3 path/to/file.usfm
-
-# Choose output format
-usfm3 path/to/file.usfm usx
-usfm3 path/to/file.usfm usfm
-usfm3 path/to/file.usfm vref
-
-# From stdin
-cat file.usfm | usfm3
-
-# Skip validation
-usfm3 path/to/file.usfm --no-validate
+usfm3 tokens path/to/file.usfm
+usfm3 cst path/to/file.usfm
+usfm3 ast path/to/file.usfm
+usfm3 diagnostics path/to/file.usfm
+usfm3 usj path/to/file.usfm
+usfm3 usj path/to/file.usfm --inline-spans
+usfm3 usx path/to/file.usfm
+usfm3 usfm path/to/file.usfm
+usfm3 vref path/to/file.usfm
 ```
 
-Diagnostics are printed to stderr; document output goes to stdout.
+If no input path is given, the CLI reads from stdin.
 
-### Rust
-
-Crate available on [crates.io](https://crates.io/crates/usfm3):
+## Rust
 
 ```rust
-let result = usfm3::builder::parse(r#"\id GEN
+let parsed = usfm3::parse(
+    r#"\id GEN
 \c 1
 \p
 \v 1 In the beginning God created the heavens and the earth.
-"#);
+"#,
+    usfm3::ParseOptions::default(),
+);
 
-// Check for errors
-for diag in result.diagnostics.iter() {
-    eprintln!("{diag}");
-}
+let tokens = parsed.tokens();
+let cst = parsed.cst();
+let ast = parsed.ast();
+let source_map = parsed.source_map();
+let diagnostics = parsed.diagnostics();
 
-// Output as USJ (JSON)
-let usj = usfm3::usj::to_usj_string_pretty(&result.document).unwrap();
-println!("{usj}");
-
-// Include source spans for editor tooling
-let usj_with_spans = usfm3::usj::to_usj_string_pretty_with_options(
-    &result.document,
-    usfm3::usj::UsjOptions {
-        include_spans: true,
-    },
-)
-.unwrap();
-
-// Output as USX (XML)
-let usx = usfm3::usx::to_usx_string(&result.document).unwrap();
-
-// Output as normalized USFM
-let usfm = usfm3::usfm::to_usfm_string(&result.document);
-
-// Run semantic validation
-let validation_diags = usfm3::validation::validate(&result.document);
+let usj = parsed
+    .to_usj(usfm3::usj::UsjOptions { include_spans: false })
+    .unwrap();
+let usx = parsed.to_usx().unwrap();
+let usfm = parsed.to_usfm();
+let vref = parsed.to_vref();
 ```
 
-### Python
+For eager AST work:
 
-Python bindings available at: [PyPI](https://pypi.org/project/usfm3/)
+```rust
+let ast_document = usfm3::parse_ast(
+    text,
+    usfm3::ParseOptions {
+        diagnostics: true,
+    },
+);
+
+let ast = ast_document.ast;
+let source_map = ast_document.source_map;
+let diagnostics = ast_document.diagnostics;
+```
+
+For CST-first lowering:
+
+```rust
+let cst = usfm3::parse_cst(text);
+let ast_document = usfm3::lower_cst(
+    &cst,
+    usfm3::ParseOptions {
+        diagnostics: true,
+    },
+);
+```
+
+## Python
 
 ```python
 import usfm3
 
-result = usfm3.parse(open("GEN.usfm").read())
+parsed = usfm3.parse(text)
 
-# Output formats
-usj = result.to_usj()              # dict
-usj_with_spans = result.to_usj(spans=True)
-usx = result.to_usx()              # XML string
-usfm = result.to_usfm()            # USFM string
-vref = result.to_vref()            # {"GEN 1:1": "In the beginning...", ...}
+tokens = usfm3.tokenize(text)
+cst = usfm3.parse_cst(text)
+ast_document = usfm3.parse_ast(text, diagnostics=True)
 
-# Diagnostics
-for d in result.diagnostics:
-    print(f"[{d.severity}] {d.message} ({d.start}..{d.end})")
+ast = parsed.ast()
+source_map = parsed.source_map()
+diagnostics = parsed.diagnostics
 
-if result.has_errors():
-    print("Document has errors")
-
-# Skip validation
-result = usfm3.parse(text, validate=False)
+usj = parsed.to_usj()
+usj_with_spans = parsed.to_usj(spans=True)
+usx = parsed.to_usx()
+usfm = parsed.to_usfm()
+vref = parsed.to_vref()
 ```
 
-Build with [maturin](https://www.maturin.rs):
+## JavaScript / TypeScript
 
-```sh
-cd crates/usfm3-python
-maturin develop  # install into current venv
+```ts
+import { parse, parseAst, parseCst, tokenize } from "usfm3";
+
+const parsed = parse(usfmText);
+
+const tokens = tokenize(usfmText);
+const cst = parseCst(usfmText);
+const astDocument = parseAst(usfmText, { diagnostics: true });
+
+const ast = parsed.ast();
+const sourceMap = parsed.sourceMap();
+const diagnostics = parsed.diagnostics();
+
+const usj = parsed.toUsj();
+const usjWithSpans = parsed.toUsj({ spans: true });
+const usx = parsed.toUsx();
+const usfm = parsed.toUsfm();
+const vref = parsed.toVref();
+
+parsed.free();
 ```
 
-### JavaScript / TypeScript (WebAssembly)
+## Data Model
 
-Works in browsers, Node.js, Deno, and Bun. [NPM](https://www.npmjs.com/package/usfm3)
+- AST nodes do not carry spans.
+- Source locations live in a parallel `source_map` tree.
+- Diagnostics are a single flat list, sorted in document order.
+- Diagnostics are only computed when `diagnostics: true` is requested.
+- Inline USJ spans are derived from the source map.
 
-WASM is automatically initialized in Node.js, Deno, and Bun. In a browser, call `init()` first:
+## Performance Notes
 
-```typescript
-import init from "usfm3";
-await init(); // browser only
-```
-
-```typescript
-import { parse } from "usfm3";
-
-const result = parse(usfmText);
-
-// Output formats (lazy -- only serialized when called)
-const usj = result.toUsj();    // USJ object
-const usjWithSpans = result.toUsj({ spans: true });
-const usx = result.toUsx();    // USX XML string
-const usfm = result.toUsfm();  // Normalized USFM string
-const vref = result.toVref();  // Vref pairs like { "GEN 1:1": "In the beginning...", ... }
-
-// Diagnostics
-for (const d of result.diagnostics) {
-    console.log(`[${d.severity}] ${d.message} (${d.start}..${d.end})`);
-    // d.code is a machine-readable enum like "UnknownMarker", "ImplicitClose", etc.
-}
-
-// Skip validation
-const result2 = parse(usfmText, { validate: false });
-
-// Free wasm memory when done
-result.free();
-```
-
-Build with [wasm-pack](https://rustwasm.github.io/wasm-pack/):
-
-```sh
-wasm-pack build crates/usfm3-wasm --target web     # for browsers
-wasm-pack build crates/usfm3-wasm --target nodejs  # for Node.js
-```
-
-## Building from Source
-
-```sh
-# Build everything
-cargo build
-
-# Build individual crates
-cargo build -p usfm3          # core library
-cargo build -p usfm3-cli      # CLI
-
-# Run tests
-cargo test -p usfm3
-```
-
-## Architecture
-
-The parser uses a two-phase architecture:
-
-1. **Lexer** (`logos`-based tokenizer) -- splits USFM source into tokens with byte-offset spans
-2. **Builder** (stack-based tree builder) -- converts the token stream into a `Document` AST
-
-This design makes the parser error-tolerant: the lexer always succeeds, and the builder recovers from structural errors by emitting diagnostics and applying heuristics (implicit closes, etc.).
-
-Validation is a separate pass over the AST that checks semantic rules without modifying the tree.
-
-## Output Formats
-
-| Format | Function | Description |
-|--------|----------|-------------|
-| USJ | `usj::to_usj_string()` / `usj::to_usj_string_with_options()` | Unified Scripture JSON; optional nested source spans for editor tooling |
-| USX | `usx::to_usx_string()` | Unified Scripture XML -- the standard XML representation |
-| USFM | `usfm::to_usfm_string()` | Normalized USFM with regularized whitespace |
-| VRef | `vref::to_vref_json_string()` | Verse reference to plain text map (strips formatting/notes) |
-
-When USJ spans are enabled, each structural node includes a `spans` object with a required `node` range and optional `code`, `number`, and `close` ranges.
+- `tokenize()` is the lightest editor-facing path.
+- `parse_cst()` preserves full source-backed structure and is the preferred CST/LSP path.
+- `parse()` is lazy and diagnostics-off by default.
+- `parse_ast(..., diagnostics: true)` or `lower_cst(..., diagnostics: true)` opt into the full semantic + diagnostic pass.
 
 ## License
 

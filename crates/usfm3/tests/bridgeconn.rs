@@ -374,13 +374,22 @@ fn run_test_case(case: &TestCase) -> TestResult {
     };
 
     // Parse with our parser
-    let result = usfm3::parse_full(&usfm, usfm3::ParseOptions { validate: true });
+    let result = usfm3::parse_ast(
+        &usfm,
+        usfm3::ParseOptions {
+            diagnostics: true,
+        },
+    );
 
     // For "fail" tests, check that we produce diagnostics (from parsing or validation).
     if !case.validated_pass {
-        let has_parse_errors = result.parser_diagnostics.has_errors();
-        let has_validation_errors = result.validation_diagnostics.has_errors();
-        if has_parse_errors || has_validation_errors {
+        let has_errors = result
+            .diagnostics
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .any(|diagnostic| diagnostic.severity == usfm3::diagnostics::Severity::Error);
+        if has_errors {
             return TestResult::Pass;
         } else {
             return TestResult::Fail(vec![

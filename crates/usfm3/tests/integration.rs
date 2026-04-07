@@ -23,8 +23,20 @@ fn get_cst(usfm: &str) -> usfm3::cst::CstDocument {
     cst::parse(usfm)
 }
 
-fn get_full(usfm: &str) -> usfm3::ParseArtifacts {
-    usfm3::parse_full(usfm, usfm3::ParseOptions { validate: true })
+fn get_full(usfm: &str) -> usfm3::ParsedDocument {
+    usfm3::parse(
+        usfm,
+        usfm3::ParseOptions {
+            diagnostics: true,
+        },
+    )
+}
+
+fn diagnostics(result: &usfm3::AstDocument) -> &[usfm3::diagnostics::Diagnostic] {
+    result
+        .diagnostics
+        .as_deref()
+        .expect("builder::parse() should collect diagnostics")
 }
 
 /// Parse USFM and return the USJ JSON value.
@@ -133,21 +145,22 @@ fn cst_preserves_raw_marker_spelling() {
 fn lowering_from_cst_matches_direct_parse() {
     let usfm = "\\id GEN Genesis\n\\c 1\n\\p \\v 1 In the beginning\\nd Lord\\nd*\n";
     let cst = get_cst(usfm);
-    let lowered = builder::lower(&cst);
+    let lowered = builder::lower(
+        &cst,
+        usfm3::ParseOptions {
+            diagnostics: true,
+        },
+    );
     let parsed = builder::parse(usfm);
 
     assert_eq!(lowered.ast, parsed.ast);
-    assert_eq!(
-        lowered.diagnostics.into_inner(),
-        parsed.diagnostics.into_inner()
-    );
+    assert_eq!(lowered.diagnostics, parsed.diagnostics);
 }
 
 #[test]
 fn parser_diagnostics_capture_cst_anchor() {
     let result = builder::parse("\\p \\notreal foo");
-    let diag = result
-        .diagnostics
+    let diag = diagnostics(&result)
         .iter()
         .find(|d| d.code == DiagnosticCode::UnknownMarker)
         .expect("expected unknown marker diagnostic");
@@ -162,7 +175,8 @@ fn parser_diagnostics_capture_cst_anchor() {
 fn validation_diagnostics_resolve_cst_anchor_lazily() {
     let result = get_full("\\id BAD Bad Book\n\\c 1\n\\p \\v 1 Text");
     let diag = result
-        .validation_diagnostics
+        .diagnostics()
+        .expect("diagnostics should be available")
         .iter()
         .find(|d| d.code == DiagnosticCode::InvalidBookCode)
         .expect("expected invalid book code diagnostic");
@@ -172,7 +186,7 @@ fn validation_diagnostics_resolve_cst_anchor_lazily() {
         "validation diagnostics should stay lazy"
     );
     assert!(
-        diag.resolved_anchor_cst(&result.cst).is_some(),
+        diag.resolved_anchor_cst(result.cst()).is_some(),
         "validation diagnostics should resolve back to a CST node"
     );
 }
@@ -253,6 +267,8 @@ fn implicit_paragraph_and_verses() {
     let doc = result.ast;
     let warnings: Vec<_> = result
         .diagnostics
+        .as_deref()
+        .expect("diagnostics should be available")
         .iter()
         .filter(|d| d.code == DiagnosticCode::VerseOutsideParagraph)
         .collect();
@@ -526,13 +542,12 @@ fn tables_do_not_emit_close_diagnostics_at_row_or_eof_boundaries() {
     let result = builder::parse(usfm);
 
     assert!(
-        !result.diagnostics.iter().any(|d| matches!(
+        !diagnostics(&result).iter().any(|d| matches!(
             d.code,
             DiagnosticCode::ImplicitClose | DiagnosticCode::UnclosedAtEof
         )),
         "table rows/cells should close structurally without implicit/unclosed diagnostics: {:?}",
-        result
-            .diagnostics
+        diagnostics(&result)
             .iter()
             .map(|d| format!("{:?}", d.code))
             .collect::<Vec<_>>()
@@ -553,13 +568,12 @@ fn tables_close_cleanly_before_following_block_markers() {
     let result = builder::parse(usfm);
 
     assert!(
-        !result.diagnostics.iter().any(|d| matches!(
+        !diagnostics(&result).iter().any(|d| matches!(
             d.code,
             DiagnosticCode::ImplicitClose | DiagnosticCode::UnclosedAtEof
         )),
         "table rows/cells should close cleanly before later block markers: {:?}",
-        result
-            .diagnostics
+        diagnostics(&result)
             .iter()
             .map(|d| format!("{:?}", d.code))
             .collect::<Vec<_>>()
@@ -774,7 +788,7 @@ fn diagnostics_for_unclosed_char_marker() {
 
     let result = builder::parse(usfm);
     assert!(
-        !result.diagnostics.is_empty(),
+        !diagnostics(&result).is_empty(),
         "should produce diagnostics for unclosed \\nd"
     );
 }

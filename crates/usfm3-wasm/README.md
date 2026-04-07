@@ -1,10 +1,8 @@
 # usfm3
 
-An error-tolerant [USFM 3.x](https://docs.usfm.bible/usfm/3.1.1/index.html) parser for JavaScript and TypeScript. Outputs [USJ](https://docs.usfm.bible/usfm/3.1.1/usj/index.html) (JSON), [USX](https://docs.usfm.bible/usfm/3.1.1/usx/index.html) (XML), normalized USFM, and vref format (a key-value map of verse references to text).
+`usfm3` is the JavaScript / TypeScript package for the Rust `usfm3` parser.
 
-Built in Rust and compiled to WebAssembly. Works in browsers, Node.js, Deno, and Bun.
-
-Also available as a [Rust crate](https://crates.io/crates/usfm3) and [Python package](https://pypi.org/project/usfm3/).
+It exposes a staged API so browser, Node, and editor integrations can stay on the cheapest representation they need.
 
 ## Installation
 
@@ -12,88 +10,82 @@ Also available as a [Rust crate](https://crates.io/crates/usfm3) and [Python pac
 npm install usfm3
 ```
 
-## Usage
+In browsers:
 
-WASM is automatically initialized in Node.js, Deno, and Bun. In a browser, call `init()` first:
-
-```typescript
+```ts
 import init from "usfm3";
-await init(); // browser only
+await init();
 ```
 
-Then parse USFM text:
+## Quick Start
 
-```typescript
-import { parse } from "usfm3";
+```ts
+import { parse, parseAst, parseCst, tokenize } from "usfm3";
 
-const result = parse(usfmText);
+const parsed = parse(usfmText);
 
-if (result.hasErrors()) {
-    console.error("Document has errors");
-}
+const tokens = tokenize(usfmText);
+const cst = parseCst(usfmText);
+const astDocument = parseAst(usfmText, { diagnostics: true });
 
-// Output formats (lazy — only serialized when called)
-const usj = result.toUsj();    // USJ object
-const usx = result.toUsx();    // USX XML string
-const usfm = result.toUsfm();  // Normalized USFM string
-const vref = result.toVref();  // Vref pairs like { "GEN 1:1": "In the beginning...", ... }
+const ast = parsed.ast();
+const sourceMap = parsed.sourceMap();
+const diagnostics = parsed.diagnostics();
 
-const usjWithSpans = result.toUsj({ spans: true });
-// Structural nodes then include `spans.node` and, when relevant, `spans.code`,
-// `spans.number`, and `spans.close`.
+const usj = parsed.toUsj();
+const usjWithSpans = parsed.toUsj({ spans: true });
+const usx = parsed.toUsx();
+const usfm = parsed.toUsfm();
+const vref = parsed.toVref();
 
-// Diagnostics
-for (const d of result.diagnostics) {
-    console.log(`[${d.severity}] ${d.message} (${d.start}..${d.end})`);
-    // d.code is a machine-readable string like "UnknownMarker", "ImplicitClose", etc.
-}
-
-// Skip semantic validation
-const result2 = parse(usfmText, { validate: false });
-
-// Free WASM memory when done
-result.free();
+parsed.free();
 ```
 
 ## API
 
-### `parse(usfm: string, options?: ParseOptions): ParseResult`
+### `parse(usfm: string, options?: { diagnostics?: boolean }): ParsedDocument`
 
-Parse a USFM string. Returns a `ParseResult` with lazy output methods and diagnostics.
+Returns a lazy parsed handle.
 
-**ParseOptions:**
+### `parseCst(usfm: string): any`
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `validate` | `boolean` | `true` | Run semantic validation after parsing |
+Returns a JSON-friendly CST tree.
 
-**UsjOptions:**
+### `parseAst(usfm: string, options?: { diagnostics?: boolean }): any`
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `spans` | `boolean` | `false` | Include nested source byte-offset metadata on structural JSON nodes |
+Returns:
 
-### `ParseResult`
+```ts
+{
+  ast: ...,
+  source_map: ...,
+  diagnostics?: Diagnostic[]
+}
+```
 
-| Method / Property | Returns | Description |
-|---|---|---|
-| `toUsj(options?: UsjOptions)` | `object` | USJ (Unified Scripture JSON) |
-| `toUsx()` | `string` | USX (Unified Scripture XML) |
-| `toUsfm()` | `string` | Normalized USFM |
-| `toVref()` | `Record<string, string>` | Verse reference to plain text map |
-| `hasErrors()` | `boolean` | True if any error-severity diagnostics |
-| `diagnostics` | `Diagnostic[]` | Parser and validation diagnostics |
-| `free()` | `void` | Free WASM memory |
+### `tokenize(usfm: string): any[]`
 
-### `Diagnostic`
+Returns token spans suitable for editor tooling.
 
-| Property | Type | Description |
-|---|---|---|
-| `severity` | `string` | `"error"`, `"warning"`, or `"info"` |
-| `code` | `string` | Machine-readable code (e.g. `"UnknownMarker"`) |
-| `message` | `string` | Human-readable message |
-| `start` | `number` | Start byte offset in source |
-| `end` | `number` | End byte offset in source |
+### `ParsedDocument`
+
+- `cst(): any`
+- `ast(): any`
+- `sourceMap(): any`
+- `diagnostics(): Diagnostic[] | undefined`
+- `toUsj(options?: { spans?: boolean }): any`
+- `toUsx(): string`
+- `toUsfm(): string`
+- `toVref(): Record<string, string>`
+- `free(): void`
+
+## Notes
+
+- `tokenize()` and `parseCst()` are cheaper than materializing the AST.
+- Diagnostics are only computed when `diagnostics: true` is requested.
+- Diagnostics are a flat list.
+- AST nodes do not carry spans.
+- `toUsj({ spans: true })` derives inline span data from the source map.
 
 ## License
 

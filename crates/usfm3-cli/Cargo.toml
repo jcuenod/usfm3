@@ -9,3 +9,5 @@ path = "src/main.rs"
 
 [dependencies]
 usfm3 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

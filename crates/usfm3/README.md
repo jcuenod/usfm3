@@ -1,16 +1,10 @@
 # usfm3
 
-An error-tolerant [USFM 3.x](https://docs.usfm.bible/usfm/3.1.1/index.html) parser written in Rust. Outputs [USJ](https://docs.usfm.bible/usfm/3.1.1/usj/index.html) (JSON), [USX](https://docs.usfm.bible/usfm/3.1.1/usx/index.html) (XML), normalized USFM, and verse-reference maps.
+`usfm3` is the core Rust crate for parsing USFM 3.x.
 
-Also available as a [Python package](https://pypi.org/project/usfm3/) and [npm package](https://www.npmjs.com/package/usfm3) (WebAssembly).
+The public pipeline is:
 
-## Features
-
-- Parses all USFM 3.x markers including tables, milestones, sidebars, figures, and nested character styles
-- Error-tolerant: always produces a document tree, even from malformed input
-- Structured diagnostics with source locations, severity levels, and machine-readable codes
-- Semantic validation (chapter/verse sequence, attribute rules, milestone pairing, etc.)
-- Multiple output formats: USJ, USX, USFM, and verse-reference maps
+`tokenize -> parse_cst -> parse_ast / lower_cst -> serialize`
 
 ## Installation
 
@@ -19,55 +13,60 @@ Also available as a [Python package](https://pypi.org/project/usfm3/) and [npm p
 usfm3 = "0.1"
 ```
 
-## Usage
+## Lazy Parse Handle
 
 ```rust
-let result = usfm3::builder::parse(r#"\id GEN
-\c 1
-\p
-\v 1 In the beginning God created the heavens and the earth.
-"#);
+let parsed = usfm3::parse(text, usfm3::ParseOptions::default());
 
-// Check for errors
-for diag in result.diagnostics.iter() {
-    eprintln!("{diag}");
-}
+let tokens = parsed.tokens();
+let cst = parsed.cst();
+let ast = parsed.ast();
+let source_map = parsed.source_map();
+let diagnostics = parsed.diagnostics();
 
-// Output as USJ (JSON)
-let usj = usfm3::usj::to_usj_string_pretty(&result.document).unwrap();
-
-// Include source spans for editor tooling
-let usj_with_spans = usfm3::usj::to_usj_string_pretty_with_options(
-    &result.document,
-    usfm3::usj::UsjOptions {
-        include_spans: true,
-    },
-)
-.unwrap();
-
-// Output as USX (XML)
-let usx = usfm3::usx::to_usx_string(&result.document).unwrap();
-
-// Output as normalized USFM
-let usfm = usfm3::usfm::to_usfm_string(&result.document);
-
-// Output as verse-reference map
-let vref = usfm3::vref::to_vref_json_string(&result.document);
-
-// Run semantic validation
-let validation_diags = usfm3::validation::validate(&result.document);
+let usj = parsed
+    .to_usj(usfm3::usj::UsjOptions { include_spans: false })
+    .unwrap();
+let usx = parsed.to_usx().unwrap();
+let usfm = parsed.to_usfm();
+let vref = parsed.to_vref();
 ```
 
-## Output Formats
+`parse()` is lazy and diagnostics-off by default, so token/CST/editor consumers do not pay for validation unless they opt in.
 
-| Format | Function | Description |
-|--------|----------|-------------|
-| USJ | `usj::to_usj_string()` / `usj::to_usj_string_with_options()` | Unified Scripture JSON; optional nested source spans |
-| USX | `usx::to_usx_string()` | Unified Scripture XML |
-| USFM | `usfm::to_usfm_string()` | Normalized USFM with regularized whitespace |
-| VRef | `vref::to_vref_json_string()` | Verse reference to plain text map |
+## Eager AST
 
-When `include_spans` is enabled, each structural USJ node includes a `spans` object with a required `node` range and optional `code`, `number`, and `close` ranges.
+```rust
+let ast_document = usfm3::parse_ast(
+    text,
+    usfm3::ParseOptions {
+        diagnostics: true,
+    },
+);
+
+let ast = ast_document.ast;
+let source_map = ast_document.source_map;
+let diagnostics = ast_document.diagnostics;
+```
+
+## CST-First Lowering
+
+```rust
+let cst = usfm3::parse_cst(text);
+let ast_document = usfm3::lower_cst(
+    &cst,
+    usfm3::ParseOptions {
+        diagnostics: true,
+    },
+);
+```
+
+## Notes
+
+- AST nodes are semantic-only and do not own spans.
+- `source_map` mirrors the AST and holds source ranges plus CST anchors.
+- Diagnostics are a single flat list when requested, otherwise `None`.
+- USJ inline spans come from `source_map`, not from the AST.
 
 ## License
 

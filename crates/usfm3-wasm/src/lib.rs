@@ -4,256 +4,141 @@ use wasm_bindgen::prelude::*;
 
 use ::usfm3 as usfm3_lib;
 
-// ---------------------------------------------------------------------------
-// TypeScript wrapper types (auto-generate .d.ts via tsify)
-// ---------------------------------------------------------------------------
-
-/// Severity level for diagnostics.
-#[derive(Tsify, Serialize, Clone)]
-#[serde(rename_all = "lowercase")]
-pub enum Severity {
-    Error,
-    Warning,
-    Info,
-}
-
-/// Machine-readable diagnostic code.
-#[derive(Tsify, Serialize, Clone)]
-pub enum DiagnosticCode {
-    UnknownMarker,
-    DeprecatedMarker,
-    UnclosedMarker,
-    StrayCloseMarker,
-    MisnestedMarker,
-    MissingNestingPrefix,
-    ImplicitClose,
-    UnclosedNote,
-    UnclosedAtEof,
-    InvalidChapterSequence,
-    InvalidVerseSequence,
-    DuplicateChapter,
-    DuplicateId,
-    MissingIdMarker,
-    InvalidBookCode,
-    NoteSubmarkerOutsideNote,
-    TextBeforeId,
-    HeaderAfterBody,
-    MilestoneMismatch,
-    InvalidAttributes,
-    MissingChapterNumber,
-    MissingVerseNumber,
-    VerseOutsideParagraph,
-    MissingChapterMarker,
-    CharCrossesVerseBoundary,
-    EmptyFigure,
-    UnquotedAttributeValue,
-    MissingRequiredAttribute,
-    DefaultAttributeNotDefined,
-    BodyParagraphBeforeChapter,
-    NonEmptyBlankLine,
-    LeadingZeros,
-    EmptyWordMarker,
-    MissingMilestoneSelfClose,
-    InvalidTableColumnSequence,
-}
-
-/// A diagnostic message with source location.
-#[derive(Tsify, Serialize, Clone)]
-#[tsify(into_wasm_abi)]
-pub struct Diagnostic {
-    pub severity: Severity,
-    pub message: String,
-    pub code: DiagnosticCode,
-    pub start: usize,
-    pub end: usize,
-}
-
-/// Options for the `parse` function.
-#[derive(Tsify, Deserialize)]
+#[derive(Tsify, Deserialize, Clone, Copy, Default)]
 #[tsify(from_wasm_abi)]
 pub struct ParseOptions {
-    #[serde(default = "default_true")]
-    pub validate: bool,
+    #[serde(default)]
+    pub diagnostics: bool,
 }
 
-fn default_true() -> bool {
-    true
-}
-
-/// Options for the `toUsj` method.
-#[derive(Tsify, Deserialize)]
+#[derive(Tsify, Deserialize, Clone, Copy, Default)]
 #[tsify(from_wasm_abi)]
 pub struct UsjOptions {
     #[serde(default)]
     pub spans: bool,
 }
 
-// ---------------------------------------------------------------------------
-// Hand-written TypeScript declarations for ParseResult and parse()
-// ---------------------------------------------------------------------------
-
 #[wasm_bindgen(typescript_custom_section)]
-const PARSE_RESULT_TS: &str = r#"
-export class ParseResult {
+const TYPESCRIPT_API: &str = r#"
+export interface ParseOptions {
+  diagnostics?: boolean;
+}
+
+export interface UsjOptions {
+  spans?: boolean;
+}
+
+export class ParsedDocument {
   free(): void;
-  readonly diagnostics: Diagnostic[];
-  hasErrors(): boolean;
+  cst(): any;
+  ast(): any;
+  sourceMap(): any;
+  diagnostics(): any[] | undefined;
   toUsj(options?: UsjOptions): any;
   toUsx(): string;
   toUsfm(): string;
   toVref(): Record<string, string>;
 }
-export function parse(usfm: string, options?: ParseOptions): ParseResult;
+
+export function parse(usfm: string, options?: ParseOptions): ParsedDocument;
+export function parseCst(usfm: string): any;
+export function parseAst(usfm: string, options?: ParseOptions): any;
+export function tokenize(usfm: string): any[];
 "#;
 
-// ---------------------------------------------------------------------------
-// ParseResult
-// ---------------------------------------------------------------------------
-
 #[wasm_bindgen(skip_typescript)]
-pub struct ParseResult {
-    ast: usfm3_lib::ast::Document,
-    diagnostics_js: JsValue,
-    has_errors: bool,
+pub struct ParsedDocument {
+    inner: usfm3_lib::ParsedDocument,
 }
 
 #[wasm_bindgen]
-impl ParseResult {
-    /// Serialize the parsed document to USJ (Unified Scripture JSON).
+impl ParsedDocument {
+    #[wasm_bindgen]
+    pub fn cst(&self) -> Result<JsValue, JsError> {
+        to_js_value(&usfm3_lib::cst::export(self.inner.cst()))
+    }
+
+    #[wasm_bindgen]
+    pub fn ast(&self) -> Result<JsValue, JsError> {
+        to_js_value(self.inner.ast())
+    }
+
+    #[wasm_bindgen(js_name = "sourceMap")]
+    pub fn source_map(&self) -> Result<JsValue, JsError> {
+        to_js_value(self.inner.source_map())
+    }
+
+    #[wasm_bindgen]
+    pub fn diagnostics(&self) -> Result<JsValue, JsError> {
+        to_js_value(&self.inner.diagnostics())
+    }
+
     #[wasm_bindgen(js_name = "toUsj")]
     pub fn to_usj(&self, options: Option<UsjOptions>) -> Result<JsValue, JsError> {
-        let include_spans = options.map(|o| o.spans).unwrap_or(false);
-        let usj = usfm3_lib::usj::to_usj_value_with_options(
-            &self.ast,
-            usfm3_lib::usj::UsjOptions { include_spans },
-        )
-        .map_err(|e| JsError::new(&e.to_string()))?;
-        serde_wasm_bindgen::to_value(&usj).map_err(|e| JsError::new(&e.to_string()))
+        let options = options.unwrap_or_default();
+        let value = self
+            .inner
+            .to_usj(usfm3_lib::usj::UsjOptions {
+                include_spans: options.spans,
+            })
+            .map_err(|error| JsError::new(&error.to_string()))?;
+        to_js_value(&value)
     }
 
-    /// Serialize the parsed document to USX XML.
     #[wasm_bindgen(js_name = "toUsx")]
     pub fn to_usx(&self) -> Result<String, JsError> {
-        usfm3_lib::usx::to_usx_string(&self.ast).map_err(|e| JsError::new(&e.to_string()))
+        self.inner
+            .to_usx()
+            .map_err(|error| JsError::new(&error.to_string()))
     }
 
-    /// Serialize the parsed document to normalized USFM.
     #[wasm_bindgen(js_name = "toUsfm")]
     pub fn to_usfm(&self) -> String {
-        usfm3_lib::usfm::to_usfm_string(&self.ast)
+        self.inner.to_usfm()
     }
 
-    /// Returns a verse reference map: `{ "GEN 1:1": "In the beginning ...", ... }`.
     #[wasm_bindgen(js_name = "toVref")]
     pub fn to_vref(&self) -> Result<JsValue, JsError> {
-        let map = usfm3_lib::vref::to_vref_map(&self.ast);
-        let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
-        serde::Serialize::serialize(&map, &serializer).map_err(|e| JsError::new(&e.to_string()))
-    }
-
-    /// Get the diagnostics array.
-    #[wasm_bindgen(getter)]
-    pub fn diagnostics(&self) -> JsValue {
-        self.diagnostics_js.clone()
-    }
-
-    /// True if any diagnostics have Error severity.
-    #[wasm_bindgen(js_name = "hasErrors")]
-    pub fn has_errors(&self) -> bool {
-        self.has_errors
+        to_js_value(&self.inner.to_vref())
     }
 }
 
-// ---------------------------------------------------------------------------
-// parse() entry point
-// ---------------------------------------------------------------------------
-
 #[wasm_bindgen(skip_typescript)]
-pub fn parse(usfm: &str, options: Option<ParseOptions>) -> Result<ParseResult, JsError> {
-    let validate = options.is_none_or(|o| o.validate);
-
-    let result = usfm3_lib::parse_full(usfm, usfm3_lib::ParseOptions { validate });
-
-    let diagnostics: Vec<Diagnostic> = result
-        .parser_diagnostics
-        .iter()
-        .chain(result.validation_diagnostics.iter())
-        .map(convert_diagnostic)
-        .collect();
-
-    let has_errors = diagnostics
-        .iter()
-        .any(|d| matches!(d.severity, Severity::Error));
-
-    let diagnostics_js =
-        serde_wasm_bindgen::to_value(&diagnostics).map_err(|e| JsError::new(&e.to_string()))?;
-
-    Ok(ParseResult {
-        ast: result.ast,
-        diagnostics_js,
-        has_errors,
+pub fn parse(usfm: &str, options: Option<ParseOptions>) -> Result<ParsedDocument, JsError> {
+    let options = options.unwrap_or_default();
+    Ok(ParsedDocument {
+        inner: usfm3_lib::parse(
+            usfm,
+            usfm3_lib::ParseOptions {
+                diagnostics: options.diagnostics,
+            },
+        ),
     })
 }
 
-// ---------------------------------------------------------------------------
-// Conversion helpers (core types → wasm wrapper types)
-// ---------------------------------------------------------------------------
-
-fn convert_diagnostic(d: &usfm3_lib::diagnostics::Diagnostic) -> Diagnostic {
-    Diagnostic {
-        severity: convert_severity(d.severity),
-        message: d.message.clone(),
-        code: convert_code(d.code),
-        start: d.span.start,
-        end: d.span.end,
-    }
+#[wasm_bindgen(skip_typescript, js_name = "parseCst")]
+pub fn parse_cst(usfm: &str) -> Result<JsValue, JsError> {
+    let cst = usfm3_lib::parse_cst(usfm);
+    to_js_value(&usfm3_lib::cst::export(&cst))
 }
 
-fn convert_severity(s: usfm3_lib::diagnostics::Severity) -> Severity {
-    match s {
-        usfm3_lib::diagnostics::Severity::Error => Severity::Error,
-        usfm3_lib::diagnostics::Severity::Warning => Severity::Warning,
-        usfm3_lib::diagnostics::Severity::Info => Severity::Info,
-    }
+#[wasm_bindgen(skip_typescript, js_name = "parseAst")]
+pub fn parse_ast(usfm: &str, options: Option<ParseOptions>) -> Result<JsValue, JsError> {
+    let options = options.unwrap_or_default();
+    let ast_document = usfm3_lib::parse_ast(
+        usfm,
+        usfm3_lib::ParseOptions {
+            diagnostics: options.diagnostics,
+        },
+    );
+    to_js_value(&ast_document)
 }
 
-fn convert_code(c: usfm3_lib::diagnostics::DiagnosticCode) -> DiagnosticCode {
-    use usfm3_lib::diagnostics::DiagnosticCode as DC;
-    match c {
-        DC::UnknownMarker => DiagnosticCode::UnknownMarker,
-        DC::DeprecatedMarker => DiagnosticCode::DeprecatedMarker,
-        DC::UnclosedMarker => DiagnosticCode::UnclosedMarker,
-        DC::StrayCloseMarker => DiagnosticCode::StrayCloseMarker,
-        DC::MisnestedMarker => DiagnosticCode::MisnestedMarker,
-        DC::MissingNestingPrefix => DiagnosticCode::MissingNestingPrefix,
-        DC::ImplicitClose => DiagnosticCode::ImplicitClose,
-        DC::UnclosedNote => DiagnosticCode::UnclosedNote,
-        DC::UnclosedAtEof => DiagnosticCode::UnclosedAtEof,
-        DC::InvalidChapterSequence => DiagnosticCode::InvalidChapterSequence,
-        DC::InvalidVerseSequence => DiagnosticCode::InvalidVerseSequence,
-        DC::DuplicateChapter => DiagnosticCode::DuplicateChapter,
-        DC::DuplicateId => DiagnosticCode::DuplicateId,
-        DC::MissingIdMarker => DiagnosticCode::MissingIdMarker,
-        DC::InvalidBookCode => DiagnosticCode::InvalidBookCode,
-        DC::NoteSubmarkerOutsideNote => DiagnosticCode::NoteSubmarkerOutsideNote,
-        DC::TextBeforeId => DiagnosticCode::TextBeforeId,
-        DC::HeaderAfterBody => DiagnosticCode::HeaderAfterBody,
-        DC::MilestoneMismatch => DiagnosticCode::MilestoneMismatch,
-        DC::InvalidAttributes => DiagnosticCode::InvalidAttributes,
-        DC::MissingChapterNumber => DiagnosticCode::MissingChapterNumber,
-        DC::MissingVerseNumber => DiagnosticCode::MissingVerseNumber,
-        DC::VerseOutsideParagraph => DiagnosticCode::VerseOutsideParagraph,
-        DC::MissingChapterMarker => DiagnosticCode::MissingChapterMarker,
-        DC::CharCrossesVerseBoundary => DiagnosticCode::CharCrossesVerseBoundary,
-        DC::EmptyFigure => DiagnosticCode::EmptyFigure,
-        DC::UnquotedAttributeValue => DiagnosticCode::UnquotedAttributeValue,
-        DC::MissingRequiredAttribute => DiagnosticCode::MissingRequiredAttribute,
-        DC::DefaultAttributeNotDefined => DiagnosticCode::DefaultAttributeNotDefined,
-        DC::BodyParagraphBeforeChapter => DiagnosticCode::BodyParagraphBeforeChapter,
-        DC::NonEmptyBlankLine => DiagnosticCode::NonEmptyBlankLine,
-        DC::LeadingZeros => DiagnosticCode::LeadingZeros,
-        DC::EmptyWordMarker => DiagnosticCode::EmptyWordMarker,
-        DC::MissingMilestoneSelfClose => DiagnosticCode::MissingMilestoneSelfClose,
-        DC::InvalidTableColumnSequence => DiagnosticCode::InvalidTableColumnSequence,
-    }
+#[wasm_bindgen(skip_typescript)]
+pub fn tokenize(usfm: &str) -> Result<JsValue, JsError> {
+    to_js_value(&usfm3_lib::tokenize(usfm))
+}
+
+fn to_js_value<T: Serialize>(value: &T) -> Result<JsValue, JsError> {
+    serde_wasm_bindgen::to_value(value).map_err(|error| JsError::new(&error.to_string()))
 }

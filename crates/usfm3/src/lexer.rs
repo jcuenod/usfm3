@@ -1,4 +1,5 @@
 use logos::Logos;
+use serde::Serialize;
 
 /// Byte-offset range into the source string.
 pub type Span = std::ops::Range<usize>;
@@ -95,6 +96,85 @@ pub fn spanned_tokens(input: &str) -> impl Iterator<Item = (Token<'_>, Span)> + 
 
 pub fn tokenize(input: &str) -> Vec<(Token<'_>, Span)> {
     spanned_tokens(input).collect()
+}
+
+/// A serialization-friendly token representation for editor tooling.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TokenSpan {
+    pub kind: String,
+    pub text: String,
+    pub start: usize,
+    pub end: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub normalized_marker: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_kind: Option<String>,
+}
+
+pub fn exported_tokens(input: &str) -> Vec<TokenSpan> {
+    spanned_tokens(input)
+        .map(|(token, span)| token_to_export(token, span))
+        .collect()
+}
+
+fn token_to_export(token: Token<'_>, span: Span) -> TokenSpan {
+    let (kind, text, normalized_marker, token_kind) = match token {
+        Token::Whitespace(text) => ("whitespace".to_string(), text.to_string(), None, None),
+        Token::Chapter => (
+            "marker".to_string(),
+            "\\c".to_string(),
+            Some("c".to_string()),
+            Some("chapter".to_string()),
+        ),
+        Token::Verse => (
+            "marker".to_string(),
+            "\\v".to_string(),
+            Some("v".to_string()),
+            Some("verse".to_string()),
+        ),
+        Token::Milestone(text) => (
+            "marker".to_string(),
+            text.to_string(),
+            Some(strip_marker_backslash(text).to_string()),
+            Some("milestone".to_string()),
+        ),
+        Token::NestedMarker(text) => (
+            "marker".to_string(),
+            text.to_string(),
+            Some(strip_marker_backslash(text).trim_start_matches('+').to_string()),
+            Some("nested".to_string()),
+        ),
+        Token::NestedClosingMarker(text) => (
+            "closing_marker".to_string(),
+            text.to_string(),
+            Some(strip_closing_star(text).trim_start_matches('+').to_string()),
+            Some("nested".to_string()),
+        ),
+        Token::MilestoneEnd => ("milestone_end".to_string(), "\\*".to_string(), None, None),
+        Token::ClosingMarker(text) => (
+            "closing_marker".to_string(),
+            text.to_string(),
+            Some(strip_closing_star(text).to_string()),
+            Some("regular".to_string()),
+        ),
+        Token::Marker(text) => (
+            "marker".to_string(),
+            text.to_string(),
+            Some(strip_marker_backslash(text).to_string()),
+            Some("regular".to_string()),
+        ),
+        Token::Attributes(text) => ("attributes".to_string(), text.to_string(), None, None),
+        Token::Text(text) => ("text".to_string(), text.to_string(), None, None),
+        Token::Newline => ("newline".to_string(), "\n".to_string(), None, None),
+    };
+    TokenSpan {
+        kind,
+        text,
+        start: span.start,
+        end: span.end,
+        normalized_marker,
+        token_kind,
+    }
 }
 
 /// Strip the leading backslash from a marker string.

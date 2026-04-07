@@ -1,6 +1,7 @@
-use crate::ast::Span;
+use crate::diagnostics::Span;
 use crate::lexer::{self, Token};
 use crate::markers::{MarkerKind, MarkerName};
+use serde::Serialize;
 use std::num::NonZeroUsize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -135,6 +136,21 @@ pub struct LeafToken<'a> {
     pub kind: LeafTokenKind<'a>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExportedCstNode {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub span: Span,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub marker: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<ExportedCstNode>,
+}
+
 impl CstKind {
     pub fn is_leaf(&self) -> bool {
         matches!(
@@ -258,6 +274,10 @@ impl CstDocument {
             current = self.node(current).parent?;
         }
     }
+
+    pub fn export(&self) -> ExportedCstNode {
+        export_node(self, self.root_id())
+    }
 }
 
 pub fn parse(input: &str) -> CstDocument {
@@ -277,6 +297,129 @@ pub fn parse_owned(input: String) -> CstDocument {
         root,
         nodes,
         leaf_ids,
+    }
+}
+
+pub fn export(document: &CstDocument) -> ExportedCstNode {
+    document.export()
+}
+
+fn export_node(document: &CstDocument, id: CstNodeId) -> ExportedCstNode {
+    let node = document.node(id);
+    let (kind, marker, token_kind, text) = match &node.kind {
+        CstKind::Document => ("document".to_string(), None, None, None),
+        CstKind::Book { marker } => ("book".to_string(), Some(marker.to_string()), None, None),
+        CstKind::Chapter { marker } => {
+            ("chapter".to_string(), Some(marker.to_string()), None, None)
+        }
+        CstKind::Verse { marker } => ("verse".to_string(), Some(marker.to_string()), None, None),
+        CstKind::Para { marker } => ("para".to_string(), Some(marker.to_string()), None, None),
+        CstKind::Char { marker } => ("char".to_string(), Some(marker.to_string()), None, None),
+        CstKind::Note { marker } => ("note".to_string(), Some(marker.to_string()), None, None),
+        CstKind::Milestone { marker } => {
+            ("milestone".to_string(), Some(marker.to_string()), None, None)
+        }
+        CstKind::Figure { marker } => {
+            ("figure".to_string(), Some(marker.to_string()), None, None)
+        }
+        CstKind::Sidebar { marker } => {
+            ("sidebar".to_string(), Some(marker.to_string()), None, None)
+        }
+        CstKind::Periph { marker } => {
+            ("periph".to_string(), Some(marker.to_string()), None, None)
+        }
+        CstKind::Table => ("table".to_string(), None, None, None),
+        CstKind::TableRow { marker } => {
+            ("table_row".to_string(), Some(marker.to_string()), None, None)
+        }
+        CstKind::TableCell { marker } => {
+            ("table_cell".to_string(), Some(marker.to_string()), None, None)
+        }
+        CstKind::Ref => ("ref".to_string(), None, None, None),
+        CstKind::Unknown { marker } => {
+            ("unknown".to_string(), Some(marker.to_string()), None, None)
+        }
+        CstKind::MarkerToken {
+            normalized,
+            token_kind,
+        } => (
+            "marker_token".to_string(),
+            Some(normalized.to_string()),
+            Some(export_marker_token_kind(*token_kind).to_string()),
+            Some(document.source_text(id).to_string()),
+        ),
+        CstKind::ClosingMarkerToken {
+            normalized,
+            token_kind,
+        } => (
+            "closing_marker_token".to_string(),
+            Some(normalized.to_string()),
+            Some(export_closing_token_kind(*token_kind).to_string()),
+            Some(document.source_text(id).to_string()),
+        ),
+        CstKind::MilestoneEndToken => (
+            "milestone_end_token".to_string(),
+            None,
+            None,
+            Some(document.source_text(id).to_string()),
+        ),
+        CstKind::AttributesToken => (
+            "attributes_token".to_string(),
+            None,
+            None,
+            Some(document.source_text(id).to_string()),
+        ),
+        CstKind::TextToken => (
+            "text_token".to_string(),
+            None,
+            None,
+            Some(document.source_text(id).to_string()),
+        ),
+        CstKind::WhitespaceToken => (
+            "whitespace_token".to_string(),
+            None,
+            None,
+            Some(document.source_text(id).to_string()),
+        ),
+        CstKind::NewlineToken => (
+            "newline_token".to_string(),
+            None,
+            None,
+            Some(document.source_text(id).to_string()),
+        ),
+    };
+
+    let mut children = Vec::new();
+    let mut child_id = node.first_child;
+    while let Some(current) = child_id {
+        children.push(export_node(document, current));
+        child_id = document.node(current).next_sibling;
+    }
+
+    ExportedCstNode {
+        kind,
+        span: node.span.clone(),
+        marker,
+        token_kind,
+        text,
+        children,
+    }
+}
+
+fn export_marker_token_kind(kind: MarkerTokenKind) -> &'static str {
+    match kind {
+        MarkerTokenKind::Regular => "regular",
+        MarkerTokenKind::Nested => "nested",
+        MarkerTokenKind::Chapter => "chapter",
+        MarkerTokenKind::Verse => "verse",
+        MarkerTokenKind::Milestone => "milestone",
+    }
+}
+
+fn export_closing_token_kind(kind: ClosingTokenKind) -> &'static str {
+    match kind {
+        ClosingTokenKind::Regular => "regular",
+        ClosingTokenKind::Nested => "nested",
     }
 }
 

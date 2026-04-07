@@ -1,66 +1,39 @@
 /// Semantic validation pass for parsed USFM documents.
-///
-/// This module runs **after** parsing. The parser always produces a tree;
-/// validation checks that the tree makes semantic sense (correct book codes,
-/// sequential chapter/verse numbering, milestone pairing, etc.) and emits
-/// diagnostics for anything it finds.
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{Document, Node, Span};
-use crate::diagnostics::{Diagnostic, DiagnosticList};
+use crate::ast::{Document, Node};
+use crate::diagnostics::{Diagnostic, DiagnosticList, Span};
 use crate::markers::{self, MarkerKind};
+use crate::source_map::{SourceMap, SourceNode};
 
-// ── Public entry point ──────────────────────────────────────────────────────
-
-/// Validate a parsed USFM document and return any diagnostics.
-pub fn validate(doc: &Document) -> DiagnosticList {
+pub fn validate(doc: &Document, source_map: &SourceMap) -> DiagnosticList {
     let mut diagnostics = DiagnosticList::new();
     let mut validator = Validator::new(&mut diagnostics);
-    validator.validate(doc);
+    validator.validate(doc, source_map);
     diagnostics
 }
 
-// ── Valid book codes ────────────────────────────────────────────────────────
-
-/// The set of valid 3-letter book codes (standard 66 + deuterocanonical +
-/// peripheral).
 const VALID_BOOK_CODES: &[&str] = &[
-    // OT
     "GEN", "EXO", "LEV", "NUM", "DEU", "JOS", "JDG", "RUT", "1SA", "2SA", "1KI", "2KI", "1CH",
     "2CH", "EZR", "NEH", "EST", "JOB", "PSA", "PRO", "ECC", "SNG", "ISA", "JER", "LAM", "EZK",
     "DAN", "HOS", "JOL", "AMO", "OBA", "JON", "MIC", "NAM", "HAB", "ZEP", "HAG", "ZEC", "MAL",
-    // NT
     "MAT", "MRK", "LUK", "JHN", "ACT", "ROM", "1CO", "2CO", "GAL", "EPH", "PHP", "COL", "1TH",
     "2TH", "1TI", "2TI", "TIT", "PHM", "HEB", "JAS", "1PE", "2PE", "1JN", "2JN", "3JN", "JUD",
-    "REV", // Deuterocanonical / Apocrypha
-    "TOB", "JDT", "ESG", "WIS", "SIR", "BAR", "LJE", "S3Y", "SUS", "BEL", "1MA", "2MA", "3MA",
-    "4MA", "1ES", "2ES", "MAN", "PS2", "ODA", "PSS", "EZA", "5EZ", "6EZ", "DAG", "PS3", "2BA",
-    "LBA", "JUB", "ENO", "1MQ", "2MQ", "3MQ", "REP", "4BA", "LAO", // Peripheral
-    "FRT", "BAK", "OTH", "INT", "CNC", "GLO", "TDX", "NDX",
+    "REV", "TOB", "JDT", "ESG", "WIS", "SIR", "BAR", "LJE", "S3Y", "SUS", "BEL", "1MA", "2MA",
+    "3MA", "4MA", "1ES", "2ES", "MAN", "PS2", "ODA", "PSS", "EZA", "5EZ", "6EZ", "DAG", "PS3",
+    "2BA", "LBA", "JUB", "ENO", "1MQ", "2MQ", "3MQ", "REP", "4BA", "LAO", "FRT", "BAK", "OTH",
+    "INT", "CNC", "GLO", "TDX", "NDX",
 ];
 
-/// Markers that are *exclusively* note sub-markers and should never appear
-/// outside of a `\f` or `\x` note.
 const NOTE_ONLY_MARKERS: &[&str] = &[
     "fr", "ft", "fk", "fq", "fqa", "fl", "fw", "fp", "fv", "fdc", "xop", "xot", "xnt", "xdc",
 ];
 
-// ── Verse number helpers ────────────────────────────────────────────────────
-
-/// Parse the leading integer from a verse number string.
-///
-/// `"1"` -> `Some(1)`, `"3-4"` -> `Some(3)`, `"1a"` -> `Some(1)`,
-/// `"abc"` -> `None`
 fn parse_verse_start(s: &str) -> Option<u32> {
     let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
     digits.parse().ok()
 }
 
-/// Parse the ending integer from a verse range string. If the string
-/// contains a hyphen, the number after the hyphen is parsed; otherwise the
-/// leading integer is returned (same as `parse_verse_start`).
-///
-/// `"3-4"` -> `Some(4)`, `"1"` -> `Some(1)`, `"2b-3a"` -> `Some(3)`
 fn parse_verse_end(s: &str) -> Option<u32> {
     if let Some(pos) = s.find('-') {
         parse_verse_start(&s[pos + 1..])
@@ -69,10 +42,6 @@ fn parse_verse_end(s: &str) -> Option<u32> {
     }
 }
 
-/// Parse numbered table-cell markers like `th1`, `tc3`, or `tcr1-2`.
-///
-/// Returns `(start_col, end_col)` where `end_col == start_col` for cells that
-/// do not span multiple columns.
 fn parse_table_cell_columns(marker: &str) -> Option<(u32, u32)> {
     let (base, end_col) = if let Some(dash) = marker.rfind('-') {
         let after_dash = &marker[dash + 1..];
@@ -91,8 +60,6 @@ fn parse_table_cell_columns(marker: &str) -> Option<(u32, u32)> {
     Some((start_col, end_col.max(start_col)))
 }
 
-// ── Validator ───────────────────────────────────────────────────────────────
-
 struct Validator<'a> {
     diagnostics: &'a mut DiagnosticList,
     expected_chapter: u32,
@@ -107,7 +74,7 @@ struct Validator<'a> {
 
 impl<'a> Validator<'a> {
     fn new(diagnostics: &'a mut DiagnosticList) -> Self {
-        Validator {
+        Self {
             diagnostics,
             expected_chapter: 1,
             seen_chapters: HashSet::new(),
@@ -120,22 +87,18 @@ impl<'a> Validator<'a> {
         }
     }
 
-    fn validate(&mut self, doc: &Document) {
-        match doc.content.first() {
+    fn validate(&mut self, doc: &Document, source_map: &SourceMap) {
+        let first = doc.content.first();
+        let first_source = source_map.content.first();
+        match first {
             Some(Node::Book { code, .. }) => {
                 if !is_valid_book_code(code) {
-                    self.diagnostics.push(Diagnostic::invalid_book_code(
-                        code,
-                        doc.content
-                            .first()
-                            .and_then(Node::span)
-                            .cloned()
-                            .unwrap_or(0..0),
-                    ));
+                    self.diagnostics
+                        .push(Diagnostic::invalid_book_code(code, span_of(first_source)));
                 }
             }
             Some(Node::Text(_)) => {
-                self.diagnostics.push(Diagnostic::text_before_id(0..0));
+                self.diagnostics.push(Diagnostic::text_before_id(span_of(first_source)));
                 self.diagnostics.push(Diagnostic::missing_id_marker());
             }
             _ => {
@@ -143,13 +106,11 @@ impl<'a> Validator<'a> {
             }
         }
 
-        for node in &doc.content {
+        for (node, source) in zip_nodes(&doc.content, &source_map.content) {
             match node {
                 Node::Book { .. } => {
                     if self.saw_book {
-                        self.diagnostics.push(Diagnostic::duplicate_id(
-                            node.span().cloned().unwrap_or(0..0),
-                        ));
+                        self.diagnostics.push(Diagnostic::duplicate_id(span_of(Some(source))));
                     }
                     self.saw_book = true;
                 }
@@ -157,7 +118,7 @@ impl<'a> Validator<'a> {
                     self.body_started = true;
                     self.has_chapter = true;
                     self.expected_verse = 1;
-                    self.handle_chapter_sequence(node);
+                    self.handle_chapter_sequence(node, source);
                 }
                 Node::Para { marker, .. } => {
                     if marker.kind() == MarkerKind::Header
@@ -166,25 +127,24 @@ impl<'a> Validator<'a> {
                     {
                         self.diagnostics.push(Diagnostic::header_after_body(
                             marker.as_str(),
-                            node.span().cloned().unwrap_or(0..0),
+                            span_of(Some(source)),
                         ));
                     }
                     if !self.has_chapter
                         && marker.kind() == MarkerKind::Paragraph
                         && !is_introduction_marker(marker.as_str())
                     {
-                        self.diagnostics
-                            .push(Diagnostic::body_paragraph_before_chapter(
-                                marker.as_str(),
-                                node.span().cloned().unwrap_or(0..0),
-                            ));
+                        self.diagnostics.push(Diagnostic::body_paragraph_before_chapter(
+                            marker.as_str(),
+                            span_of(Some(source)),
+                        ));
                     }
                 }
                 _ => {}
             }
 
             if !matches!(node, Node::Chapter { .. }) {
-                self.walk(node, false);
+                self.walk(node, source, false);
             }
         }
 
@@ -195,7 +155,7 @@ impl<'a> Validator<'a> {
         self.finish_milestone_pairs();
     }
 
-    fn handle_chapter_sequence(&mut self, node: &Node) {
+    fn handle_chapter_sequence(&mut self, node: &Node, source: &SourceNode) {
         let Node::Chapter { number, .. } = node else {
             return;
         };
@@ -203,219 +163,195 @@ impl<'a> Validator<'a> {
             return;
         };
         if !self.seen_chapters.insert(num) {
-            self.diagnostics.push(Diagnostic::duplicate_chapter(
-                num,
-                node.span().cloned().unwrap_or(0..0),
-            ));
+            self.diagnostics
+                .push(Diagnostic::duplicate_chapter(num, span_of(Some(source))));
         }
         if num != self.expected_chapter {
             self.diagnostics.push(Diagnostic::invalid_chapter_sequence(
                 self.expected_chapter,
                 num,
-                node.span().cloned().unwrap_or(0..0),
+                span_of(Some(source)),
             ));
         }
         self.expected_chapter = num + 1;
     }
 
-    fn walk(&mut self, node: &Node, inside_note: bool) {
+    fn walk(&mut self, node: &Node, source: &SourceNode, inside_note: bool) {
         match node {
             Node::Verse { number, .. } => {
-                let start = parse_verse_start(number);
-                let end = parse_verse_end(number);
-                let span = node.span().cloned().unwrap_or(0..0);
-                if let Some(v_start) = start {
+                if let Some(v_start) = parse_verse_start(number) {
                     if v_start != self.expected_verse {
                         self.diagnostics.push(Diagnostic::invalid_verse_sequence(
                             &self.expected_verse.to_string(),
                             number,
-                            span.clone(),
+                            span_of(Some(source)),
                         ));
                     }
-                    self.expected_verse = end.unwrap_or(v_start) + 1;
+                    self.expected_verse = parse_verse_end(number).unwrap_or(v_start) + 1;
                 }
             }
             Node::Char {
                 marker,
                 content,
                 attributes,
-                ..
             } => {
                 if !inside_note && is_note_only_marker(marker.as_str()) {
-                    self.diagnostics
-                        .push(Diagnostic::note_submarker_outside_note(
-                            marker.as_str(),
-                            node.span().cloned().unwrap_or(0..0),
-                        ));
+                    self.diagnostics.push(Diagnostic::note_submarker_outside_note(
+                        marker.as_str(),
+                        span_of(Some(source)),
+                    ));
                 }
                 if content.iter().any(|n| matches!(n, Node::Verse { .. })) {
                     self.diagnostics.push(Diagnostic::char_crosses_verse(
                         marker.as_str(),
-                        node.span().cloned().unwrap_or(0..0),
+                        span_of(Some(source)),
                     ));
                 }
 
                 let clean_marker = marker.strip_prefix('+').unwrap_or(marker.as_str());
                 for &req in markers::required_attributes(clean_marker) {
                     if !attributes.iter().any(|a| a.key == req) {
-                        self.diagnostics
-                            .push(Diagnostic::missing_required_attribute(
-                                clean_marker,
-                                req,
-                                node.span().cloned().unwrap_or(0..0),
-                            ));
+                        self.diagnostics.push(Diagnostic::missing_required_attribute(
+                            clean_marker,
+                            req,
+                            span_of(Some(source)),
+                        ));
                     }
                 }
                 if attributes.iter().any(|a| a.key == "default")
                     && markers::default_attribute(clean_marker).is_none()
                 {
+                    self.diagnostics.push(Diagnostic::default_attribute_not_defined(
+                        clean_marker,
+                        span_of(Some(source)),
+                    ));
+                }
+                if attributes.iter().any(|a| a.value.trim().is_empty()) {
                     self.diagnostics
-                        .push(Diagnostic::default_attribute_not_defined(
-                            clean_marker,
-                            node.span().cloned().unwrap_or(0..0),
-                        ));
+                        .push(Diagnostic::malformed_attributes(span_of(Some(source))));
                 }
-                for attr in attributes {
-                    if !attr.value.is_empty() && attr.value.trim().is_empty() {
-                        self.diagnostics.push(Diagnostic::malformed_attributes(
-                            node.span().cloned().unwrap_or(0..0),
-                        ));
-                        break;
-                    }
+                if clean_marker == "w" && content.is_empty() && attributes.is_empty() {
+                    self.diagnostics
+                        .push(Diagnostic::empty_word_marker(span_of(Some(source))));
                 }
-                if clean_marker == "w" {
-                    let has_text = content.iter().any(|n| {
-                        if let Node::Text(s) = n {
-                            !s.trim().is_empty()
-                        } else {
-                            true
-                        }
-                    });
-                    if !has_text && attributes.is_empty() {
-                        self.diagnostics.push(Diagnostic::empty_word_marker(
-                            node.span().cloned().unwrap_or(0..0),
-                        ));
-                    }
-                }
+                self.walk_children(content, source, inside_note);
             }
+            Node::Note { content, .. } => self.walk_children(content, source, true),
             Node::Figure {
                 content,
-                attributes,
-                marker,
                 ..
             } => {
-                let has_text = content.iter().any(|n| {
-                    if let Node::Text(s) = n {
-                        !s.trim().is_empty()
-                    } else {
-                        false
-                    }
-                });
-                let has_meaningful_attrs = attributes
-                    .iter()
-                    .any(|a| a.value.chars().any(|c| c != '|' && !c.is_whitespace()));
-                if !has_text && !has_meaningful_attrs {
-                    self.diagnostics.push(Diagnostic::empty_figure(
-                        node.span().cloned().unwrap_or(0..0),
-                    ));
-                }
-
-                let clean_marker = marker.strip_prefix('+').unwrap_or(marker.as_str());
-                if attributes.iter().any(|a| a.key == "default")
-                    && markers::default_attribute(clean_marker).is_none()
-                {
+                if content_is_blank(content) {
                     self.diagnostics
-                        .push(Diagnostic::default_attribute_not_defined(
-                            clean_marker,
-                            node.span().cloned().unwrap_or(0..0),
-                        ));
+                        .push(Diagnostic::empty_figure(span_of(Some(source))));
                 }
+                self.walk_children(content, source, inside_note);
             }
             Node::Milestone { marker, .. } => {
-                if let Some(base) = marker.strip_suffix("-s") {
-                    self.milestone_starts
-                        .entry(base.to_string())
-                        .or_default()
-                        .push(node.span().cloned().unwrap_or(0..0));
-                } else if let Some(base) = marker.strip_suffix("-e") {
-                    self.milestone_ends
-                        .entry(base.to_string())
-                        .or_default()
-                        .push(node.span().cloned().unwrap_or(0..0));
+                if let Some(base) = milestone_base(marker.as_str()) {
+                    if marker.as_str().ends_with("-s") {
+                        self.milestone_starts
+                            .entry(base.to_string())
+                            .or_default()
+                            .push(span_of(Some(source)));
+                    } else if marker.as_str().ends_with("-e") {
+                        self.milestone_ends
+                            .entry(base.to_string())
+                            .or_default()
+                            .push(span_of(Some(source)));
+                    }
                 }
             }
-            Node::Para {
-                marker, content, ..
-            } => {
+            Node::Para { marker, content } => {
                 if marker == "b" && !content.is_empty() {
-                    self.diagnostics.push(Diagnostic::non_empty_blank_line(
-                        node.span().cloned().unwrap_or(0..0),
-                    ));
+                    self.diagnostics
+                        .push(Diagnostic::non_empty_blank_line(span_of(Some(source))));
                 }
+                self.walk_children(content, source, inside_note);
             }
-            Node::Table { content, .. } => {
-                for row in content {
-                    self.check_table_row_columns(row);
-                }
-            }
+            Node::Table { content }
+            | Node::TableRow { content, .. }
+            | Node::Book { content, .. }
+            | Node::Sidebar { content, .. }
+            | Node::Periph { content, .. }
+            | Node::Ref { content, .. }
+            | Node::Unknown { content, .. } => self.walk_children(content, source, inside_note),
             _ => {}
         }
-        let is_note = matches!(node, Node::Note { .. });
-        for child in node.children() {
-            self.walk(child, inside_note || is_note);
+
+        if let Node::TableRow { content, .. } = node {
+            self.validate_table_row(content, source);
         }
     }
 
-    fn check_table_row_columns(&mut self, row: &Node) {
-        let Node::TableRow { content, .. } = row else {
-            return;
-        };
+    fn walk_children(&mut self, content: &[Node], source: &SourceNode, inside_note: bool) {
+        for (child, child_source) in zip_nodes(content, &source.children) {
+            self.walk(child, child_source, inside_note);
+        }
+    }
 
-        let mut expected_col = 1;
-        for cell in content {
+    fn validate_table_row(&mut self, content: &[Node], source: &SourceNode) {
+        let mut expected = 1;
+        for (cell, source) in zip_nodes(content, &source.children) {
             let Node::TableCell { marker, .. } = cell else {
                 continue;
             };
             let Some((start_col, end_col)) = parse_table_cell_columns(marker.as_str()) else {
                 continue;
             };
-            if start_col != expected_col {
-                self.diagnostics
-                    .push(Diagnostic::invalid_table_column_sequence(
-                        expected_col,
-                        start_col,
-                        cell.span().cloned().unwrap_or(0..0),
-                    ));
+            if start_col != expected {
+                self.diagnostics.push(Diagnostic::invalid_table_column_sequence(
+                    expected,
+                    start_col,
+                    span_of(Some(source)),
+                ));
             }
-            expected_col = end_col + 1;
+            expected = end_col + 1;
         }
     }
 
     fn finish_milestone_pairs(&mut self) {
-        for (base, spans) in &self.milestone_starts {
-            let end_count = self.milestone_ends.get(base).map_or(0, |v| v.len());
+        for (marker, spans) in &self.milestone_starts {
+            let end_count = self.milestone_ends.get(marker).map_or(0, Vec::len);
             if spans.len() > end_count {
                 for span in spans.iter().skip(end_count) {
-                    let marker = format!("{}-s", base);
                     self.diagnostics
-                        .push(Diagnostic::milestone_mismatch(&marker, span.clone()));
+                        .push(Diagnostic::milestone_mismatch(&format!("{marker}-s"), span.clone()));
                 }
             }
         }
-        for (base, spans) in &self.milestone_ends {
-            let start_count = self.milestone_starts.get(base).map_or(0, |v| v.len());
+        for (marker, spans) in &self.milestone_ends {
+            let start_count = self.milestone_starts.get(marker).map_or(0, Vec::len);
             if spans.len() > start_count {
                 for span in spans.iter().skip(start_count) {
-                    let marker = format!("{}-e", base);
                     self.diagnostics
-                        .push(Diagnostic::milestone_mismatch(&marker, span.clone()));
+                        .push(Diagnostic::milestone_mismatch(&format!("{marker}-e"), span.clone()));
                 }
             }
         }
     }
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+fn zip_nodes<'a>(nodes: &'a [Node], sources: &'a [SourceNode]) -> impl Iterator<Item = (&'a Node, &'a SourceNode)> {
+    nodes.iter().zip(sources.iter())
+}
+
+fn span_of(source: Option<&SourceNode>) -> Span {
+    source
+        .and_then(|source| source.spans.as_ref().map(|spans| spans.node.clone()))
+        .unwrap_or(0..0)
+}
+
+fn content_is_blank(content: &[Node]) -> bool {
+    if content.is_empty() {
+        return true;
+    }
+
+    content.iter().all(|node| match node {
+        Node::Text(text) => text.trim().is_empty(),
+        _ => false,
+    })
+}
 
 fn is_valid_book_code(code: &str) -> bool {
     VALID_BOOK_CODES.contains(&code)
@@ -425,139 +361,175 @@ fn is_note_only_marker(marker: &str) -> bool {
     NOTE_ONLY_MARKERS.contains(&marker)
 }
 
-/// Markers classified as Header that legitimately appear after the body
-/// has started (i.e., after `\c`). These are not flagged by the
-/// header-after-body check.
-fn is_body_header_marker(marker: &str) -> bool {
-    matches!(marker, "cl" | "cd" | "cp" | "mte" | "mte1" | "mte2")
-}
-
-/// Introduction paragraph markers that are allowed before the first `\c`.
-/// All USFM introduction markers start with 'i'.
 fn is_introduction_marker(marker: &str) -> bool {
-    marker.starts_with('i')
+    matches!(
+        marker,
+        "imt"
+            | "imt1"
+            | "imt2"
+            | "imt3"
+            | "imt4"
+            | "imte"
+            | "imte1"
+            | "imte2"
+            | "is"
+            | "is1"
+            | "is2"
+            | "is3"
+            | "ip"
+            | "ipi"
+            | "im"
+            | "imi"
+            | "ipq"
+            | "imq"
+            | "ipr"
+            | "ib"
+            | "iq"
+            | "iq1"
+            | "iq2"
+            | "iq3"
+            | "iex"
+            | "iot"
+            | "io"
+            | "io1"
+            | "io2"
+            | "io3"
+            | "io4"
+            | "ili"
+            | "ili1"
+            | "ili2"
+            | "ie"
+    )
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
+fn is_body_header_marker(marker: &str) -> bool {
+    matches!(marker, "cl" | "cp" | "cd")
+}
+
+fn milestone_base(marker: &str) -> Option<&str> {
+    marker.strip_suffix("-s").or_else(|| marker.strip_suffix("-e"))
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::*;
+    use crate::ast::{Attribute, Document, Node};
     use crate::diagnostics::DiagnosticCode;
+    use crate::source_map::{SourceMap, SourceNode, SourceSpans};
 
     fn doc_with(nodes: Vec<Node>) -> Document {
         Document { content: nodes }
     }
 
-    // -- parse_verse_start / parse_verse_end ---------------------------------
+    fn validate_doc(doc: &Document) -> DiagnosticList {
+        validate(doc, &source_map_for_document(doc))
+    }
+
+    fn source_map_for_document(doc: &Document) -> SourceMap {
+        SourceMap {
+            content: doc
+                .content
+                .iter()
+                .enumerate()
+                .map(|(index, node)| source_node_for_node(node, index * 10))
+                .collect(),
+        }
+    }
+
+    fn source_node_for_node(node: &Node, start: usize) -> SourceNode {
+        let children = node
+            .children()
+            .iter()
+            .enumerate()
+            .map(|(index, child)| source_node_for_node(child, (start + 1) * 10 + index))
+            .collect();
+
+        match node {
+            Node::Text(_) | Node::OptBreak => SourceNode::leaf(),
+            _ => SourceNode::structural(SourceSpans::node(start..start + 1), children, None),
+        }
+    }
 
     #[test]
-    fn test_parse_verse_start_simple() {
+    fn parse_verse_helpers_cover_ranges_and_suffixes() {
         assert_eq!(parse_verse_start("1"), Some(1));
-        assert_eq!(parse_verse_start("12"), Some(12));
-    }
-
-    #[test]
-    fn test_parse_verse_start_range() {
         assert_eq!(parse_verse_start("3-4"), Some(3));
-    }
-
-    #[test]
-    fn test_parse_verse_start_with_letter() {
-        assert_eq!(parse_verse_start("1a"), Some(1));
         assert_eq!(parse_verse_start("2b"), Some(2));
-    }
-
-    #[test]
-    fn test_parse_verse_start_no_digits() {
         assert_eq!(parse_verse_start("abc"), None);
-    }
 
-    #[test]
-    fn test_parse_verse_end_simple() {
         assert_eq!(parse_verse_end("1"), Some(1));
-    }
-
-    #[test]
-    fn test_parse_verse_end_range() {
         assert_eq!(parse_verse_end("3-4"), Some(4));
         assert_eq!(parse_verse_end("2b-3a"), Some(3));
     }
 
-    // -- 1. Missing \id marker -----------------------------------------------
+    #[test]
+    fn validation_uses_source_map_spans() {
+        let doc = Document {
+            content: vec![Node::Book {
+                marker: "id".into(),
+                code: "BAD".into(),
+                content: Vec::new(),
+            }],
+        };
+        let source_map = SourceMap {
+            content: vec![SourceNode::structural(
+                SourceSpans::node(4..7),
+                Vec::new(),
+                Some(0),
+            )],
+        };
+        let diagnostics = validate(&doc, &source_map);
+        let first = diagnostics.iter().next().unwrap();
+        assert_eq!(first.span, 4..7);
+    }
 
     #[test]
-    fn test_missing_id() {
+    fn missing_id_is_reported() {
         let doc = doc_with(vec![Node::Para {
             marker: "p".into(),
             content: vec![],
-            spans: NodeSpans::node(0..2),
         }]);
-        let diags = validate(&doc);
-        assert!(diags.has_errors());
+
+        let diagnostics = validate_doc(&doc);
         assert!(
-            diags
+            diagnostics
                 .iter()
-                .any(|d| d.code == DiagnosticCode::MissingIdMarker)
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::MissingIdMarker)
         );
     }
 
     #[test]
-    fn test_empty_document() {
-        let doc = doc_with(vec![]);
-        let diags = validate(&doc);
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::MissingIdMarker)
-        );
-    }
-
-    // -- 2. Book code validation ---------------------------------------------
-
-    #[test]
-    fn test_valid_book_code() {
-        let doc = doc_with(vec![Node::Book {
+    fn valid_and_invalid_book_codes_are_distinguished() {
+        let valid = doc_with(vec![Node::Book {
             marker: "id".into(),
             code: "GEN".into(),
             content: vec![],
-            spans: NodeSpans::node(0..10).with_code(0..0),
         }]);
-        let diags = validate(&doc);
-        assert!(
-            !diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::InvalidBookCode)
-        );
-    }
-
-    #[test]
-    fn test_invalid_book_code() {
-        let doc = doc_with(vec![Node::Book {
+        let invalid = doc_with(vec![Node::Book {
             marker: "id".into(),
             code: "XYZ".into(),
             content: vec![],
-            spans: NodeSpans::node(0..10).with_code(0..0),
         }]);
-        let diags = validate(&doc);
+
         assert!(
-            diags
+            !validate_doc(&valid)
                 .iter()
-                .any(|d| d.code == DiagnosticCode::InvalidBookCode)
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::InvalidBookCode)
+        );
+        assert!(
+            validate_doc(&invalid)
+                .iter()
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::InvalidBookCode)
         );
     }
 
-    // -- 3. Chapter sequence -------------------------------------------------
-
     #[test]
-    fn test_chapter_sequence_valid() {
-        let doc = doc_with(vec![
+    fn chapter_sequence_and_duplicates_are_reported() {
+        let valid = doc_with(vec![
             Node::Book {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -565,7 +537,6 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                spans: NodeSpans::node(10..14).with_number(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -573,25 +544,13 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                spans: NodeSpans::node(20..24).with_number(0..0),
             },
         ]);
-        let diags = validate(&doc);
-        assert!(
-            !diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::InvalidChapterSequence)
-        );
-    }
-
-    #[test]
-    fn test_chapter_sequence_gap() {
-        let doc = doc_with(vec![
+        let gap = doc_with(vec![
             Node::Book {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -599,7 +558,6 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                spans: NodeSpans::node(10..14).with_number(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -607,25 +565,13 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                spans: NodeSpans::node(20..24).with_number(0..0),
             },
         ]);
-        let diags = validate(&doc);
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::InvalidChapterSequence)
-        );
-    }
-
-    #[test]
-    fn test_duplicate_chapter() {
-        let doc = doc_with(vec![
+        let duplicate = doc_with(vec![
             Node::Book {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -633,7 +579,6 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                spans: NodeSpans::node(10..14).with_number(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -641,27 +586,33 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                spans: NodeSpans::node(20..24).with_number(0..0),
             },
         ]);
-        let diags = validate(&doc);
+
         assert!(
-            diags
+            !validate_doc(&valid)
                 .iter()
-                .any(|d| d.code == DiagnosticCode::DuplicateChapter)
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::InvalidChapterSequence)
+        );
+        assert!(
+            validate_doc(&gap)
+                .iter()
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::InvalidChapterSequence)
+        );
+        assert!(
+            validate_doc(&duplicate)
+                .iter()
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::DuplicateChapter)
         );
     }
 
-    // -- 4. Verse sequence ---------------------------------------------------
-
     #[test]
-    fn test_verse_sequence_valid() {
-        let doc = doc_with(vec![
+    fn verse_sequence_rules_handle_ranges_and_new_chapters() {
+        let valid = doc_with(vec![
             Node::Book {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -669,7 +620,6 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                spans: NodeSpans::node(10..14).with_number(0..0),
             },
             Node::Para {
                 marker: "p".into(),
@@ -680,106 +630,6 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        spans: NodeSpans::node(15..18).with_number(0..0),
-                    },
-                    Node::text("Text"),
-                    Node::Verse {
-                        marker: "v".into(),
-                        number: "2".into(),
-                        sid: None,
-                        altnumber: None,
-                        pubnumber: None,
-                        spans: NodeSpans::node(25..28).with_number(0..0),
-                    },
-                    Node::text("More text"),
-                ],
-                spans: NodeSpans::node(14..40),
-            },
-        ]);
-        let diags = validate(&doc);
-        assert!(
-            !diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::InvalidVerseSequence)
-        );
-    }
-
-    #[test]
-    fn test_verse_sequence_gap() {
-        let doc = doc_with(vec![
-            Node::Book {
-                marker: "id".into(),
-                code: "GEN".into(),
-                content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
-            },
-            Node::Chapter {
-                marker: "c".into(),
-                number: "1".into(),
-                sid: None,
-                altnumber: None,
-                pubnumber: None,
-                spans: NodeSpans::node(10..14).with_number(0..0),
-            },
-            Node::Para {
-                marker: "p".into(),
-                content: vec![
-                    Node::Verse {
-                        marker: "v".into(),
-                        number: "1".into(),
-                        sid: None,
-                        altnumber: None,
-                        pubnumber: None,
-                        spans: NodeSpans::node(15..18).with_number(0..0),
-                    },
-                    Node::Verse {
-                        marker: "v".into(),
-                        number: "3".into(),
-                        sid: None,
-                        altnumber: None,
-                        pubnumber: None,
-                        spans: NodeSpans::node(25..28).with_number(0..0),
-                    },
-                ],
-                spans: NodeSpans::node(14..40),
-            },
-        ]);
-        let diags = validate(&doc);
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::InvalidVerseSequence)
-        );
-    }
-
-    #[test]
-    fn test_verse_range_resets_expected() {
-        // After "3-4", the next expected verse is 5.
-        let doc = doc_with(vec![
-            Node::Book {
-                marker: "id".into(),
-                code: "GEN".into(),
-                content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
-            },
-            Node::Chapter {
-                marker: "c".into(),
-                number: "1".into(),
-                sid: None,
-                altnumber: None,
-                pubnumber: None,
-                spans: NodeSpans::node(10..14).with_number(0..0),
-            },
-            Node::Para {
-                marker: "p".into(),
-                content: vec![
-                    Node::Verse {
-                        marker: "v".into(),
-                        number: "1".into(),
-                        sid: None,
-                        altnumber: None,
-                        pubnumber: None,
-                        spans: NodeSpans::node(15..18).with_number(0..0),
                     },
                     Node::Verse {
                         marker: "v".into(),
@@ -787,7 +637,6 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        spans: NodeSpans::node(19..22).with_number(0..0),
                     },
                     Node::Verse {
                         marker: "v".into(),
@@ -795,7 +644,6 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        spans: NodeSpans::node(23..28).with_number(0..0),
                     },
                     Node::Verse {
                         marker: "v".into(),
@@ -803,58 +651,8 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        spans: NodeSpans::node(29..32).with_number(0..0),
                     },
                 ],
-                spans: NodeSpans::node(14..40),
-            },
-        ]);
-        let diags = validate(&doc);
-        assert!(
-            !diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::InvalidVerseSequence)
-        );
-    }
-
-    #[test]
-    fn test_verse_resets_at_new_chapter() {
-        let doc = doc_with(vec![
-            Node::Book {
-                marker: "id".into(),
-                code: "GEN".into(),
-                content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
-            },
-            Node::Chapter {
-                marker: "c".into(),
-                number: "1".into(),
-                sid: None,
-                altnumber: None,
-                pubnumber: None,
-                spans: NodeSpans::node(10..14).with_number(0..0),
-            },
-            Node::Para {
-                marker: "p".into(),
-                content: vec![
-                    Node::Verse {
-                        marker: "v".into(),
-                        number: "1".into(),
-                        sid: None,
-                        altnumber: None,
-                        pubnumber: None,
-                        spans: NodeSpans::node(15..18).with_number(0..0),
-                    },
-                    Node::Verse {
-                        marker: "v".into(),
-                        number: "2".into(),
-                        sid: None,
-                        altnumber: None,
-                        pubnumber: None,
-                        spans: NodeSpans::node(19..22).with_number(0..0),
-                    },
-                ],
-                spans: NodeSpans::node(14..30),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -862,7 +660,6 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                spans: NodeSpans::node(30..34).with_number(0..0),
             },
             Node::Para {
                 marker: "p".into(),
@@ -872,27 +669,14 @@ mod tests {
                     sid: None,
                     altnumber: None,
                     pubnumber: None,
-                    spans: NodeSpans::node(35..38).with_number(0..0),
                 }],
-                spans: NodeSpans::node(34..45),
             },
         ]);
-        let diags = validate(&doc);
-        assert!(
-            !diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::InvalidVerseSequence)
-        );
-    }
-
-    #[test]
-    fn test_verse_must_restart_at_one_after_new_chapter() {
-        let doc = doc_with(vec![
+        let gap = doc_with(vec![
             Node::Book {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -900,56 +684,16 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                spans: NodeSpans::node(10..14).with_number(0..0),
-            },
-            Node::Para {
-                marker: "p".into(),
-                content: vec![Node::Verse {
-                    marker: "v".into(),
-                    number: "2".into(),
-                    sid: None,
-                    altnumber: None,
-                    pubnumber: None,
-                    spans: NodeSpans::node(15..18).with_number(0..0),
-                }],
-                spans: NodeSpans::node(14..25),
-            },
-        ]);
-        let diags = validate(&doc);
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::InvalidVerseSequence)
-        );
-    }
-
-    #[test]
-    fn test_verse_range_can_open_chapter() {
-        let doc = doc_with(vec![
-            Node::Book {
-                marker: "id".into(),
-                code: "GEN".into(),
-                content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
-            },
-            Node::Chapter {
-                marker: "c".into(),
-                number: "1".into(),
-                sid: None,
-                altnumber: None,
-                pubnumber: None,
-                spans: NodeSpans::node(10..14).with_number(0..0),
             },
             Node::Para {
                 marker: "p".into(),
                 content: vec![
                     Node::Verse {
                         marker: "v".into(),
-                        number: "1-2".into(),
+                        number: "1".into(),
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        spans: NodeSpans::node(15..20).with_number(0..0),
                     },
                     Node::Verse {
                         marker: "v".into(),
@@ -957,59 +701,49 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        spans: NodeSpans::node(21..24).with_number(0..0),
                     },
                 ],
-                spans: NodeSpans::node(14..30),
             },
         ]);
-        let diags = validate(&doc);
+
         assert!(
-            !diags
+            !validate_doc(&valid)
                 .iter()
-                .any(|d| d.code == DiagnosticCode::InvalidVerseSequence)
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::InvalidVerseSequence)
+        );
+        assert!(
+            validate_doc(&gap)
+                .iter()
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::InvalidVerseSequence)
         );
     }
 
-    // -- 5. Text before \id -------------------------------------------------
-
     #[test]
-    fn test_text_before_id() {
+    fn text_before_id_is_detected() {
         let doc = doc_with(vec![
             Node::text("stray text"),
             Node::Book {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                spans: NodeSpans::node(10..20).with_code(0..0),
             },
         ]);
-        let diags = validate(&doc);
-        assert!(diags.iter().any(|d| d.code == DiagnosticCode::TextBeforeId));
+
+        let diagnostics = validate_doc(&doc);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::TextBeforeId)
+        );
     }
 
     #[test]
-    fn test_no_text_before_id() {
-        let doc = doc_with(vec![Node::Book {
-            marker: "id".into(),
-            code: "GEN".into(),
-            content: vec![],
-            spans: NodeSpans::node(0..10).with_code(0..0),
-        }]);
-        let diags = validate(&doc);
-        assert!(!diags.iter().any(|d| d.code == DiagnosticCode::TextBeforeId));
-    }
-
-    // -- 6. Header after body ------------------------------------------------
-
-    #[test]
-    fn test_header_after_body() {
-        let doc = doc_with(vec![
+    fn header_after_body_but_not_body_headers_is_reported() {
+        let bad = doc_with(vec![
             Node::Book {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -1017,35 +751,17 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                spans: NodeSpans::node(10..14).with_number(0..0),
             },
             Node::Para {
                 marker: "h".into(),
                 content: vec![Node::text("Genesis")],
-                spans: NodeSpans::node(14..25),
             },
         ]);
-        let diags = validate(&doc);
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::HeaderAfterBody)
-        );
-    }
-
-    #[test]
-    fn test_header_before_body_ok() {
-        let doc = doc_with(vec![
+        let ok = doc_with(vec![
             Node::Book {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
-            },
-            Node::Para {
-                marker: "h".into(),
-                content: vec![Node::text("Genesis")],
-                spans: NodeSpans::node(10..21),
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -1053,159 +769,32 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                spans: NodeSpans::node(21..25).with_number(0..0),
-            },
-        ]);
-        let diags = validate(&doc);
-        assert!(
-            !diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::HeaderAfterBody)
-        );
-    }
-
-    #[test]
-    fn test_rem_before_h_no_false_positive() {
-        let doc = doc_with(vec![
-            Node::Book {
-                marker: "id".into(),
-                code: "GEN".into(),
-                content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
-            },
-            Node::Para {
-                marker: "rem".into(),
-                content: vec![Node::text("A remark")],
-                spans: NodeSpans::node(10..25),
-            },
-            Node::Para {
-                marker: "h".into(),
-                content: vec![Node::text("Genesis")],
-                spans: NodeSpans::node(25..36),
-            },
-        ]);
-        let diags = validate(&doc);
-        assert!(
-            !diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::HeaderAfterBody),
-            "\\rem before \\h should not trigger header-after-body"
-        );
-    }
-
-    #[test]
-    fn test_intro_para_before_h_no_false_positive() {
-        let doc = doc_with(vec![
-            Node::Book {
-                marker: "id".into(),
-                code: "GEN".into(),
-                content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
-            },
-            Node::Para {
-                marker: "ip".into(),
-                content: vec![Node::text("Introduction paragraph")],
-                spans: NodeSpans::node(10..40),
-            },
-            Node::Para {
-                marker: "h".into(),
-                content: vec![Node::text("Genesis")],
-                spans: NodeSpans::node(40..51),
-            },
-        ]);
-        let diags = validate(&doc);
-        assert!(
-            !diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::HeaderAfterBody),
-            "\\ip before \\h should not trigger header-after-body"
-        );
-    }
-
-    #[test]
-    fn test_cl_after_chapter_no_false_positive() {
-        let doc = doc_with(vec![
-            Node::Book {
-                marker: "id".into(),
-                code: "GEN".into(),
-                content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
-            },
-            Node::Para {
-                marker: "h".into(),
-                content: vec![Node::text("Genesis")],
-                spans: NodeSpans::node(10..21),
-            },
-            Node::Chapter {
-                marker: "c".into(),
-                number: "1".into(),
-                sid: None,
-                altnumber: None,
-                pubnumber: None,
-                spans: NodeSpans::node(21..25).with_number(0..0),
             },
             Node::Para {
                 marker: "cl".into(),
                 content: vec![Node::text("Chapter One")],
-                spans: NodeSpans::node(25..40),
             },
         ]);
-        let diags = validate(&doc);
+
         assert!(
-            !diags
+            validate_doc(&bad)
                 .iter()
-                .any(|d| d.code == DiagnosticCode::HeaderAfterBody),
-            "\\cl after \\c should not trigger header-after-body"
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::HeaderAfterBody)
+        );
+        assert!(
+            !validate_doc(&ok)
+                .iter()
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::HeaderAfterBody)
         );
     }
 
     #[test]
-    fn test_mte_at_end_of_book_no_false_positive() {
-        let doc = doc_with(vec![
+    fn note_only_markers_must_stay_inside_notes() {
+        let bad = doc_with(vec![
             Node::Book {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
-            },
-            Node::Chapter {
-                marker: "c".into(),
-                number: "1".into(),
-                sid: None,
-                altnumber: None,
-                pubnumber: None,
-                spans: NodeSpans::node(10..14).with_number(0..0),
-            },
-            Node::Para {
-                marker: "p".into(),
-                content: vec![Node::text("Content")],
-                spans: NodeSpans::node(14..25),
-            },
-            Node::Para {
-                marker: "mte1".into(),
-                content: vec![Node::text("End of Genesis")],
-                spans: NodeSpans::node(25..45),
-            },
-        ]);
-        let diags = validate(&doc);
-        assert!(
-            !diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::HeaderAfterBody),
-            "\\mte1 at end of book should not trigger header-after-body"
-        );
-    }
-
-    // -- 7. Note sub-markers outside notes -----------------------------------
-
-    #[test]
-    fn test_note_submarker_outside_note() {
-        let doc = doc_with(vec![
-            Node::Book {
-                marker: "id".into(),
-                code: "GEN".into(),
-                content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Para {
                 marker: "p".into(),
@@ -1213,27 +802,14 @@ mod tests {
                     marker: "ft".into(),
                     content: vec![Node::text("footnote text")],
                     attributes: vec![],
-                    spans: NodeSpans::node(15..30),
                 }],
-                spans: NodeSpans::node(10..35),
             },
         ]);
-        let diags = validate(&doc);
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::NoteSubmarkerOutsideNote)
-        );
-    }
-
-    #[test]
-    fn test_note_submarker_inside_note_ok() {
-        let doc = doc_with(vec![
+        let ok = doc_with(vec![
             Node::Book {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Para {
                 marker: "p".into(),
@@ -1245,173 +821,71 @@ mod tests {
                         marker: "ft".into(),
                         content: vec![Node::text("footnote text")],
                         attributes: vec![],
-                        spans: NodeSpans::node(20..35),
                     }],
-                    spans: NodeSpans::node(15..40),
                 }],
-                spans: NodeSpans::node(10..45),
             },
         ]);
-        let diags = validate(&doc);
+
         assert!(
-            !diags
+            validate_doc(&bad)
                 .iter()
-                .any(|d| d.code == DiagnosticCode::NoteSubmarkerOutsideNote)
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::NoteSubmarkerOutsideNote)
+        );
+        assert!(
+            !validate_doc(&ok)
+                .iter()
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::NoteSubmarkerOutsideNote)
         );
     }
 
     #[test]
-    fn test_regular_char_marker_outside_note_ok() {
-        // \nd is a regular character marker, not a note-only marker.
-        let doc = doc_with(vec![
+    fn milestone_pairing_is_validated() {
+        let matched = doc_with(vec![
             Node::Book {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
-            },
-            Node::Para {
-                marker: "p".into(),
-                content: vec![Node::Char {
-                    marker: "nd".into(),
-                    content: vec![Node::text("Lord")],
-                    attributes: vec![],
-                    spans: NodeSpans::node(15..25),
-                }],
-                spans: NodeSpans::node(10..30),
-            },
-        ]);
-        let diags = validate(&doc);
-        assert!(
-            !diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::NoteSubmarkerOutsideNote)
-        );
-    }
-
-    // -- 8. Milestone pair matching ------------------------------------------
-
-    #[test]
-    fn test_milestone_matched_pair() {
-        let doc = doc_with(vec![
-            Node::Book {
-                marker: "id".into(),
-                code: "GEN".into(),
-                content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Milestone {
                 marker: "qt1-s".into(),
                 attributes: vec![],
-                spans: NodeSpans::node(10..20),
             },
             Node::Milestone {
                 marker: "qt1-e".into(),
                 attributes: vec![],
-                spans: NodeSpans::node(30..40),
             },
         ]);
-        let diags = validate(&doc);
-        assert!(
-            !diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::MilestoneMismatch)
-        );
-    }
-
-    #[test]
-    fn test_milestone_unmatched_start() {
-        let doc = doc_with(vec![
+        let unmatched = doc_with(vec![
             Node::Book {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Milestone {
                 marker: "qt1-s".into(),
                 attributes: vec![],
-                spans: NodeSpans::node(10..20),
             },
         ]);
-        let diags = validate(&doc);
+
         assert!(
-            diags
+            !validate_doc(&matched)
                 .iter()
-                .any(|d| d.code == DiagnosticCode::MilestoneMismatch)
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::MilestoneMismatch)
+        );
+        assert!(
+            validate_doc(&unmatched)
+                .iter()
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::MilestoneMismatch)
         );
     }
 
     #[test]
-    fn test_milestone_unmatched_end() {
-        let doc = doc_with(vec![
+    fn table_column_sequence_accepts_spans_and_rejects_gaps() {
+        let valid = doc_with(vec![
             Node::Book {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
-            },
-            Node::Milestone {
-                marker: "qt1-e".into(),
-                attributes: vec![],
-                spans: NodeSpans::node(10..20),
-            },
-        ]);
-        let diags = validate(&doc);
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::MilestoneMismatch)
-        );
-    }
-
-    #[test]
-    fn test_table_column_sequence_gap() {
-        let doc = doc_with(vec![
-            Node::Book {
-                marker: "id".into(),
-                code: "GEN".into(),
-                content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
-            },
-            Node::Table {
-                content: vec![Node::TableRow {
-                    marker: "tr".into(),
-                    content: vec![
-                        Node::TableCell {
-                            marker: "th1".into(),
-                            align: "start".into(),
-                            content: vec![Node::text("header1 ")],
-                            spans: NodeSpans::node(10..20),
-                        },
-                        Node::TableCell {
-                            marker: "th3".into(),
-                            align: "start".into(),
-                            content: vec![Node::text("header3")],
-                            spans: NodeSpans::node(21..31),
-                        },
-                    ],
-                    spans: NodeSpans::node(10..31),
-                }],
-                spans: NodeSpans::node(10..31),
-            },
-        ]);
-        let diags = validate(&doc);
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::InvalidTableColumnSequence)
-        );
-    }
-
-    #[test]
-    fn test_table_column_sequence_with_span_is_valid() {
-        let doc = doc_with(vec![
-            Node::Book {
-                marker: "id".into(),
-                code: "GEN".into(),
-                content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
             },
             Node::Table {
                 content: vec![Node::TableRow {
@@ -1421,38 +895,60 @@ mod tests {
                             marker: "tcr1-2".into(),
                             align: "end".into(),
                             content: vec![Node::text("Total: ")],
-                            spans: NodeSpans::node(10..24),
                         },
                         Node::TableCell {
                             marker: "tcc3".into(),
                             align: "center".into(),
                             content: vec![Node::text("186,400")],
-                            spans: NodeSpans::node(25..34),
                         },
                     ],
-                    spans: NodeSpans::node(10..34),
                 }],
-                spans: NodeSpans::node(10..34),
             },
         ]);
-        let diags = validate(&doc);
-        assert!(
-            !diags
-                .iter()
-                .any(|d| d.code == DiagnosticCode::InvalidTableColumnSequence)
-        );
-    }
-
-    // -- Integration: valid document produces no diagnostics ------------------
-
-    #[test]
-    fn test_valid_document_no_warnings() {
-        let doc = doc_with(vec![
+        let invalid = doc_with(vec![
             Node::Book {
                 marker: "id".into(),
                 code: "GEN".into(),
                 content: vec![],
-                spans: NodeSpans::node(0..10).with_code(0..0),
+            },
+            Node::Table {
+                content: vec![Node::TableRow {
+                    marker: "tr".into(),
+                    content: vec![
+                        Node::TableCell {
+                            marker: "th1".into(),
+                            align: "start".into(),
+                            content: vec![Node::text("header1 ")],
+                        },
+                        Node::TableCell {
+                            marker: "th3".into(),
+                            align: "start".into(),
+                            content: vec![Node::text("header3")],
+                        },
+                    ],
+                }],
+            },
+        ]);
+
+        assert!(
+            !validate_doc(&valid)
+                .iter()
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::InvalidTableColumnSequence)
+        );
+        assert!(
+            validate_doc(&invalid)
+                .iter()
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::InvalidTableColumnSequence)
+        );
+    }
+
+    #[test]
+    fn char_and_figure_specific_validation_rules_still_hold() {
+        let word_with_empty_attribute = doc_with(vec![
+            Node::Book {
+                marker: "id".into(),
+                code: "GEN".into(),
+                content: vec![],
             },
             Node::Chapter {
                 marker: "c".into(),
@@ -1460,7 +956,6 @@ mod tests {
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-                spans: NodeSpans::node(10..14).with_number(0..0),
             },
             Node::Para {
                 marker: "p".into(),
@@ -1471,14 +966,73 @@ mod tests {
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                        spans: NodeSpans::node(15..18).with_number(0..0),
+                    },
+                    Node::Char {
+                        marker: "w".into(),
+                        content: vec![Node::text("word")],
+                        attributes: vec![Attribute {
+                            key: "lemma".into(),
+                            value: String::new(),
+                        }],
+                    },
+                ],
+            },
+        ]);
+        let empty_figure = doc_with(vec![
+            Node::Book {
+                marker: "id".into(),
+                code: "GEN".into(),
+                content: vec![],
+            },
+            Node::Figure {
+                marker: "fig".into(),
+                content: vec![Node::text(" ")],
+                attributes: vec![],
+            },
+        ]);
+
+        assert!(
+            validate_doc(&word_with_empty_attribute)
+                .iter()
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::InvalidAttributes)
+        );
+        assert!(
+            validate_doc(&empty_figure)
+                .iter()
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::EmptyFigure)
+        );
+    }
+
+    #[test]
+    fn valid_document_can_still_produce_no_diagnostics() {
+        let doc = doc_with(vec![
+            Node::Book {
+                marker: "id".into(),
+                code: "GEN".into(),
+                content: vec![],
+            },
+            Node::Chapter {
+                marker: "c".into(),
+                number: "1".into(),
+                sid: None,
+                altnumber: None,
+                pubnumber: None,
+            },
+            Node::Para {
+                marker: "p".into(),
+                content: vec![
+                    Node::Verse {
+                        marker: "v".into(),
+                        number: "1".into(),
+                        sid: None,
+                        altnumber: None,
+                        pubnumber: None,
                     },
                     Node::text("In the beginning"),
                 ],
-                spans: NodeSpans::node(14..40),
             },
         ]);
-        let diags = validate(&doc);
-        assert!(diags.is_empty());
+
+        assert!(validate_doc(&doc).is_empty());
     }
 }

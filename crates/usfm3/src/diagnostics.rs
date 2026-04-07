@@ -1,4 +1,5 @@
-use crate::cst::{CstDocument, CstNodeId};
+use crate::cst::CstDocument;
+use serde::Serialize;
 
 /// Diagnostics and error reporting for the USFM 3.x parser.
 ///
@@ -10,7 +11,8 @@ use crate::cst::{CstDocument, CstNodeId};
 pub type Span = std::ops::Range<usize>;
 
 /// Severity level for diagnostics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Severity {
     Info,
     Warning,
@@ -28,7 +30,7 @@ impl std::fmt::Display for Severity {
 }
 
 /// Machine-readable diagnostic code.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum DiagnosticCode {
     // Parser-generated diagnostics
     UnknownMarker,
@@ -71,13 +73,14 @@ pub enum DiagnosticCode {
 }
 
 /// A diagnostic message with source location.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Diagnostic {
     pub severity: Severity,
     pub span: Span,
     pub message: String,
     pub code: DiagnosticCode,
-    pub anchor_cst: Option<CstNodeId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor_cst: Option<usize>,
 }
 
 impl std::fmt::Display for Diagnostic {
@@ -97,14 +100,17 @@ impl Diagnostic {
         }
     }
 
-    pub fn with_anchor_cst(mut self, anchor_cst: CstNodeId) -> Self {
+    pub fn with_anchor_cst(mut self, anchor_cst: usize) -> Self {
         self.anchor_cst = Some(anchor_cst);
         self
     }
 
-    pub fn resolved_anchor_cst(&self, cst: &CstDocument) -> Option<CstNodeId> {
+    pub fn resolved_anchor_cst(&self, cst: &CstDocument) -> Option<usize> {
         self.anchor_cst
-            .or_else(|| cst.covering_node_range(self.span.start, self.span.end))
+            .or_else(|| {
+                cst.covering_node_range(self.span.start, self.span.end)
+                    .map(|id| id.index())
+            })
     }
 
     /// Unknown/unrecognized marker encountered.
@@ -460,7 +466,7 @@ impl Diagnostic {
 }
 
 /// A collection of diagnostics produced during parsing and validation.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct DiagnosticList {
     diagnostics: Vec<Diagnostic>,
 }
@@ -517,6 +523,21 @@ impl DiagnosticList {
         self.diagnostics
             .iter()
             .any(|d| d.severity == Severity::Error)
+    }
+
+    /// Sort diagnostics in document order with stable tie-breaking.
+    pub fn sort_in_document_order(&mut self) {
+        let mut indexed = self
+            .diagnostics
+            .drain(..)
+            .enumerate()
+            .map(|(idx, diagnostic)| (idx, diagnostic))
+            .collect::<Vec<_>>();
+        indexed.sort_by_key(|(idx, diagnostic)| (diagnostic.span.start, diagnostic.span.end, *idx));
+        self.diagnostics = indexed
+            .drain(..)
+            .map(|(_, diagnostic)| diagnostic)
+            .collect();
     }
 
     /// Consume the list and return the underlying `Vec<Diagnostic>`.
