@@ -20,10 +20,20 @@ pub struct ParseOptions {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct AstDocument {
-    pub ast: ast::Document,
+pub struct AstDocument<'a> {
+    pub ast: ast::Document<'a>,
     pub source_map: source_map::SourceMap,
     pub diagnostics: Option<Vec<diagnostics::Diagnostic>>,
+}
+
+impl<'a> AstDocument<'a> {
+    pub fn into_owned(self) -> AstDocument<'static> {
+        AstDocument {
+            ast: self.ast.into_owned(),
+            source_map: self.source_map,
+            diagnostics: self.diagnostics,
+        }
+    }
 }
 
 pub struct ParsedDocument {
@@ -31,7 +41,7 @@ pub struct ParsedDocument {
     options: ParseOptions,
     tokens: OnceCell<Vec<lexer::TokenSpan>>,
     cst: OnceCell<cst::CstDocument>,
-    ast_document: OnceCell<AstDocument>,
+    ast_document: OnceCell<AstDocument<'static>>,
 }
 
 impl ParsedDocument {
@@ -55,12 +65,14 @@ impl ParsedDocument {
         self.cst.get_or_init(|| cst::parse(&self.source))
     }
 
-    pub fn ast_document(&self) -> &AstDocument {
-        self.ast_document
-            .get_or_init(|| builder::lower(self.cst(), self.options))
+    pub fn ast_document(&self) -> &AstDocument<'static> {
+        self.ast_document.get_or_init(|| {
+            let doc = builder::lower(self.cst(), self.options);
+            doc.into_owned()
+        })
     }
 
-    pub fn ast(&self) -> &ast::Document {
+    pub fn ast(&self) -> &ast::Document<'static> {
         &self.ast_document().ast
     }
 
@@ -105,15 +117,17 @@ pub fn parse_cst_owned(input: String) -> cst::CstDocument {
     cst::parse_owned(input)
 }
 
-pub fn parse_ast(input: &str, options: ParseOptions) -> AstDocument {
-    lower_cst(&parse_cst(input), options)
+pub fn parse_ast(input: &str, options: ParseOptions) -> AstDocument<'static> {
+    let cst = parse_cst(input);
+    lower_cst(&cst, options).into_owned()
 }
 
-pub fn parse_ast_owned(input: String, options: ParseOptions) -> AstDocument {
-    lower_cst(&parse_cst_owned(input), options)
+pub fn parse_ast_owned(input: String, options: ParseOptions) -> AstDocument<'static> {
+    let cst = parse_cst_owned(input);
+    lower_cst(&cst, options).into_owned()
 }
 
-pub fn lower_cst(document: &cst::CstDocument, options: ParseOptions) -> AstDocument {
+pub fn lower_cst(document: &cst::CstDocument, options: ParseOptions) -> AstDocument<'_> {
     builder::lower(document, options)
 }
 

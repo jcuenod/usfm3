@@ -3,12 +3,13 @@
 //! Walks the CST tree structure directly to produce an AST
 //! ([`crate::ast::Document`]) together with a list of diagnostics.
 
-use crate::ast::{Attribute, Document, Node};
+use crate::ast::{Attribute, ChapterData, CharData, Document, Node, VerseData};
 use crate::cst::{self, CstDocument, CstKind, CstNode, CstNodeId, MarkerTokenKind};
 use crate::diagnostics::{Diagnostic, DiagnosticList, Span};
 use crate::markers::{self, MarkerKind, MarkerName};
 use crate::source_map::{SourceMap, SourceNode, SourceSpans};
 use crate::{AstDocument, ParseOptions};
+use std::borrow::Cow;
 
 #[cfg(test)]
 use std::cell::Cell;
@@ -22,28 +23,28 @@ thread_local! {
 // Public API
 // ---------------------------------------------------------------------------
 
-pub type ParseResult = AstDocument;
+pub type ParseResult<'a> = AstDocument<'a>;
 
 #[derive(Debug, Clone)]
-struct SpannedNode {
-    node: Node,
+struct SpannedNode<'a> {
+    node: Node<'a>,
     source: SourceNode,
 }
 
-impl SpannedNode {
-    fn new(node: Node, source: SourceNode) -> Self {
+impl<'a> SpannedNode<'a> {
+    fn new(node: Node<'a>, source: SourceNode) -> Self {
         Self { node, source }
     }
 
-    fn text(s: impl Into<String>) -> Self {
-        Self::new(Node::text(s), SourceNode::leaf())
+    fn text(s: impl Into<Cow<'a, str>>) -> Self {
+        Self::new(Node::Text(s.into()), SourceNode::leaf())
     }
 
     fn optbreak() -> Self {
         Self::new(Node::OptBreak, SourceNode::leaf())
     }
 
-    fn marker(&self) -> Option<&str> {
+    fn marker(&self) -> Option<MarkerName> {
         self.node.marker()
     }
 
@@ -53,24 +54,27 @@ impl SpannedNode {
 }
 
 /// Parse a USFM source string into an eager AST document with diagnostics.
-pub fn parse(input: &str) -> AstDocument {
+pub fn parse(input: &str) -> AstDocument<'static> {
     let cst = cst::parse(input);
-    lower(&cst, ParseOptions { diagnostics: true })
+    lower(&cst, ParseOptions { diagnostics: true }).into_owned()
 }
 
-pub fn parse_owned(input: String) -> AstDocument {
+pub fn parse_owned(input: String) -> AstDocument<'static> {
     let cst = cst::parse_owned(input);
-    lower(&cst, ParseOptions { diagnostics: true })
+    lower(&cst, ParseOptions { diagnostics: true }).into_owned()
 }
 
-pub fn lower(document: &CstDocument, options: ParseOptions) -> AstDocument {
+pub fn lower<'a>(document: &'a CstDocument, options: ParseOptions) -> AstDocument<'a> {
     #[cfg(test)]
     LOWER_INVOCATIONS.with(|count| count.set(count.get() + 1));
 
     let mut ctx = LowerCtx::new(document, options.diagnostics);
     let root = document.node(document.root_id());
-    let content = ctx.lower_children(root);
+    let mut content = ctx.lower_children(root);
+    trim_trailing_text(&mut content);
+
     let (ast, source_map) = split_document(content);
+
     let diagnostics = if options.diagnostics {
         let mut diagnostics = ctx.diagnostics;
         diagnostics.extend(crate::validation::validate(&ast, &source_map));
@@ -87,7 +91,7 @@ pub fn lower(document: &CstDocument, options: ParseOptions) -> AstDocument {
 }
 
 #[cfg(test)]
-pub(crate) fn parse_from_cst(document: &CstDocument) -> AstDocument {
+pub(crate) fn parse_from_cst<'a>(document: &'a CstDocument) -> AstDocument<'a> {
     lower(document, ParseOptions { diagnostics: true })
 }
 
@@ -109,8 +113,8 @@ struct LowerCtx<'a> {
     doc: &'a CstDocument,
     collect_diagnostics: bool,
     diagnostics: DiagnosticList,
-    current_book_code: Option<String>,
-    current_chapter: Option<String>,
+    current_book_code: Option<Cow<'a, str>>,
+    current_chapter: Option<Cow<'a, str>>,
     seen_id: bool,
     text_scratch: String,
 }
@@ -141,11 +145,11 @@ impl<'a> LowerCtx<'a> {
     }
 
     /// Lower all structural (non-leaf) children of a CST node into AST nodes.
-    fn lower_children(&mut self, parent: &CstNode) -> Vec<SpannedNode> {
+    fn lower_children(&mut self, parent: &CstNode) -> Vec<SpannedNode<'a>> {
         let parent_is_root = matches!(parent.kind, CstKind::Document);
         let parent_is_table = matches!(parent.kind, CstKind::Table);
         let mut verse_warned = false;
-        let mut result: Vec<SpannedNode> = Vec::new();
+        let mut result: Vec<SpannedNode<'a>> = Vec::new();
         let mut child_id = parent.first_child;
         while let Some(id) = child_id {
             let node = self.doc.node(id);
@@ -179,7 +183,7 @@ impl<'a> LowerCtx<'a> {
                     );
                 }
                 let verse_span = node.span.clone();
-                let mut para_children: Vec<SpannedNode> = Vec::new();
+                let mut para_children: Vec<SpannedNode<'a>> = Vec::new();
                 let mut after_verse = true;
                 if let Some(v) = self.lower_verse(id, node) {
                     para_children.push(v);
@@ -219,7 +223,14 @@ impl<'a> LowerCtx<'a> {
                                     && !prev.ends_with(' ')
                                     && !prev.ends_with('\u{00a0}')
                                 {
-                                    prev.push(' ');
+                                    match prev {
+                                        Cow::Borrowed(s) => {
+                                            let mut owned = s.to_string();
+                                            owned.push(' ');
+                                            *prev = Cow::Owned(owned);
+                                        }
+                                        Cow::Owned(s) => s.push(' '),
+                                    }
                                 }
                             }
                             _ => {}
@@ -247,7 +258,7 @@ impl<'a> LowerCtx<'a> {
                 // ca/cp/va/vp metadata absorption
                 let maybe_marker = ast_node.marker();
                 if let Some(m) = maybe_marker
-                    && matches!(m, "ca" | "cp" | "va" | "vp")
+                    && matches!(m.as_str(), "ca" | "cp" | "va" | "vp")
                     && let Some(text) = extract_node_text(&ast_node)
                 {
                     // Remove preceding whitespace-only text node
@@ -256,11 +267,11 @@ impl<'a> LowerCtx<'a> {
                     {
                         result.pop();
                     }
-                    match m {
-                        "ca" => Self::set_chapter_altnumber(&mut result, text),
-                        "cp" => Self::set_chapter_pubnumber(&mut result, text),
-                        "va" => Self::set_verse_altnumber(&mut result, text),
-                        "vp" => Self::set_verse_pubnumber(&mut result, text),
+                    match m.as_str() {
+                        "ca" => Self::set_chapter_altnumber(&mut result, text.into()),
+                        "cp" => Self::set_chapter_pubnumber(&mut result, text.into()),
+                        "va" => Self::set_verse_altnumber(&mut result, text.into()),
+                        "vp" => Self::set_verse_pubnumber(&mut result, text.into()),
                         _ => unreachable!(),
                     }
                     continue;
@@ -296,7 +307,7 @@ impl<'a> LowerCtx<'a> {
     }
 
     /// Lower a single structural CST node into an AST node.
-    fn lower_structural(&mut self, id: CstNodeId, node: &CstNode) -> Option<SpannedNode> {
+    fn lower_structural(&mut self, id: CstNodeId, node: &'a CstNode) -> Option<SpannedNode<'a>> {
         match &node.kind {
             CstKind::Book { marker } => self.lower_book(id, node, marker),
             CstKind::Chapter { .. } => self.lower_chapter(id, node),
@@ -330,10 +341,10 @@ impl<'a> LowerCtx<'a> {
         _parent_id: CstNodeId,
         is_block: bool,
         close_span: &mut Option<Span>,
-        attributes: &mut Vec<Attribute>,
+        attributes: &mut Vec<Attribute<'a>>,
         marker_name: &str,
-    ) -> Vec<SpannedNode> {
-        let mut children: Vec<SpannedNode> = Vec::new();
+    ) -> Vec<SpannedNode<'a>> {
+        let mut children: Vec<SpannedNode<'a>> = Vec::new();
         let mut after_open = true;
         let mut after_close = false;
         let mut pending_space = false;
@@ -446,7 +457,7 @@ impl<'a> LowerCtx<'a> {
                         // ca/cp/va/vp metadata absorption
                         let maybe_marker = ast_child.marker();
                         if let Some(m) = maybe_marker
-                            && matches!(m, "ca" | "cp" | "va" | "vp")
+                            && matches!(m.as_str(), "ca" | "cp" | "va" | "vp")
                             && let Some(text) = extract_node_text(&ast_child)
                         {
                             if let Some(Node::Text(t)) = children.last().map(|node| &node.node)
@@ -454,11 +465,11 @@ impl<'a> LowerCtx<'a> {
                             {
                                 children.pop();
                             }
-                            match m {
-                                "ca" => Self::set_chapter_altnumber(&mut children, text),
-                                "cp" => Self::set_chapter_pubnumber(&mut children, text),
-                                "va" => Self::set_verse_altnumber(&mut children, text),
-                                "vp" => Self::set_verse_pubnumber(&mut children, text),
+                            match m.as_str() {
+                                "ca" => Self::set_chapter_altnumber(&mut children, text.into()),
+                                "cp" => Self::set_chapter_pubnumber(&mut children, text.into()),
+                                "va" => Self::set_verse_altnumber(&mut children, text.into()),
+                                "vp" => Self::set_verse_pubnumber(&mut children, text.into()),
                                 _ => unreachable!(),
                             }
                             // Skip whitespace after consumed metadata
@@ -520,9 +531,9 @@ impl<'a> LowerCtx<'a> {
     fn lower_book(
         &mut self,
         id: CstNodeId,
-        node: &CstNode,
+        node: &'a CstNode,
         marker: &MarkerName,
-    ) -> Option<SpannedNode> {
+    ) -> Option<SpannedNode<'a>> {
         if marker == "id" {
             if self.seen_id {
                 self.push_diagnostic(
@@ -533,9 +544,9 @@ impl<'a> LowerCtx<'a> {
             self.seen_id = true;
         }
 
-        let mut code = String::new();
+        let mut code = Cow::Borrowed("");
         let mut code_span: Option<Span> = None;
-        let mut children: Vec<SpannedNode> = Vec::new();
+        let mut children: Vec<SpannedNode<'a>> = Vec::new();
         let mut after_open = true;
         let mut got_code = false;
 
@@ -563,16 +574,18 @@ impl<'a> LowerCtx<'a> {
                     if !got_code {
                         got_code = true;
                         let (c, rest) = split_first_word(text);
-                        code = c.to_string();
-                        self.current_book_code = Some(code.clone());
+                        let book_code = Cow::Borrowed(c);
+                        self.current_book_code = Some(book_code.clone());
+                        code = book_code;
                         code_span = Some(child.span.start..child.span.start + c.len());
                         if !rest.is_empty() {
-                            let rest = if rest.contains('~') {
-                                rest.replace('~', "\u{00a0}")
+                            if rest.contains('~') {
+                                children.push(SpannedNode::text(Cow::Owned(
+                                    rest.replace('~', "\u{00a0}"),
+                                )));
                             } else {
-                                rest.to_string()
+                                children.push(SpannedNode::text(Cow::Borrowed(rest)));
                             };
-                            children.push(SpannedNode::text(&rest));
                         }
                     } else {
                         self.append_normalized_text(&mut children, text);
@@ -598,7 +611,7 @@ impl<'a> LowerCtx<'a> {
         let (content, children) = split_nodes(children);
         Some(SpannedNode::new(
             Node::Book {
-                marker: marker.clone(),
+                marker: *marker,
                 code,
                 content,
             },
@@ -606,9 +619,10 @@ impl<'a> LowerCtx<'a> {
         ))
     }
 
-    fn lower_chapter(&mut self, id: CstNodeId, node: &CstNode) -> Option<SpannedNode> {
+    fn lower_chapter(&mut self, id: CstNodeId, node: &CstNode) -> Option<SpannedNode<'a>> {
         let marker_span = self.find_marker_span(node);
-        let (number, number_span) = self.find_text_child(node);
+        let (number_str, number_span) = self.find_text_child(node);
+        let number: Cow<'a, str> = Cow::Owned(number_str);
 
         if number.is_empty() {
             self.push_diagnostic(
@@ -624,7 +638,11 @@ impl<'a> LowerCtx<'a> {
 
         self.current_chapter = Some(number.clone());
         let book = self.current_book_code.as_deref().unwrap_or("");
-        let sid = Some(format!("{} {}", book, strip_leading_zeros(&number)));
+        let sid = Some(Cow::Owned(format!(
+            "{} {}",
+            book,
+            strip_leading_zeros(&number)
+        )));
 
         let mut spans = SourceSpans::node(marker_span);
         if let Some(ns) = number_span {
@@ -632,20 +650,21 @@ impl<'a> LowerCtx<'a> {
         }
 
         Some(SpannedNode::new(
-            Node::Chapter {
+            Node::Chapter(Box::new(ChapterData {
                 marker: "c".into(),
                 number,
                 sid,
                 altnumber: None,
                 pubnumber: None,
-            },
+            })),
             SourceNode::structural(spans, Vec::new(), Some(id.index())),
         ))
     }
 
-    fn lower_verse(&mut self, id: CstNodeId, node: &CstNode) -> Option<SpannedNode> {
+    fn lower_verse(&mut self, id: CstNodeId, node: &CstNode) -> Option<SpannedNode<'a>> {
         let marker_span = self.find_marker_span(node);
-        let (number, number_span) = self.find_text_child(node);
+        let (number_str, number_span) = self.find_text_child(node);
+        let number: Cow<'a, str> = Cow::Owned(number_str);
 
         if number.is_empty() {
             self.push_diagnostic(
@@ -661,12 +680,12 @@ impl<'a> LowerCtx<'a> {
 
         let book = self.current_book_code.as_deref().unwrap_or("");
         let ch = self.current_chapter.as_deref().unwrap_or("");
-        let sid = Some(format!(
+        let sid = Some(Cow::Owned(format!(
             "{} {}:{}",
             book,
             strip_leading_zeros(ch),
             strip_leading_zeros(&number)
-        ));
+        )));
 
         let mut spans = SourceSpans::node(marker_span);
         if let Some(ns) = number_span {
@@ -674,13 +693,13 @@ impl<'a> LowerCtx<'a> {
         }
 
         Some(SpannedNode::new(
-            Node::Verse {
+            Node::Verse(Box::new(VerseData {
                 marker: "v".into(),
                 number,
                 sid,
                 altnumber: None,
                 pubnumber: None,
-            },
+            })),
             SourceNode::structural(spans, Vec::new(), Some(id.index())),
         ))
     }
@@ -690,7 +709,7 @@ impl<'a> LowerCtx<'a> {
         id: CstNodeId,
         node: &CstNode,
         marker: &MarkerName,
-    ) -> Option<SpannedNode> {
+    ) -> Option<SpannedNode<'a>> {
         // \usfm marker — discard entirely (version string is absorbed)
         if marker == "usfm" {
             return None;
@@ -722,7 +741,7 @@ impl<'a> LowerCtx<'a> {
         let (content, children) = split_nodes(children);
         Some(SpannedNode::new(
             Node::Para {
-                marker: marker.clone(),
+                marker: *marker,
                 content,
             },
             SourceNode::structural(
@@ -738,7 +757,7 @@ impl<'a> LowerCtx<'a> {
         id: CstNodeId,
         node: &CstNode,
         marker: &MarkerName,
-    ) -> Option<SpannedNode> {
+    ) -> Option<SpannedNode<'a>> {
         let nested = self.is_nested_marker(node);
 
         if marker == "addpn" {
@@ -797,7 +816,7 @@ impl<'a> LowerCtx<'a> {
                         Node::Ref {
                             content,
                             attributes: vec![Attribute {
-                                key: "loc".to_string(),
+                                key: Cow::Borrowed("loc"),
                                 value: loc.clone(),
                             }],
                         },
@@ -815,27 +834,27 @@ impl<'a> LowerCtx<'a> {
             };
             let (content, children) = split_nodes(final_children);
             return Some(SpannedNode::new(
-                Node::Char {
-                    marker: marker.clone(),
+                Node::Char(Box::new(CharData {
+                    marker: *marker,
                     content,
                     attributes,
-                },
+                })),
                 SourceNode::structural(spans, children, Some(id.index())),
             ));
         }
 
         let (content, children) = split_nodes(children);
         Some(SpannedNode::new(
-            Node::Char {
-                marker: marker.clone(),
+            Node::Char(Box::new(CharData {
+                marker: *marker,
                 content,
                 attributes,
-            },
+            })),
             SourceNode::structural(spans, children, Some(id.index())),
         ))
     }
 
-    fn lower_ref(&mut self, id: CstNodeId, node: &CstNode) -> Option<SpannedNode> {
+    fn lower_ref(&mut self, id: CstNodeId, node: &CstNode) -> Option<SpannedNode<'a>> {
         let ref_marker = MarkerName::from("ref");
         let mut close_span = None;
         let mut attributes = Vec::new();
@@ -864,11 +883,11 @@ impl<'a> LowerCtx<'a> {
         id: CstNodeId,
         node: &CstNode,
         marker: &MarkerName,
-    ) -> Option<SpannedNode> {
+    ) -> Option<SpannedNode<'a>> {
         let mut close_span = None;
         let mut attributes = Vec::new();
         let mut caller = None;
-        let mut children: Vec<SpannedNode> = Vec::new();
+        let mut children: Vec<SpannedNode<'a>> = Vec::new();
         let mut after_open = true;
         let mut after_close = false;
         let mut pending_space = false;
@@ -941,19 +960,20 @@ impl<'a> LowerCtx<'a> {
                         let trimmed = text.trim_start();
                         if !trimmed.is_empty() {
                             let (c, rest) = split_first_word(trimmed);
-                            caller = Some(c.to_string());
+                            caller = Some(Cow::Borrowed(c));
                             if !rest.is_empty() {
-                                let rest = if rest.contains('~') {
-                                    rest.replace('~', "\u{00a0}")
+                                if rest.contains('~') {
+                                    children.push(SpannedNode::text(Cow::Owned(
+                                        rest.replace('~', "\u{00a0}"),
+                                    )));
                                 } else {
-                                    rest.to_string()
-                                };
-                                children.push(SpannedNode::text(&rest));
+                                    children.push(SpannedNode::text(Cow::Borrowed(rest)));
+                                }
                             }
-                            continue;
                         }
+                    } else {
+                        self.append_normalized_text(&mut children, text);
                     }
-                    self.append_normalized_text(&mut children, text);
                     continue;
                 }
                 _ if !child.kind.is_leaf() => {
@@ -990,8 +1010,8 @@ impl<'a> LowerCtx<'a> {
         let (content, children) = split_nodes(cat_children);
         Some(SpannedNode::new(
             Node::Note {
-                marker: marker.clone(),
-                caller: caller.unwrap_or_default(),
+                marker: *marker,
+                caller: caller.unwrap_or(Cow::Borrowed("")),
                 category,
                 content,
             },
@@ -1004,7 +1024,7 @@ impl<'a> LowerCtx<'a> {
         id: CstNodeId,
         node: &CstNode,
         marker: &MarkerName,
-    ) -> Option<SpannedNode> {
+    ) -> Option<SpannedNode<'a>> {
         let mut attributes = Vec::new();
         let mut has_milestone_end = false;
 
@@ -1035,7 +1055,7 @@ impl<'a> LowerCtx<'a> {
 
         Some(SpannedNode::new(
             Node::Milestone {
-                marker: marker.clone(),
+                marker: *marker,
                 attributes,
             },
             SourceNode::structural(
@@ -1051,7 +1071,7 @@ impl<'a> LowerCtx<'a> {
         id: CstNodeId,
         node: &CstNode,
         marker: &MarkerName,
-    ) -> Option<SpannedNode> {
+    ) -> Option<SpannedNode<'a>> {
         let mut close_span = None;
         let mut attributes = Vec::new();
         let children = self.collect_content(
@@ -1073,7 +1093,7 @@ impl<'a> LowerCtx<'a> {
         let (content, children) = split_nodes(children);
         Some(SpannedNode::new(
             Node::Figure {
-                marker: marker.clone(),
+                marker: *marker,
                 content,
                 attributes,
             },
@@ -1086,7 +1106,7 @@ impl<'a> LowerCtx<'a> {
         id: CstNodeId,
         node: &CstNode,
         marker: &MarkerName,
-    ) -> Option<SpannedNode> {
+    ) -> Option<SpannedNode<'a>> {
         let mut close_span = None;
         let mut attributes = Vec::new();
         let children = self.collect_content(
@@ -1115,7 +1135,7 @@ impl<'a> LowerCtx<'a> {
         let (content, children) = split_nodes(cat_children);
         Some(SpannedNode::new(
             Node::Sidebar {
-                marker: marker.clone(),
+                marker: *marker,
                 category,
                 content,
             },
@@ -1128,11 +1148,11 @@ impl<'a> LowerCtx<'a> {
         id: CstNodeId,
         node: &CstNode,
         marker: &MarkerName,
-    ) -> Option<SpannedNode> {
+    ) -> Option<SpannedNode<'a>> {
         let mut _close_span = None;
         let mut attributes = Vec::new();
-        let mut alt: Option<String> = None;
-        let mut children: Vec<SpannedNode> = Vec::new();
+        let mut alt: Option<Cow<'a, str>> = None;
+        let mut children: Vec<SpannedNode<'a>> = Vec::new();
         let mut after_open = true;
 
         let mut child_id_opt = node.first_child;
@@ -1172,7 +1192,7 @@ impl<'a> LowerCtx<'a> {
                     if alt.is_none() {
                         let trimmed = text.trim();
                         if !trimmed.is_empty() {
-                            alt = Some(trimmed.to_string());
+                            alt = Some(Cow::Borrowed(trimmed));
                         }
                         continue;
                     }
@@ -1205,7 +1225,7 @@ impl<'a> LowerCtx<'a> {
         ))
     }
 
-    fn lower_table(&mut self, id: CstNodeId, node: &CstNode) -> Option<SpannedNode> {
+    fn lower_table(&mut self, id: CstNodeId, node: &CstNode) -> Option<SpannedNode<'a>> {
         let children = self.lower_children(node);
         if children.is_empty() {
             return None;
@@ -1226,7 +1246,7 @@ impl<'a> LowerCtx<'a> {
         id: CstNodeId,
         node: &CstNode,
         marker: &MarkerName,
-    ) -> Option<SpannedNode> {
+    ) -> Option<SpannedNode<'a>> {
         let mut close_span = None;
         let mut attributes = Vec::new();
         let mut children = self.collect_content(
@@ -1249,7 +1269,7 @@ impl<'a> LowerCtx<'a> {
         let (content, children) = split_nodes(children);
         Some(SpannedNode::new(
             Node::TableRow {
-                marker: marker.clone(),
+                marker: *marker,
                 content,
             },
             SourceNode::structural(
@@ -1265,7 +1285,7 @@ impl<'a> LowerCtx<'a> {
         id: CstNodeId,
         node: &CstNode,
         marker: &MarkerName,
-    ) -> Option<SpannedNode> {
+    ) -> Option<SpannedNode<'a>> {
         let mut close_span = None;
         let mut attributes = Vec::new();
         let children = self.collect_content(
@@ -1294,17 +1314,17 @@ impl<'a> LowerCtx<'a> {
         };
         let base = without_span.trim_end_matches(|c: char| c.is_ascii_digit());
         let align = if base.ends_with('r') {
-            "end".to_string()
+            Cow::Borrowed("end")
         } else if base == "thc" || base == "tcc" {
-            "center".to_string()
+            Cow::Borrowed("center")
         } else {
-            "start".to_string()
+            Cow::Borrowed("start")
         };
 
         let (content, children) = split_nodes(children);
         Some(SpannedNode::new(
             Node::TableCell {
-                marker: marker.clone(),
+                marker: *marker,
                 align,
                 content,
             },
@@ -1317,7 +1337,7 @@ impl<'a> LowerCtx<'a> {
         id: CstNodeId,
         node: &CstNode,
         marker: &MarkerName,
-    ) -> Option<SpannedNode> {
+    ) -> Option<SpannedNode<'a>> {
         // Check if this is a self-closing \zfoo\* pattern (milestone-like)
         if self.has_milestone_end_child(node) && self.has_no_content_children(node) {
             let mut attributes = Vec::new();
@@ -1338,7 +1358,7 @@ impl<'a> LowerCtx<'a> {
             }
             return Some(SpannedNode::new(
                 Node::Milestone {
-                    marker: marker.clone(),
+                    marker: *marker,
                     attributes,
                 },
                 SourceNode::structural(
@@ -1377,7 +1397,7 @@ impl<'a> LowerCtx<'a> {
         let (content, children) = split_nodes(children);
         Some(SpannedNode::new(
             Node::Unknown {
-                marker: marker.clone(),
+                marker: *marker,
                 content,
             },
             SourceNode::structural(spans, children, Some(id.index())),
@@ -1577,20 +1597,27 @@ impl<'a> LowerCtx<'a> {
     }
 
     /// Append text to a children vec, merging with previous Text node.
-    fn append_text_to(children: &mut Vec<SpannedNode>, text: &str) {
+    fn append_text_to(children: &mut Vec<SpannedNode<'a>>, text: &str) {
         if let Some(SpannedNode {
             node: Node::Text(prev),
             ..
         }) = children.last_mut()
         {
-            prev.push_str(text);
+            match prev {
+                Cow::Borrowed(s) => {
+                    let mut owned = s.to_string();
+                    owned.push_str(text);
+                    *prev = Cow::Owned(owned);
+                }
+                Cow::Owned(s) => s.push_str(text),
+            }
         } else {
-            children.push(SpannedNode::text(text));
+            children.push(SpannedNode::text(Cow::Owned(text.to_string())));
         }
     }
 
     /// Normalize and append text (handle ~, \r, //, space collapse).
-    fn append_normalized_text(&mut self, children: &mut Vec<SpannedNode>, text: &str) {
+    fn append_normalized_text(&mut self, children: &mut Vec<SpannedNode<'a>>, text: &str) {
         if text.is_empty() {
             return;
         }
@@ -1654,37 +1681,37 @@ impl<'a> LowerCtx<'a> {
     // Alt/pub number setters
     // -----------------------------------------------------------------
 
-    fn set_chapter_altnumber(children: &mut Vec<SpannedNode>, value: String) {
+    fn set_chapter_altnumber(children: &mut Vec<SpannedNode<'a>>, value: Cow<'a, str>) {
         for node in children.iter_mut().rev() {
-            if let Node::Chapter { altnumber, .. } = &mut node.node {
-                *altnumber = Some(value);
+            if let Node::Chapter(data) = &mut node.node {
+                data.altnumber = Some(value);
                 return;
             }
         }
     }
 
-    fn set_chapter_pubnumber(children: &mut Vec<SpannedNode>, value: String) {
+    fn set_chapter_pubnumber(children: &mut Vec<SpannedNode<'a>>, value: Cow<'a, str>) {
         for node in children.iter_mut().rev() {
-            if let Node::Chapter { pubnumber, .. } = &mut node.node {
-                *pubnumber = Some(value);
+            if let Node::Chapter(data) = &mut node.node {
+                data.pubnumber = Some(value);
                 return;
             }
         }
     }
 
-    fn set_verse_altnumber(children: &mut Vec<SpannedNode>, value: String) {
+    fn set_verse_altnumber(children: &mut Vec<SpannedNode<'a>>, value: Cow<'a, str>) {
         for node in children.iter_mut().rev() {
-            if let Node::Verse { altnumber, .. } = &mut node.node {
-                *altnumber = Some(value);
+            if let Node::Verse(data) = &mut node.node {
+                data.altnumber = Some(value);
                 return;
             }
         }
     }
 
-    fn set_verse_pubnumber(children: &mut Vec<SpannedNode>, value: String) {
+    fn set_verse_pubnumber(children: &mut Vec<SpannedNode<'a>>, value: Cow<'a, str>) {
         for node in children.iter_mut().rev() {
-            if let Node::Verse { pubnumber, .. } = &mut node.node {
-                *pubnumber = Some(value);
+            if let Node::Verse(data) = &mut node.node {
+                data.pubnumber = Some(value);
                 return;
             }
         }
@@ -1708,14 +1735,14 @@ impl<'a> Iterator for ChildIter<'a> {
     }
 }
 
-fn split_nodes(nodes: Vec<SpannedNode>) -> (Vec<Node>, Vec<SourceNode>) {
+fn split_nodes<'a>(nodes: Vec<SpannedNode<'a>>) -> (Vec<Node<'a>>, Vec<SourceNode>) {
     nodes
         .into_iter()
         .map(|node| (node.node, node.source))
         .unzip()
 }
 
-fn split_document(nodes: Vec<SpannedNode>) -> (Document, SourceMap) {
+fn split_document<'a>(nodes: Vec<SpannedNode<'a>>) -> (Document<'a>, SourceMap) {
     let (content, source_content) = split_nodes(nodes);
     (
         Document { content },
@@ -1738,7 +1765,7 @@ fn split_document(nodes: Vec<SpannedNode>) -> (Document, SourceMap) {
 /// Returns `None` when the attribute string is malformed (e.g. unquoted
 /// values in `key=value` pairs). The caller should treat the raw string
 /// as text content in that case.
-pub fn parse_attributes(attr_str: &str) -> Option<Vec<Attribute>> {
+pub fn parse_attributes<'a>(attr_str: &'a str) -> Option<Vec<Attribute<'a>>> {
     let s = attr_str.strip_prefix('|').unwrap_or(attr_str);
 
     if s.is_empty() {
@@ -1749,8 +1776,8 @@ pub fn parse_attributes(attr_str: &str) -> Option<Vec<Attribute>> {
     // Preserve whitespace (e.g. "| " → default value " ").
     if !s.contains('=') {
         return Some(vec![Attribute {
-            key: "default".to_string(),
-            value: s.to_string(),
+            key: Cow::Borrowed("default"),
+            value: Cow::Owned(s.to_string()),
         }]);
     }
 
@@ -1776,13 +1803,28 @@ pub fn parse_attributes(attr_str: &str) -> Option<Vec<Attribute>> {
                     // Quoted value: find the closing (unescaped) quote.
                     remaining = &remaining[1..];
                     if let Some(end_quote) = find_unescaped_quote(remaining) {
-                        let value = remaining[..end_quote].replace("\\\"", "\"");
-                        attrs.push(Attribute { key, value });
+                        let raw_value = &remaining[..end_quote];
+                        let value = if raw_value.contains("\\\"") {
+                            Cow::Owned(raw_value.replace("\\\"", "\""))
+                        } else {
+                            Cow::Owned(raw_value.to_string())
+                        };
+                        attrs.push(Attribute {
+                            key: Cow::Owned(key),
+                            value,
+                        });
                         remaining = &remaining[end_quote + 1..];
                     } else {
                         // No closing quote -- take the rest.
-                        let value = remaining.replace("\\\"", "\"");
-                        attrs.push(Attribute { key, value });
+                        let value = if remaining.contains("\\\"") {
+                            Cow::Owned(remaining.replace("\\\"", "\""))
+                        } else {
+                            Cow::Owned(remaining.to_string())
+                        };
+                        attrs.push(Attribute {
+                            key: Cow::Owned(key),
+                            value,
+                        });
                         break;
                     }
                 } else {
@@ -1810,26 +1852,22 @@ fn find_unescaped_quote(s: &str) -> Option<usize> {
 /// Replace any `"default"` attribute keys with the marker-specific default
 /// attribute name (e.g. `"lemma"` for `\w`, `"gloss"` for `\rb`).
 /// Also applies marker-specific key renaming (e.g. `src` → `file` for `\fig`).
-fn resolve_default_attr_keys(marker: &str, attrs: Vec<Attribute>) -> Vec<Attribute> {
+fn resolve_default_attr_keys<'a>(marker: &str, attrs: Vec<Attribute<'a>>) -> Vec<Attribute<'a>> {
     let default_key = markers::default_attribute(marker);
     attrs
         .into_iter()
-        .map(|a| {
+        .map(|mut a| {
             // Resolve bare "default" key to marker-specific name.
             if a.key == "default"
                 && let Some(key_name) = default_key
             {
-                return Attribute {
-                    key: key_name.to_string(),
-                    value: a.value,
-                };
+                a.key = Cow::Borrowed(key_name);
+                return a;
             }
             // Rename \fig's "src" attribute to "file" per USJ spec.
             if marker == "fig" && a.key == "src" {
-                return Attribute {
-                    key: "file".to_string(),
-                    value: a.value,
-                };
+                a.key = Cow::Borrowed("file");
+                return a;
             }
             a
         })
@@ -1851,11 +1889,16 @@ fn trim_trailing_text(children: &mut Vec<SpannedNode>) {
         ..
     }) = children.last_mut()
     {
-        let trimmed = s.trim_end();
-        if trimmed.is_empty() {
+        let trimmed_len = s.trim_end().len();
+        if trimmed_len == 0 {
             children.pop();
-        } else if trimmed.len() != s.len() {
-            *s = trimmed.to_string();
+        } else if trimmed_len != s.len() {
+            match s {
+                Cow::Borrowed(b) => *s = Cow::Owned(b[..trimmed_len].to_string()),
+                Cow::Owned(owned) => {
+                    owned.truncate(trimmed_len);
+                }
+            }
         }
     }
 }
@@ -1864,7 +1907,6 @@ fn trim_trailing_text_on_children(node: &mut SpannedNode) {
     match (&mut node.node, &mut node.source.children) {
         (Node::TableCell { content, .. }, source_children)
         | (Node::Para { content, .. }, source_children)
-        | (Node::Char { content, .. }, source_children)
         | (Node::Note { content, .. }, source_children)
         | (Node::Figure { content, .. }, source_children)
         | (Node::Sidebar { content, .. }, source_children)
@@ -1875,12 +1917,33 @@ fn trim_trailing_text_on_children(node: &mut SpannedNode) {
         | (Node::Ref { content, .. }, source_children)
         | (Node::Unknown { content, .. }, source_children) => {
             if let Some(Node::Text(s)) = content.last_mut() {
-                let trimmed = s.trim_end();
-                if trimmed.is_empty() {
+                let trimmed_len = s.trim_end().len();
+                if trimmed_len == 0 {
                     content.pop();
                     source_children.pop();
-                } else if trimmed.len() != s.len() {
-                    *s = trimmed.to_string();
+                } else if trimmed_len != s.len() {
+                    match s {
+                        Cow::Borrowed(b) => *s = Cow::Owned(b[..trimmed_len].to_string()),
+                        Cow::Owned(owned) => {
+                            owned.truncate(trimmed_len);
+                        }
+                    }
+                }
+            }
+        }
+        (Node::Char(data), source_children) => {
+            if let Some(Node::Text(s)) = data.content.last_mut() {
+                let trimmed_len = s.trim_end().len();
+                if trimmed_len == 0 {
+                    data.content.pop();
+                    source_children.pop();
+                } else if trimmed_len != s.len() {
+                    match s {
+                        Cow::Borrowed(b) => *s = Cow::Owned(b[..trimmed_len].to_string()),
+                        Cow::Owned(owned) => {
+                            owned.truncate(trimmed_len);
+                        }
+                    }
                 }
             }
         }
@@ -1891,17 +1954,17 @@ fn trim_trailing_text_on_children(node: &mut SpannedNode) {
 /// If a `\cat` node is found among the children (possibly wrapped in a `Para`),
 /// its text content is returned as the category. The `\cat` node (and any
 /// surrounding whitespace-only text) is removed from the children list.
-fn extract_category(mut children: Vec<SpannedNode>) -> (Option<String>, Vec<SpannedNode>) {
-    let cat_idx = children.iter().position(|n| match n {
-        SpannedNode {
-            node: Node::Char { marker, .. } | Node::Para { marker, .. },
-            ..
-        } => marker == "cat",
+fn extract_category<'a>(
+    mut children: Vec<SpannedNode<'a>>,
+) -> (Option<Cow<'a, str>>, Vec<SpannedNode<'a>>) {
+    let cat_idx = children.iter().position(|n| match &n.node {
+        Node::Char(data) => data.marker == "cat",
+        Node::Para { marker, .. } => marker == "cat",
         _ => false,
     });
     if let Some(idx) = cat_idx {
         let cat_node = children.remove(idx);
-        let text = extract_node_text(&cat_node);
+        let text = extract_node_text(&cat_node).map(Cow::Owned);
         // Also remove a preceding whitespace-only text node if present.
         if idx > 0
             && let Some(Node::Text(t)) = children.get(idx - 1).map(|node| &node.node)
@@ -1960,13 +2023,9 @@ fn split_first_word(s: &str) -> (&str, &str) {
 
 /// Strip leading zeros from a numeric string for SID generation.
 /// Ranges like "03-04" and non-numeric strings like "1a" are preserved as-is.
-fn strip_leading_zeros(s: &str) -> String {
+fn strip_leading_zeros(s: &str) -> &str {
     let trimmed = s.trim_start_matches('0');
-    if trimmed.is_empty() {
-        "0".to_string()
-    } else {
-        trimmed.to_string()
-    }
+    if trimmed.is_empty() { "0" } else { trimmed }
 }
 
 // ---------------------------------------------------------------------------
@@ -1977,7 +2036,7 @@ fn strip_leading_zeros(s: &str) -> String {
 mod tests {
     use super::*;
 
-    fn diagnostics(result: &AstDocument) -> &[crate::diagnostics::Diagnostic] {
+    fn diagnostics<'b, 'a>(result: &'b AstDocument<'a>) -> &'b [crate::diagnostics::Diagnostic] {
         result
             .diagnostics
             .as_deref()
@@ -2001,9 +2060,10 @@ mod tests {
         // Find the Para node and check it has Char child
         let has_char = result.ast.content.iter().any(|n| {
             if let Node::Para { content, .. } = n {
-                content
-                    .iter()
-                    .any(|c| matches!(c, Node::Char { marker, .. } if marker == "nd"))
+                content.iter().any(|c| match c {
+                    Node::Char(data) => data.marker == "nd",
+                    _ => false,
+                })
             } else {
                 false
             }
@@ -2219,8 +2279,8 @@ mod tests {
         let result = parse("\\id GEN\n\\c 3\n\\p\n\\v 5 text");
         // Find the Chapter node and verify sid.
         let chapter = result.ast.content.iter().find_map(|n| {
-            if let Node::Chapter { sid, number, .. } = n {
-                Some((number.clone(), sid.clone()))
+            if let Node::Chapter(data) = n {
+                Some((data.number.clone(), data.sid.clone()))
             } else {
                 None
             }
@@ -2234,8 +2294,8 @@ mod tests {
         let verse = result.ast.content.iter().find_map(|n| {
             if let Node::Para { content, .. } = n {
                 content.iter().find_map(|c| {
-                    if let Node::Verse { sid, number, .. } = c {
-                        Some((number.clone(), sid.clone()))
+                    if let Node::Verse(data) = c {
+                        Some((data.number.clone(), data.sid.clone()))
                     } else {
                         None
                     }
@@ -2460,7 +2520,7 @@ mod tests {
             .ast
             .content
             .iter()
-            .filter(|n| matches!(n, Node::Chapter { .. }))
+            .filter(|n| matches!(n, Node::Chapter(_)))
             .count();
         assert_eq!(chapter_count, 2);
     }
@@ -2471,8 +2531,8 @@ mod tests {
         let verse = result.ast.content.iter().find_map(|n| {
             if let Node::Para { content, .. } = n {
                 content.iter().find_map(|c| {
-                    if let Node::Verse { number, .. } = c {
-                        Some(number.clone())
+                    if let Node::Verse(data) = c {
+                        Some(data.number.clone())
                     } else {
                         None
                     }
@@ -2497,11 +2557,14 @@ mod tests {
         assert!(!has_unknown, "\\fm should not produce UnknownMarker");
 
         let has_fm_char = result.ast.content.iter().any(|n| {
-            matches!(
-                n,
-                Node::Para { content, .. }
-                if content.iter().any(|c| matches!(c, Node::Char { marker, .. } if marker == "fm"))
-            )
+            if let Node::Para { content, .. } = n {
+                content.iter().any(|c| match c {
+                    Node::Char(data) => data.marker == "fm",
+                    _ => false,
+                })
+            } else {
+                false
+            }
         });
         assert!(has_fm_char, "\\fm should parse as a character node");
     }
@@ -2533,11 +2596,14 @@ mod tests {
         assert!(deprecation_warnings[0].message.contains("\\addpn"));
 
         let has_addpn_char = result.ast.content.iter().any(|n| {
-            matches!(
-                n,
-                Node::Para { content, .. }
-                if content.iter().any(|c| matches!(c, Node::Char { marker, .. } if marker == "addpn"))
-            )
+            if let Node::Para { content, .. } = n {
+                content.iter().any(|c| match c {
+                    Node::Char(data) => data.marker == "addpn",
+                    _ => false,
+                })
+            } else {
+                false
+            }
         });
         assert!(has_addpn_char, "\\addpn should parse as a character node");
     }

@@ -114,23 +114,23 @@ impl KnownMarker {
 }
 
 /// Marker names stored in hot-path CST/AST nodes.
-#[derive(Clone, PartialEq, Eq, Debug, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum MarkerName {
     Known(KnownMarker),
-    Custom(Box<str>),
+    Custom(&'static str),
 }
 
 impl MarkerName {
     pub fn parse(name: &str) -> Self {
         lookup_known_marker_exact(name)
             .map(Self::Known)
-            .unwrap_or_else(|| Self::Custom(name.into()))
+            .unwrap_or_else(|| Self::Custom(Box::leak(name.to_string().into_boxed_str())))
     }
 
     pub fn as_str(&self) -> &str {
         match self {
             MarkerName::Known(marker) => marker.as_str(),
-            MarkerName::Custom(marker) => marker.as_ref(),
+            MarkerName::Custom(marker) => marker,
         }
     }
 
@@ -196,7 +196,7 @@ impl From<String> for MarkerName {
     fn from(value: String) -> Self {
         lookup_known_marker_exact(&value)
             .map(Self::Known)
-            .unwrap_or_else(|| Self::Custom(value.into_boxed_str()))
+            .unwrap_or_else(|| Self::Custom(Box::leak(value.into_boxed_str())))
     }
 }
 

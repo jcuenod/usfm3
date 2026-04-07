@@ -76,37 +76,27 @@ impl<'a> UsfmSerializer<'a> {
         match node {
             Node::Book { code, content, .. } => self.serialize_book(code, content),
 
-            Node::Chapter {
-                number,
-                altnumber,
-                pubnumber,
-                ..
-            } => {
-                self.serialize_chapter(number);
-                if let Some(alt) = altnumber {
+            Node::Chapter(data) => {
+                self.serialize_chapter(&data.number);
+                if let Some(alt) = &data.altnumber {
                     self.output.push_str(" \\ca ");
                     self.output.push_str(alt);
                     self.output.push_str("\\ca*");
                 }
-                if let Some(pub_) = pubnumber {
+                if let Some(pub_) = &data.pubnumber {
                     self.output.push_str(" \\cp ");
                     self.output.push_str(pub_);
                 }
             }
 
-            Node::Verse {
-                number,
-                altnumber,
-                pubnumber,
-                ..
-            } => {
-                self.serialize_verse(number);
-                if let Some(alt) = altnumber {
+            Node::Verse(data) => {
+                self.serialize_verse(&data.number);
+                if let Some(alt) = &data.altnumber {
                     self.output.push_str("\\va ");
                     self.output.push_str(alt);
                     self.output.push_str("\\va*");
                 }
-                if let Some(pub_) = pubnumber {
+                if let Some(pub_) = &data.pubnumber {
                     self.output.push_str("\\vp ");
                     self.output.push_str(pub_);
                     self.output.push_str("\\vp*");
@@ -117,12 +107,7 @@ impl<'a> UsfmSerializer<'a> {
                 marker, content, ..
             } => self.serialize_para(marker, content),
 
-            Node::Char {
-                marker,
-                content,
-                attributes,
-                ..
-            } => self.serialize_char(marker, content, attributes),
+            Node::Char(data) => self.serialize_char(&data.marker, &data.content, &data.attributes),
 
             Node::Note {
                 marker,
@@ -260,7 +245,7 @@ impl<'a> UsfmSerializer<'a> {
         // For paragraphs with content, we place children on the same line.
         // A space is needed between the marker and the first child unless
         // the first child is a verse (which will handle its own spacing).
-        let first_is_verse = matches!(content.first(), Some(Node::Verse { .. }));
+        let first_is_verse = matches!(content.first(), Some(Node::Verse(_)));
         if !first_is_verse {
             self.output.push(' ');
         }
@@ -413,23 +398,23 @@ mod tests {
                     code: "GEN".into(),
                     content: vec![Node::text("Genesis")],
                 },
-                Node::Chapter {
+                Node::Chapter(Box::new(ChapterData {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                },
+                })),
                 Node::Para {
                     marker: "p".into(),
                     content: vec![
-                        Node::Verse {
+                        Node::Verse(Box::new(VerseData {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                        },
+                        })),
                         Node::text("In the beginning God created the heavens and the earth."),
                     ],
                 },
@@ -450,11 +435,11 @@ mod tests {
                 marker: "p".into(),
                 content: vec![
                     Node::text("The "),
-                    Node::Char {
+                    Node::Char(Box::new(CharData {
                         marker: "nd".into(),
                         content: vec![Node::text("Lord")],
                         attributes: vec![],
-                    },
+                    })),
                     Node::text(" spoke."),
                 ],
             }],
@@ -475,16 +460,16 @@ mod tests {
                         caller: "+".into(),
                         category: None,
                         content: vec![
-                            Node::Char {
+                            Node::Char(Box::new(CharData {
                                 marker: "fr".into(),
                                 content: vec![Node::text("1.1")],
                                 attributes: vec![],
-                            },
-                            Node::Char {
+                            })),
+                            Node::Char(Box::new(CharData {
                                 marker: "ft".into(),
                                 content: vec![Node::text("A note")],
                                 attributes: vec![],
-                            },
+                            })),
                         ],
                     },
                     Node::text(" more text"),
@@ -504,13 +489,13 @@ mod tests {
                 Node::Para {
                     marker: "q1".into(),
                     content: vec![
-                        Node::Verse {
+                        Node::Verse(Box::new(VerseData {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: None,
                             altnumber: None,
                             pubnumber: None,
-                        },
+                        })),
                         Node::text("O Lord, I have heard of what you have done,"),
                     ],
                 },
@@ -635,21 +620,21 @@ mod tests {
             content: vec![Node::Para {
                 marker: "p".into(),
                 content: vec![
-                    Node::Verse {
+                    Node::Verse(Box::new(VerseData {
                         marker: "v".into(),
                         number: "1".into(),
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                    },
+                    })),
                     Node::text("First verse text."),
-                    Node::Verse {
+                    Node::Verse(Box::new(VerseData {
                         marker: "v".into(),
                         number: "2".into(),
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                    },
+                    })),
                     Node::text("Second verse text."),
                 ],
             }],
@@ -701,18 +686,18 @@ mod tests {
         let doc = Document {
             content: vec![Node::Para {
                 marker: "p".into(),
-                content: vec![Node::Char {
+                content: vec![Node::Char(Box::new(CharData {
                     marker: "add".into(),
                     content: vec![
                         Node::text("added "),
-                        Node::Char {
+                        Node::Char(Box::new(CharData {
                             marker: "nd".into(),
                             content: vec![Node::text("Lord")],
                             attributes: vec![],
-                        },
+                        })),
                     ],
                     attributes: vec![],
-                }],
+                }))],
             }],
         };
         let usfm = to_usfm_string(&doc);
@@ -730,11 +715,11 @@ mod tests {
                         marker: "x".into(),
                         caller: "-".into(),
                         category: None,
-                        content: vec![Node::Char {
+                        content: vec![Node::Char(Box::new(CharData {
                             marker: "xt".into(),
                             content: vec![Node::text("Gen 1:1")],
                             attributes: vec![],
-                        }],
+                        }))],
                     },
                 ],
             }],

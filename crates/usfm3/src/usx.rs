@@ -2,7 +2,7 @@ use quick_xml::Writer;
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
 use std::io::Cursor;
 
-use crate::ast::{Document, Node};
+use crate::ast::{ChapterData, CharData, Document, Node, VerseData};
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -140,7 +140,7 @@ fn serialize_node<W: std::io::Write>(
             ..
         } => {
             let mut elem = BytesStart::new("book");
-            elem.push_attribute(("code", code.as_str()));
+            elem.push_attribute(("code", code.as_ref()));
             elem.push_attribute(("style", marker.as_str()));
             if content.is_empty() {
                 writer.write_event(Event::Empty(elem))?;
@@ -153,53 +153,55 @@ fn serialize_node<W: std::io::Write>(
             }
         }
 
-        Node::Chapter {
-            number,
-            sid,
-            altnumber,
-            pubnumber,
-            ..
-        } => {
+        Node::Chapter(data) => {
+            let ChapterData {
+                number,
+                sid,
+                altnumber,
+                pubnumber,
+                ..
+            } = data.as_ref();
             // Close previous verse and chapter before opening a new chapter.
             state.close_verse(writer)?;
             state.close_chapter(writer)?;
 
             let sid_str = sid.as_deref().unwrap_or("");
             let mut elem = BytesStart::new("chapter");
-            elem.push_attribute(("number", number.as_str()));
+            elem.push_attribute(("number", number.as_ref()));
             elem.push_attribute(("style", "c"));
             elem.push_attribute(("sid", sid_str));
             if let Some(alt) = altnumber {
-                elem.push_attribute(("altnumber", alt.as_str()));
+                elem.push_attribute(("altnumber", alt.as_ref()));
             }
             if let Some(pub_) = pubnumber {
-                elem.push_attribute(("pubnumber", pub_.as_str()));
+                elem.push_attribute(("pubnumber", pub_.as_ref()));
             }
             writer.write_event(Event::Empty(elem))?;
 
             state.current_chapter_sid = Some(sid_str.to_string());
         }
 
-        Node::Verse {
-            number,
-            sid,
-            altnumber,
-            pubnumber,
-            ..
-        } => {
+        Node::Verse(data) => {
+            let VerseData {
+                number,
+                sid,
+                altnumber,
+                pubnumber,
+                ..
+            } = data.as_ref();
             // Close the previous verse before opening a new one.
             state.close_verse(writer)?;
 
             let sid_str = sid.as_deref().unwrap_or("");
             let mut elem = BytesStart::new("verse");
-            elem.push_attribute(("number", number.as_str()));
+            elem.push_attribute(("number", number.as_ref()));
             elem.push_attribute(("style", "v"));
             elem.push_attribute(("sid", sid_str));
             if let Some(alt) = altnumber {
-                elem.push_attribute(("altnumber", alt.as_str()));
+                elem.push_attribute(("altnumber", alt.as_ref()));
             }
             if let Some(pub_) = pubnumber {
-                elem.push_attribute(("pubnumber", pub_.as_str()));
+                elem.push_attribute(("pubnumber", pub_.as_ref()));
             }
             writer.write_event(Event::Empty(elem))?;
 
@@ -222,16 +224,17 @@ fn serialize_node<W: std::io::Write>(
             }
         }
 
-        Node::Char {
-            marker,
-            content,
-            attributes,
-            ..
-        } => {
+        Node::Char(data) => {
+            let CharData {
+                marker,
+                content,
+                attributes,
+                ..
+            } = data.as_ref();
             let mut elem = BytesStart::new("char");
             elem.push_attribute(("style", marker.as_str()));
             for attr in attributes {
-                elem.push_attribute((attr.key.as_str(), attr.value.as_str()));
+                elem.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
             }
             if content.is_empty() {
                 writer.write_event(Event::Empty(elem))?;
@@ -251,7 +254,7 @@ fn serialize_node<W: std::io::Write>(
             ..
         } => {
             let mut elem = BytesStart::new("note");
-            elem.push_attribute(("caller", caller.as_str()));
+            elem.push_attribute(("caller", caller.as_ref()));
             elem.push_attribute(("style", marker.as_str()));
             if content.is_empty() {
                 writer.write_event(Event::Empty(elem))?;
@@ -270,7 +273,7 @@ fn serialize_node<W: std::io::Write>(
             let mut elem = BytesStart::new("ms");
             elem.push_attribute(("style", marker.as_str()));
             for attr in attributes {
-                elem.push_attribute((attr.key.as_str(), attr.value.as_str()));
+                elem.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
             }
             writer.write_event(Event::Empty(elem))?;
         }
@@ -284,7 +287,7 @@ fn serialize_node<W: std::io::Write>(
             let mut elem = BytesStart::new("figure");
             elem.push_attribute(("style", marker.as_str()));
             for attr in attributes {
-                elem.push_attribute((attr.key.as_str(), attr.value.as_str()));
+                elem.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
             }
             if content.is_empty() {
                 writer.write_event(Event::Empty(elem))?;
@@ -356,7 +359,7 @@ fn serialize_node<W: std::io::Write>(
         } => {
             let mut elem = BytesStart::new("cell");
             elem.push_attribute(("style", marker.as_str()));
-            elem.push_attribute(("align", align.as_str()));
+            elem.push_attribute(("align", align.as_ref()));
             if content.is_empty() {
                 writer.write_event(Event::Empty(elem))?;
             } else {
@@ -375,7 +378,7 @@ fn serialize_node<W: std::io::Write>(
         } => {
             let mut elem = BytesStart::new("ref");
             for attr in attributes {
-                elem.push_attribute((attr.key.as_str(), attr.value.as_str()));
+                elem.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
             }
             if content.is_empty() {
                 writer.write_event(Event::Empty(elem))?;
@@ -417,7 +420,7 @@ mod tests {
     use super::*;
     use crate::ast::*;
 
-    fn sample_document() -> Document {
+    fn sample_document() -> Document<'static> {
         Document {
             content: vec![
                 Node::Book {
@@ -425,23 +428,23 @@ mod tests {
                     code: "GEN".into(),
                     content: vec![Node::text("Genesis")],
                 },
-                Node::Chapter {
+                Node::Chapter(Box::new(ChapterData {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                },
+                })),
                 Node::Para {
                     marker: "p".into(),
                     content: vec![
-                        Node::Verse {
+                        Node::Verse(Box::new(VerseData {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                        },
+                        })),
                         Node::text("In the beginning God created the heavens and the earth."),
                     ],
                 },
@@ -470,20 +473,20 @@ mod tests {
                     code: "GEN".into(),
                     content: vec![],
                 },
-                Node::Chapter {
+                Node::Chapter(Box::new(ChapterData {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                },
-                Node::Chapter {
+                })),
+                Node::Chapter(Box::new(ChapterData {
                     marker: "c".into(),
                     number: "2".into(),
                     sid: Some("GEN 2".into()),
                     altnumber: None,
                     pubnumber: None,
-                },
+                })),
             ],
         };
         let xml = to_usx_string(&doc).unwrap();
@@ -502,31 +505,31 @@ mod tests {
                     code: "GEN".into(),
                     content: vec![],
                 },
-                Node::Chapter {
+                Node::Chapter(Box::new(ChapterData {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                },
+                })),
                 Node::Para {
                     marker: "p".into(),
                     content: vec![
-                        Node::Verse {
+                        Node::Verse(Box::new(VerseData {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                        },
+                        })),
                         Node::text("First verse. "),
-                        Node::Verse {
+                        Node::Verse(Box::new(VerseData {
                             marker: "v".into(),
                             number: "2".into(),
                             sid: Some("GEN 1:2".into()),
                             altnumber: None,
                             pubnumber: None,
-                        },
+                        })),
                         Node::text("Second verse."),
                     ],
                 },
@@ -546,11 +549,11 @@ mod tests {
                     marker: "f".into(),
                     caller: "+".into(),
                     category: None,
-                    content: vec![Node::Char {
+                    content: vec![Node::Char(Box::new(CharData {
                         marker: "ft".into(),
                         content: vec![Node::text("A footnote")],
                         attributes: vec![],
-                    }],
+                    }))],
                 }],
             }],
         };

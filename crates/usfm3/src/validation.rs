@@ -30,8 +30,14 @@ const NOTE_ONLY_MARKERS: &[&str] = &[
 ];
 
 fn parse_verse_start(s: &str) -> Option<u32> {
-    let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
-    digits.parse().ok()
+    let s = s.trim_start();
+    let end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    let digits = &s[..end];
+    if digits.is_empty() {
+        None
+    } else {
+        digits.parse().ok()
+    }
 }
 
 fn parse_verse_end(s: &str) -> Option<u32> {
@@ -116,7 +122,7 @@ impl<'a> Validator<'a> {
                     }
                     self.saw_book = true;
                 }
-                Node::Chapter { .. } => {
+                Node::Chapter(_) => {
                     self.body_started = true;
                     self.has_chapter = true;
                     self.expected_verse = 1;
@@ -146,7 +152,7 @@ impl<'a> Validator<'a> {
                 _ => {}
             }
 
-            if !matches!(node, Node::Chapter { .. }) {
+            if !matches!(node, Node::Chapter(_)) {
                 self.walk(node, source, false);
             }
         }
@@ -159,10 +165,10 @@ impl<'a> Validator<'a> {
     }
 
     fn handle_chapter_sequence(&mut self, node: &Node, source: &SourceNode) {
-        let Node::Chapter { number, .. } = node else {
+        let Node::Chapter(data) = node else {
             return;
         };
-        let Ok(num) = number.parse::<u32>() else {
+        let Ok(num) = data.number.parse::<u32>() else {
             return;
         };
         if !self.seen_chapters.insert(num) {
@@ -181,40 +187,39 @@ impl<'a> Validator<'a> {
 
     fn walk(&mut self, node: &Node, source: &SourceNode, inside_note: bool) {
         match node {
-            Node::Verse { number, .. } => {
-                if let Some(v_start) = parse_verse_start(number) {
+            Node::Verse(data) => {
+                if let Some(v_start) = parse_verse_start(&data.number) {
                     if v_start != self.expected_verse {
                         self.diagnostics.push(Diagnostic::invalid_verse_sequence(
                             &self.expected_verse.to_string(),
-                            number,
+                            &data.number,
                             span_of(Some(source)),
                         ));
                     }
-                    self.expected_verse = parse_verse_end(number).unwrap_or(v_start) + 1;
+                    self.expected_verse = parse_verse_end(&data.number).unwrap_or(v_start) + 1;
                 }
             }
-            Node::Char {
-                marker,
-                content,
-                attributes,
-            } => {
-                if !inside_note && is_note_only_marker(marker.as_str()) {
+            Node::Char(data) => {
+                if !inside_note && is_note_only_marker(data.marker.as_str()) {
                     self.diagnostics
                         .push(Diagnostic::note_submarker_outside_note(
-                            marker.as_str(),
+                            data.marker.as_str(),
                             span_of(Some(source)),
                         ));
                 }
-                if content.iter().any(|n| matches!(n, Node::Verse { .. })) {
+                if data.content.iter().any(|n| matches!(n, Node::Verse(_))) {
                     self.diagnostics.push(Diagnostic::char_crosses_verse(
-                        marker.as_str(),
+                        data.marker.as_str(),
                         span_of(Some(source)),
                     ));
                 }
 
-                let clean_marker = marker.strip_prefix('+').unwrap_or(marker.as_str());
+                let clean_marker = data
+                    .marker
+                    .strip_prefix('+')
+                    .unwrap_or(data.marker.as_str());
                 for &req in markers::required_attributes(clean_marker) {
-                    if !attributes.iter().any(|a| a.key == req) {
+                    if !data.attributes.iter().any(|a| a.key == req) {
                         self.diagnostics
                             .push(Diagnostic::missing_required_attribute(
                                 clean_marker,
@@ -223,7 +228,7 @@ impl<'a> Validator<'a> {
                             ));
                     }
                 }
-                if attributes.iter().any(|a| a.key == "default")
+                if data.attributes.iter().any(|a| a.key == "default")
                     && markers::default_attribute(clean_marker).is_none()
                 {
                     self.diagnostics
@@ -232,15 +237,15 @@ impl<'a> Validator<'a> {
                             span_of(Some(source)),
                         ));
                 }
-                if attributes.iter().any(|a| a.value.trim().is_empty()) {
+                if data.attributes.iter().any(|a| a.value.trim().is_empty()) {
                     self.diagnostics
                         .push(Diagnostic::malformed_attributes(span_of(Some(source))));
                 }
-                if clean_marker == "w" && content.is_empty() && attributes.is_empty() {
+                if clean_marker == "w" && data.content.is_empty() && data.attributes.is_empty() {
                     self.diagnostics
                         .push(Diagnostic::empty_word_marker(span_of(Some(source))));
                 }
-                self.walk_children(content, source, inside_note);
+                self.walk_children(&data.content, source, inside_note);
             }
             Node::Note { content, .. } => self.walk_children(content, source, true),
             Node::Figure { content, .. } => {
@@ -340,10 +345,10 @@ impl<'a> Validator<'a> {
     }
 }
 
-fn zip_nodes<'a>(
-    nodes: &'a [Node],
+fn zip_nodes<'a, 'b>(
+    nodes: &'a [Node<'b>],
     sources: &'a [SourceNode],
-) -> impl Iterator<Item = (&'a Node, &'a SourceNode)> {
+) -> impl Iterator<Item = (&'a Node<'b>, &'a SourceNode)> {
     nodes.iter().zip(sources.iter())
 }
 
@@ -426,7 +431,7 @@ fn milestone_base(marker: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Attribute, Document, Node};
+    use crate::ast::{Attribute, ChapterData, CharData, Document, Node, VerseData};
     use crate::diagnostics::DiagnosticCode;
     use crate::source_map::{SourceMap, SourceNode, SourceSpans};
 
@@ -544,20 +549,20 @@ mod tests {
                 code: "GEN".into(),
                 content: vec![],
             },
-            Node::Chapter {
+            Node::Chapter(Box::new(ChapterData {
                 marker: "c".into(),
                 number: "1".into(),
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-            },
-            Node::Chapter {
+            })),
+            Node::Chapter(Box::new(ChapterData {
                 marker: "c".into(),
                 number: "2".into(),
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-            },
+            })),
         ]);
         let gap = doc_with(vec![
             Node::Book {
@@ -565,20 +570,20 @@ mod tests {
                 code: "GEN".into(),
                 content: vec![],
             },
-            Node::Chapter {
+            Node::Chapter(Box::new(ChapterData {
                 marker: "c".into(),
                 number: "1".into(),
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-            },
-            Node::Chapter {
+            })),
+            Node::Chapter(Box::new(ChapterData {
                 marker: "c".into(),
                 number: "3".into(),
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-            },
+            })),
         ]);
         let duplicate = doc_with(vec![
             Node::Book {
@@ -586,20 +591,20 @@ mod tests {
                 code: "GEN".into(),
                 content: vec![],
             },
-            Node::Chapter {
+            Node::Chapter(Box::new(ChapterData {
                 marker: "c".into(),
                 number: "1".into(),
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-            },
-            Node::Chapter {
+            })),
+            Node::Chapter(Box::new(ChapterData {
                 marker: "c".into(),
                 number: "1".into(),
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-            },
+            })),
         ]);
 
         assert!(
@@ -627,62 +632,62 @@ mod tests {
                 code: "GEN".into(),
                 content: vec![],
             },
-            Node::Chapter {
+            Node::Chapter(Box::new(ChapterData {
                 marker: "c".into(),
                 number: "1".into(),
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-            },
+            })),
             Node::Para {
                 marker: "p".into(),
                 content: vec![
-                    Node::Verse {
+                    Node::Verse(Box::new(VerseData {
                         marker: "v".into(),
                         number: "1".into(),
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                    },
-                    Node::Verse {
+                    })),
+                    Node::Verse(Box::new(VerseData {
                         marker: "v".into(),
                         number: "2".into(),
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                    },
-                    Node::Verse {
+                    })),
+                    Node::Verse(Box::new(VerseData {
                         marker: "v".into(),
                         number: "3-4".into(),
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                    },
-                    Node::Verse {
+                    })),
+                    Node::Verse(Box::new(VerseData {
                         marker: "v".into(),
                         number: "5".into(),
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                    },
+                    })),
                 ],
             },
-            Node::Chapter {
+            Node::Chapter(Box::new(ChapterData {
                 marker: "c".into(),
                 number: "2".into(),
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-            },
+            })),
             Node::Para {
                 marker: "p".into(),
-                content: vec![Node::Verse {
+                content: vec![Node::Verse(Box::new(VerseData {
                     marker: "v".into(),
                     number: "1".into(),
                     sid: None,
                     altnumber: None,
                     pubnumber: None,
-                }],
+                }))],
             },
         ]);
         let gap = doc_with(vec![
@@ -691,30 +696,30 @@ mod tests {
                 code: "GEN".into(),
                 content: vec![],
             },
-            Node::Chapter {
+            Node::Chapter(Box::new(ChapterData {
                 marker: "c".into(),
                 number: "1".into(),
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-            },
+            })),
             Node::Para {
                 marker: "p".into(),
                 content: vec![
-                    Node::Verse {
+                    Node::Verse(Box::new(VerseData {
                         marker: "v".into(),
                         number: "1".into(),
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                    },
-                    Node::Verse {
+                    })),
+                    Node::Verse(Box::new(VerseData {
                         marker: "v".into(),
                         number: "3".into(),
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                    },
+                    })),
                 ],
             },
         ]);
@@ -758,13 +763,13 @@ mod tests {
                 code: "GEN".into(),
                 content: vec![],
             },
-            Node::Chapter {
+            Node::Chapter(Box::new(ChapterData {
                 marker: "c".into(),
                 number: "1".into(),
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-            },
+            })),
             Node::Para {
                 marker: "h".into(),
                 content: vec![Node::text("Genesis")],
@@ -776,13 +781,13 @@ mod tests {
                 code: "GEN".into(),
                 content: vec![],
             },
-            Node::Chapter {
+            Node::Chapter(Box::new(ChapterData {
                 marker: "c".into(),
                 number: "1".into(),
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-            },
+            })),
             Node::Para {
                 marker: "cl".into(),
                 content: vec![Node::text("Chapter One")],
@@ -811,11 +816,11 @@ mod tests {
             },
             Node::Para {
                 marker: "p".into(),
-                content: vec![Node::Char {
+                content: vec![Node::Char(Box::new(CharData {
                     marker: "ft".into(),
                     content: vec![Node::text("footnote text")],
                     attributes: vec![],
-                }],
+                }))],
             },
         ]);
         let ok = doc_with(vec![
@@ -830,11 +835,11 @@ mod tests {
                     marker: "f".into(),
                     caller: "+".into(),
                     category: None,
-                    content: vec![Node::Char {
+                    content: vec![Node::Char(Box::new(CharData {
                         marker: "ft".into(),
                         content: vec![Node::text("footnote text")],
                         attributes: vec![],
-                    }],
+                    }))],
                 }],
             },
         ]);
@@ -963,31 +968,31 @@ mod tests {
                 code: "GEN".into(),
                 content: vec![],
             },
-            Node::Chapter {
+            Node::Chapter(Box::new(ChapterData {
                 marker: "c".into(),
                 number: "1".into(),
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-            },
+            })),
             Node::Para {
                 marker: "p".into(),
                 content: vec![
-                    Node::Verse {
+                    Node::Verse(Box::new(VerseData {
                         marker: "v".into(),
                         number: "1".into(),
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                    },
-                    Node::Char {
+                    })),
+                    Node::Char(Box::new(CharData {
                         marker: "w".into(),
                         content: vec![Node::text("word")],
                         attributes: vec![Attribute {
                             key: "lemma".into(),
-                            value: String::new(),
+                            value: "".into(),
                         }],
-                    },
+                    })),
                 ],
             },
         ]);
@@ -1024,23 +1029,23 @@ mod tests {
                 code: "GEN".into(),
                 content: vec![],
             },
-            Node::Chapter {
+            Node::Chapter(Box::new(ChapterData {
                 marker: "c".into(),
                 number: "1".into(),
                 sid: None,
                 altnumber: None,
                 pubnumber: None,
-            },
+            })),
             Node::Para {
                 marker: "p".into(),
                 content: vec![
-                    Node::Verse {
+                    Node::Verse(Box::new(VerseData {
                         marker: "v".into(),
                         number: "1".into(),
                         sid: None,
                         altnumber: None,
                         pubnumber: None,
-                    },
+                    })),
                     Node::text("In the beginning"),
                 ],
             },

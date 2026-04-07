@@ -38,7 +38,12 @@ fn is_verse_paragraph(marker: &str) -> bool {
 fn collect_text(node: &Node, buf: &mut String) {
     match node {
         Node::Text(s) => buf.push_str(s),
-        Node::Char { content, .. } | Node::Ref { content, .. } | Node::Unknown { content, .. } => {
+        Node::Char(data) => {
+            for child in &data.content {
+                collect_text(child, buf);
+            }
+        }
+        Node::Ref { content, .. } | Node::Unknown { content, .. } => {
             for child in content {
                 collect_text(child, buf);
             }
@@ -70,19 +75,17 @@ pub fn to_vref_map(doc: &Document) -> serde_json::Map<String, serde_json::Value>
     for node in &doc.content {
         match node {
             Node::Book { code, .. } => {
-                book = code.clone();
+                book = code.to_string();
             }
-            Node::Chapter { number, .. } => {
-                chapter = number.clone();
+            Node::Chapter(data) => {
+                chapter = data.number.to_string();
             }
-            Node::Para {
-                marker, content, ..
-            } => {
+            Node::Para { marker, content } => {
                 if !is_verse_paragraph(marker) {
                     continue;
                 }
                 for child in content {
-                    if let Node::Verse { number, .. } = child {
+                    if let Node::Verse(data) = child {
                         // Flush the previous verse.
                         let trimmed = current_text.trim();
                         if !current_ref.is_empty() && !trimmed.is_empty() {
@@ -91,7 +94,7 @@ pub fn to_vref_map(doc: &Document) -> serde_json::Map<String, serde_json::Value>
                                 serde_json::Value::String(trimmed.to_string()),
                             );
                         }
-                        current_ref = format!("{} {}:{}", book, chapter, number);
+                        current_ref = format!("{} {}:{}", book, chapter, data.number);
                         current_text = String::new();
                     } else if !current_ref.is_empty() {
                         collect_text(child, &mut current_text);
@@ -100,7 +103,7 @@ pub fn to_vref_map(doc: &Document) -> serde_json::Map<String, serde_json::Value>
             }
             // Handle root-level verses (valid per USFM 3.1 — verses can be
             // siblings of paragraphs in chapter content).
-            Node::Verse { number, .. } => {
+            Node::Verse(data) => {
                 // Flush the previous verse.
                 let trimmed = current_text.trim();
                 if !current_ref.is_empty() && !trimmed.is_empty() {
@@ -109,7 +112,7 @@ pub fn to_vref_map(doc: &Document) -> serde_json::Map<String, serde_json::Value>
                         serde_json::Value::String(trimmed.to_string()),
                     );
                 }
-                current_ref = format!("{} {}:{}", book, chapter, number);
+                current_ref = format!("{} {}:{}", book, chapter, data.number);
                 current_text = String::new();
             }
             // Collect root-level text into the current verse.
@@ -138,7 +141,7 @@ mod tests {
     use super::*;
     use crate::ast::*;
 
-    fn sample_doc() -> Document {
+    fn sample_doc() -> Document<'static> {
         Document {
             content: vec![
                 Node::Book {
@@ -146,31 +149,31 @@ mod tests {
                     code: "GEN".into(),
                     content: vec![Node::text("Genesis")],
                 },
-                Node::Chapter {
+                Node::Chapter(Box::new(ChapterData {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                },
+                })),
                 Node::Para {
                     marker: "p".into(),
                     content: vec![
-                        Node::Verse {
+                        Node::Verse(Box::new(VerseData {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                        },
+                        })),
                         Node::text("In the beginning God created the heavens and the earth."),
-                        Node::Verse {
+                        Node::Verse(Box::new(VerseData {
                             marker: "v".into(),
                             number: "2".into(),
                             sid: Some("GEN 1:2".into()),
                             altnumber: None,
                             pubnumber: None,
-                        },
+                        })),
                         Node::text("The earth was without form and void."),
                     ],
                 },
@@ -208,23 +211,23 @@ mod tests {
                     code: "GEN".into(),
                     content: vec![],
                 },
-                Node::Chapter {
+                Node::Chapter(Box::new(ChapterData {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                },
+                })),
                 Node::Para {
                     marker: "p".into(),
                     content: vec![
-                        Node::Verse {
+                        Node::Verse(Box::new(VerseData {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                        },
+                        })),
                         Node::text("In the beginning"),
                         Node::Note {
                             marker: "f".into(),
@@ -253,13 +256,13 @@ mod tests {
                     code: "GEN".into(),
                     content: vec![],
                 },
-                Node::Chapter {
+                Node::Chapter(Box::new(ChapterData {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                },
+                })),
                 // Section heading -- should be ignored.
                 Node::Para {
                     marker: "s1".into(),
@@ -268,13 +271,13 @@ mod tests {
                 Node::Para {
                     marker: "p".into(),
                     content: vec![
-                        Node::Verse {
+                        Node::Verse(Box::new(VerseData {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                        },
+                        })),
                         Node::text("In the beginning."),
                     ],
                 },
@@ -297,29 +300,29 @@ mod tests {
                     code: "GEN".into(),
                     content: vec![],
                 },
-                Node::Chapter {
+                Node::Chapter(Box::new(ChapterData {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                },
+                })),
                 Node::Para {
                     marker: "p".into(),
                     content: vec![
-                        Node::Verse {
+                        Node::Verse(Box::new(VerseData {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                        },
+                        })),
                         Node::text("The "),
-                        Node::Char {
+                        Node::Char(Box::new(CharData {
                             marker: "nd".into(),
                             content: vec![Node::text("Lord")],
                             attributes: vec![],
-                        },
+                        })),
                         Node::text(" said."),
                     ],
                 },
@@ -347,23 +350,23 @@ mod tests {
                     code: "GEN".into(),
                     content: vec![],
                 },
-                Node::Chapter {
+                Node::Chapter(Box::new(ChapterData {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                },
+                })),
                 Node::Para {
                     marker: "p".into(),
                     content: vec![
-                        Node::Verse {
+                        Node::Verse(Box::new(VerseData {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                        },
+                        })),
                         Node::text("First part."),
                     ],
                 },
@@ -400,28 +403,28 @@ mod tests {
                     code: "GEN".into(),
                     content: vec![],
                 },
-                Node::Chapter {
+                Node::Chapter(Box::new(ChapterData {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                },
-                Node::Verse {
+                })),
+                Node::Verse(Box::new(VerseData {
                     marker: "v".into(),
                     number: "1".into(),
                     sid: Some("GEN 1:1".into()),
                     altnumber: None,
                     pubnumber: None,
-                },
+                })),
                 Node::text("In the beginning."),
-                Node::Verse {
+                Node::Verse(Box::new(VerseData {
                     marker: "v".into(),
                     number: "2".into(),
                     sid: Some("GEN 1:2".into()),
                     altnumber: None,
                     pubnumber: None,
-                },
+                })),
                 Node::text("And God said."),
             ],
         };
@@ -447,33 +450,33 @@ mod tests {
                     code: "GEN".into(),
                     content: vec![],
                 },
-                Node::Chapter {
+                Node::Chapter(Box::new(ChapterData {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                },
+                })),
                 // Root-level verse.
-                Node::Verse {
+                Node::Verse(Box::new(VerseData {
                     marker: "v".into(),
                     number: "1".into(),
                     sid: Some("GEN 1:1".into()),
                     altnumber: None,
                     pubnumber: None,
-                },
+                })),
                 Node::text("First."),
                 // Then a paragraph with verse 2.
                 Node::Para {
                     marker: "p".into(),
                     content: vec![
-                        Node::Verse {
+                        Node::Verse(Box::new(VerseData {
                             marker: "v".into(),
                             number: "2".into(),
                             sid: Some("GEN 1:2".into()),
                             altnumber: None,
                             pubnumber: None,
-                        },
+                        })),
                         Node::text("Second."),
                     ],
                 },

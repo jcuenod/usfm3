@@ -1,4 +1,4 @@
-use crate::ast::{Document, Node};
+use crate::ast::{ChapterData, CharData, Document, Node, VerseData};
 use crate::source_map::{SourceMap, SourceNode, SourceSpans};
 use serde_json::{Map, Value, json};
 
@@ -117,7 +117,7 @@ fn serialize_node(
 ) -> Result<Value, UsjError> {
     let mut map = Map::new();
     match node {
-        Node::Text(text) => return Ok(Value::String(text.clone())),
+        Node::Text(text) => return Ok(Value::String(text.to_string())),
         Node::OptBreak => {
             map.insert("type".into(), Value::String("optbreak".into()));
         }
@@ -128,47 +128,50 @@ fn serialize_node(
         } => {
             map.insert("type".into(), Value::String("book".into()));
             map.insert("marker".into(), Value::String(marker.to_string()));
-            map.insert("code".into(), Value::String(code.clone()));
+            map.insert("code".into(), Value::String(code.to_string()));
             insert_content(&mut map, content, source, options)?;
         }
-        Node::Chapter {
-            marker,
-            number,
-            sid,
-            altnumber,
-            pubnumber,
-        } => {
+        Node::Chapter(data) => {
+            let ChapterData {
+                marker,
+                number,
+                sid,
+                altnumber,
+                pubnumber,
+            } = data.as_ref();
             map.insert("type".into(), Value::String("chapter".into()));
             map.insert("marker".into(), Value::String(marker.to_string()));
-            map.insert("number".into(), Value::String(number.clone()));
-            insert_optional_string(&mut map, "sid", sid.as_ref());
-            insert_optional_string(&mut map, "altnumber", altnumber.as_ref());
-            insert_optional_string(&mut map, "pubnumber", pubnumber.as_ref());
+            map.insert("number".into(), Value::String(number.to_string()));
+            insert_optional_string(&mut map, "sid", sid.as_deref());
+            insert_optional_string(&mut map, "altnumber", altnumber.as_deref());
+            insert_optional_string(&mut map, "pubnumber", pubnumber.as_deref());
         }
-        Node::Verse {
-            marker,
-            number,
-            sid,
-            altnumber,
-            pubnumber,
-        } => {
+        Node::Verse(data) => {
+            let VerseData {
+                marker,
+                number,
+                sid,
+                altnumber,
+                pubnumber,
+            } = data.as_ref();
             map.insert("type".into(), Value::String("verse".into()));
             map.insert("marker".into(), Value::String(marker.to_string()));
-            map.insert("number".into(), Value::String(number.clone()));
-            insert_optional_string(&mut map, "sid", sid.as_ref());
-            insert_optional_string(&mut map, "altnumber", altnumber.as_ref());
-            insert_optional_string(&mut map, "pubnumber", pubnumber.as_ref());
+            map.insert("number".into(), Value::String(number.to_string()));
+            insert_optional_string(&mut map, "sid", sid.as_deref());
+            insert_optional_string(&mut map, "altnumber", altnumber.as_deref());
+            insert_optional_string(&mut map, "pubnumber", pubnumber.as_deref());
         }
         Node::Para { marker, content } => {
             map.insert("type".into(), Value::String("para".into()));
             map.insert("marker".into(), Value::String(marker.to_string()));
             insert_content(&mut map, content, source, options)?;
         }
-        Node::Char {
-            marker,
-            content,
-            attributes,
-        } => {
+        Node::Char(data) => {
+            let CharData {
+                marker,
+                content,
+                attributes,
+            } = data.as_ref();
             map.insert("type".into(), Value::String("char".into()));
             map.insert("marker".into(), Value::String(marker.to_string()));
             insert_content(&mut map, content, source, options)?;
@@ -182,8 +185,8 @@ fn serialize_node(
         } => {
             map.insert("type".into(), Value::String("note".into()));
             map.insert("marker".into(), Value::String(marker.to_string()));
-            map.insert("caller".into(), Value::String(caller.clone()));
-            insert_optional_string(&mut map, "category", category.as_ref());
+            map.insert("caller".into(), Value::String(caller.to_string()));
+            insert_optional_string(&mut map, "category", category.as_deref());
             insert_content(&mut map, content, source, options)?;
         }
         Node::Milestone { marker, attributes } => {
@@ -208,7 +211,7 @@ fn serialize_node(
         } => {
             map.insert("type".into(), Value::String("sidebar".into()));
             map.insert("marker".into(), Value::String(marker.to_string()));
-            insert_optional_string(&mut map, "category", category.as_ref());
+            insert_optional_string(&mut map, "category", category.as_deref());
             insert_content(&mut map, content, source, options)?;
         }
         Node::Periph {
@@ -217,7 +220,7 @@ fn serialize_node(
             attributes,
         } => {
             map.insert("type".into(), Value::String("periph".into()));
-            insert_optional_string(&mut map, "alt", alt.as_ref());
+            insert_optional_string(&mut map, "alt", alt.as_deref());
             insert_content(&mut map, content, source, options)?;
             insert_attributes(&mut map, attributes)?;
         }
@@ -237,7 +240,7 @@ fn serialize_node(
         } => {
             map.insert("type".into(), Value::String("table:cell".into()));
             map.insert("marker".into(), Value::String(marker.to_string()));
-            map.insert("align".into(), Value::String(align.clone()));
+            map.insert("align".into(), Value::String(align.to_string()));
             insert_content(&mut map, content, source, options)?;
         }
         Node::Ref {
@@ -286,9 +289,9 @@ fn insert_content(
     Ok(())
 }
 
-fn insert_optional_string(map: &mut Map<String, Value>, key: &str, value: Option<&String>) {
+fn insert_optional_string(map: &mut Map<String, Value>, key: &str, value: Option<&str>) {
     if let Some(value) = value {
-        map.insert(key.into(), Value::String(value.clone()));
+        map.insert(key.into(), Value::String(value.to_string()));
     }
 }
 
@@ -324,7 +327,7 @@ mod tests {
     use crate::source_map::{SourceMap, SourceNode, SourceSpans};
     use serde_json::json;
 
-    fn sample_document() -> Document {
+    fn sample_document() -> Document<'static> {
         Document {
             content: vec![
                 Node::Book {
@@ -332,23 +335,23 @@ mod tests {
                     code: "GEN".into(),
                     content: vec![Node::text("Genesis")],
                 },
-                Node::Chapter {
+                Node::Chapter(Box::new(ChapterData {
                     marker: "c".into(),
                     number: "1".into(),
                     sid: Some("GEN 1".into()),
                     altnumber: None,
                     pubnumber: None,
-                },
+                })),
                 Node::Para {
                     marker: "p".into(),
                     content: vec![
-                        Node::Verse {
+                        Node::Verse(Box::new(VerseData {
                             marker: "v".into(),
                             number: "1".into(),
                             sid: Some("GEN 1:1".into()),
                             altnumber: None,
                             pubnumber: None,
-                        },
+                        })),
                         Node::text("In the beginning God created the heavens and the earth."),
                     ],
                 },
@@ -518,19 +521,19 @@ mod tests {
                     caller: "+".into(),
                     category: Some("ex".into()),
                     content: vec![
-                        Node::Char {
+                        Node::Char(Box::new(CharData {
                             marker: "fr".into(),
                             content: vec![Node::text("1.1")],
                             attributes: vec![],
-                        },
-                        Node::Char {
+                        })),
+                        Node::Char(Box::new(CharData {
                             marker: "ft".into(),
                             content: vec![Node::text("A footnote")],
                             attributes: vec![Attribute {
                                 key: "style".into(),
                                 value: "plain".into(),
                             }],
-                        },
+                        })),
                     ],
                 }],
             }],

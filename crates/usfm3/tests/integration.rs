@@ -15,7 +15,7 @@ use usfm3::vref;
 // ---------------------------------------------------------------------------
 
 /// Parse USFM and return the document, panicking on unexpected errors.
-fn get_ast(usfm: &str) -> usfm3::ast::Document {
+fn get_ast(usfm: &str) -> usfm3::ast::Document<'_> {
     builder::parse(usfm).ast
 }
 
@@ -27,7 +27,7 @@ fn get_full(usfm: &str) -> usfm3::ParsedDocument {
     usfm3::parse(usfm, usfm3::ParseOptions { diagnostics: true })
 }
 
-fn diagnostics(result: &usfm3::AstDocument) -> &[usfm3::diagnostics::Diagnostic] {
+fn diagnostics<'a>(result: &'a usfm3::AstDocument<'a>) -> &'a [usfm3::diagnostics::Diagnostic] {
     result
         .diagnostics
         .as_deref()
@@ -277,13 +277,13 @@ fn implicit_paragraph_and_verses() {
 
     let para_children = para.children();
     assert!(
-        matches!(para_children.first(), Some(Node::Verse { number, .. }) if number == "1"),
+        matches!(para_children.first(), Some(Node::Verse(data)) if data.number == "1"),
         "implicit paragraph should start with verse 1"
     );
     assert!(
         para_children
             .iter()
-            .any(|n| matches!(n, Node::Verse { number, .. } if number == "2")),
+            .any(|n| matches!(n, Node::Verse(data) if data.number == "2")),
         "implicit paragraph should also contain verse 2"
     );
 
@@ -877,7 +877,7 @@ fn ast_verse_inside_para() {
     let has_verse = para
         .children()
         .iter()
-        .any(|n| matches!(n, Node::Verse { number, .. } if number == "1"));
+        .any(|n| matches!(n, Node::Verse(data) if data.number == "1"));
     assert!(has_verse, "paragraph should contain verse 1");
 }
 
