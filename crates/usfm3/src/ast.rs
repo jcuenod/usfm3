@@ -95,9 +95,7 @@ pub enum Node {
     },
 
     /// Table container wrapping consecutive `\tr` rows.
-    Table {
-        content: Vec<Node>,
-    },
+    Table { content: Vec<Node> },
 
     /// `\tr` -- table row container.
     TableRow {
@@ -205,7 +203,11 @@ impl Node {
             | Node::TableRow { marker, .. }
             | Node::TableCell { marker, .. }
             | Node::Unknown { marker, .. } => Some(marker.as_str()),
-            Node::Table { .. } | Node::Periph { .. } | Node::Ref { .. } | Node::OptBreak | Node::Text(_) => None,
+            Node::Table { .. }
+            | Node::Periph { .. }
+            | Node::Ref { .. }
+            | Node::OptBreak
+            | Node::Text(_) => None,
         }
     }
 }

@@ -24,12 +24,7 @@ fn get_cst(usfm: &str) -> usfm3::cst::CstDocument {
 }
 
 fn get_full(usfm: &str) -> usfm3::ParsedDocument {
-    usfm3::parse(
-        usfm,
-        usfm3::ParseOptions {
-            diagnostics: true,
-        },
-    )
+    usfm3::parse(usfm, usfm3::ParseOptions { diagnostics: true })
 }
 
 fn diagnostics(result: &usfm3::AstDocument) -> &[usfm3::diagnostics::Diagnostic] {
@@ -145,12 +140,7 @@ fn cst_preserves_raw_marker_spelling() {
 fn lowering_from_cst_matches_direct_parse() {
     let usfm = "\\id GEN Genesis\n\\c 1\n\\p \\v 1 In the beginning\\nd Lord\\nd*\n";
     let cst = get_cst(usfm);
-    let lowered = builder::lower(
-        &cst,
-        usfm3::ParseOptions {
-            diagnostics: true,
-        },
-    );
+    let lowered = builder::lower(&cst, usfm3::ParseOptions { diagnostics: true });
     let parsed = builder::parse(usfm);
 
     assert_eq!(lowered.ast, parsed.ast);

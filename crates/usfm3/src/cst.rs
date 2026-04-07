@@ -316,25 +316,30 @@ fn export_node(document: &CstDocument, id: CstNodeId) -> ExportedCstNode {
         CstKind::Para { marker } => ("para".to_string(), Some(marker.to_string()), None, None),
         CstKind::Char { marker } => ("char".to_string(), Some(marker.to_string()), None, None),
         CstKind::Note { marker } => ("note".to_string(), Some(marker.to_string()), None, None),
-        CstKind::Milestone { marker } => {
-            ("milestone".to_string(), Some(marker.to_string()), None, None)
-        }
-        CstKind::Figure { marker } => {
-            ("figure".to_string(), Some(marker.to_string()), None, None)
-        }
+        CstKind::Milestone { marker } => (
+            "milestone".to_string(),
+            Some(marker.to_string()),
+            None,
+            None,
+        ),
+        CstKind::Figure { marker } => ("figure".to_string(), Some(marker.to_string()), None, None),
         CstKind::Sidebar { marker } => {
             ("sidebar".to_string(), Some(marker.to_string()), None, None)
         }
-        CstKind::Periph { marker } => {
-            ("periph".to_string(), Some(marker.to_string()), None, None)
-        }
+        CstKind::Periph { marker } => ("periph".to_string(), Some(marker.to_string()), None, None),
         CstKind::Table => ("table".to_string(), None, None, None),
-        CstKind::TableRow { marker } => {
-            ("table_row".to_string(), Some(marker.to_string()), None, None)
-        }
-        CstKind::TableCell { marker } => {
-            ("table_cell".to_string(), Some(marker.to_string()), None, None)
-        }
+        CstKind::TableRow { marker } => (
+            "table_row".to_string(),
+            Some(marker.to_string()),
+            None,
+            None,
+        ),
+        CstKind::TableCell { marker } => (
+            "table_cell".to_string(),
+            Some(marker.to_string()),
+            None,
+            None,
+        ),
         CstKind::Ref => ("ref".to_string(), None, None, None),
         CstKind::Unknown { marker } => {
             ("unknown".to_string(), Some(marker.to_string()), None, None)

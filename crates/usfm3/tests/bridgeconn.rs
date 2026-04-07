@@ -374,12 +374,7 @@ fn run_test_case(case: &TestCase) -> TestResult {
     };
 
     // Parse with our parser
-    let result = usfm3::parse_ast(
-        &usfm,
-        usfm3::ParseOptions {
-            diagnostics: true,
-        },
-    );
+    let result = usfm3::parse_ast(&usfm, usfm3::ParseOptions { diagnostics: true });
 
     // For "fail" tests, check that we produce diagnostics (from parsing or validation).
     if !case.validated_pass {

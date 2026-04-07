@@ -11,24 +11,27 @@ fn lazy_parse_handle_supports_core_workflow() {
     assert!(!parsed.ast().content.is_empty());
     assert!(parsed.source_map().content.len() == parsed.ast().content.len());
     assert!(parsed.diagnostics().is_none());
-    assert!(parsed
-        .to_usj(usfm3::usj::UsjOptions {
-            include_spans: true,
-        })
-        .is_ok());
+    assert!(
+        parsed
+            .to_usj(usfm3::usj::UsjOptions {
+                include_spans: true,
+            })
+            .is_ok()
+    );
 }
 
 #[test]
 fn eager_ast_can_include_diagnostics() {
     let ast_document = parse_ast(
         "\\id BAD\n\\c 1\n\\v 1 Text",
-        ParseOptions {
-            diagnostics: true,
-        },
+        ParseOptions { diagnostics: true },
     );
 
     assert!(ast_document.diagnostics.is_some());
-    assert_eq!(ast_document.ast.content.len(), ast_document.source_map.content.len());
+    assert_eq!(
+        ast_document.ast.content.len(),
+        ast_document.source_map.content.len()
+    );
 }
 
 #[test]

@@ -467,12 +467,12 @@ impl<'a> LowerCtx<'a> {
                         }
                         // Table row grouping
                         if matches!(&ast_child.node, Node::TableRow { .. }) {
-                            if let Some(last) = children.last_mut() {
-                                if let Node::Table { content, .. } = &mut last.node {
-                                    content.push(ast_child.node);
-                                    last.source.children.push(ast_child.source);
-                                    continue;
-                                }
+                            if let Some(last) = children.last_mut()
+                                && let Node::Table { content, .. } = &mut last.node
+                            {
+                                content.push(ast_child.node);
+                                last.source.children.push(ast_child.source);
+                                continue;
                             }
                             let span = ast_child.source_span().cloned().unwrap_or(0..0);
                             children.push(SpannedNode::new(
@@ -943,7 +943,11 @@ impl<'a> LowerCtx<'a> {
                             let (c, rest) = split_first_word(trimmed);
                             caller = Some(c.to_string());
                             if !rest.is_empty() {
-                                let rest = if rest.contains('~') { rest.replace('~', "\u{00a0}") } else { rest.to_string() };
+                                let rest = if rest.contains('~') {
+                                    rest.replace('~', "\u{00a0}")
+                                } else {
+                                    rest.to_string()
+                                };
                                 children.push(SpannedNode::text(&rest));
                             }
                             continue;

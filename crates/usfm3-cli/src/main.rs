@@ -28,17 +28,18 @@ fn main() {
                 .unwrap_or_else(|error| exit_with(&format!("USJ serialization failed: {error}")));
             println!(
                 "{}",
-                serde_json::to_string_pretty(&json)
-                    .unwrap_or_else(|error| exit_with(&format!("JSON serialization failed: {error}")))
+                serde_json::to_string_pretty(&json).unwrap_or_else(|error| exit_with(&format!(
+                    "JSON serialization failed: {error}"
+                )))
             );
         }
         "usx" => {
             let parsed = usfm3::parse(&input, usfm3::ParseOptions::default());
             println!(
                 "{}",
-                parsed
-                    .to_usx()
-                    .unwrap_or_else(|error| exit_with(&format!("USX serialization failed: {error}")))
+                parsed.to_usx().unwrap_or_else(|error| exit_with(&format!(
+                    "USX serialization failed: {error}"
+                )))
             );
         }
         "usfm" => {

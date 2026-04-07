@@ -1,5 +1,5 @@
-use std::cell::OnceCell;
 use serde::Serialize;
+use std::cell::OnceCell;
 
 pub mod ast;
 pub mod builder;
@@ -14,15 +14,9 @@ pub mod usx;
 pub mod validation;
 pub mod vref;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ParseOptions {
     pub diagnostics: bool,
-}
-
-impl Default for ParseOptions {
-    fn default() -> Self {
-        Self { diagnostics: false }
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -38,11 +38,17 @@ fn main() {
             }
         });
 
-        bench_stage("parse_ast_with_diagnostics", &name, iters, total_bytes, || {
-            for doc in &docs {
-                black_box(usfm3::parse_ast(doc, ParseOptions { diagnostics: true }));
-            }
-        });
+        bench_stage(
+            "parse_ast_with_diagnostics",
+            &name,
+            iters,
+            total_bytes,
+            || {
+                for doc in &docs {
+                    black_box(usfm3::parse_ast(doc, ParseOptions { diagnostics: true }));
+                }
+            },
+        );
 
         bench_stage("parse_lazy", &name, iters, total_bytes, || {
             for doc in &docs {

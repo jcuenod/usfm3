@@ -58,7 +58,11 @@ pub struct SourceNode {
 }
 
 impl SourceNode {
-    pub fn structural(spans: SourceSpans, children: Vec<SourceNode>, anchor_cst: Option<usize>) -> Self {
+    pub fn structural(
+        spans: SourceSpans,
+        children: Vec<SourceNode>,
+        anchor_cst: Option<usize>,
+    ) -> Self {
         Self {
             spans: Some(spans),
             children,

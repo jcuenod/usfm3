@@ -46,7 +46,9 @@ pub fn to_usj_string_with_options(
     source_map: Option<&SourceMap>,
     options: UsjOptions,
 ) -> Result<String, UsjError> {
-    Ok(serde_json::to_string(&to_usj_value_with_options(doc, source_map, options)?)?)
+    Ok(serde_json::to_string(&to_usj_value_with_options(
+        doc, source_map, options,
+    )?)?)
 }
 
 pub fn to_usj_string_pretty(doc: &Document) -> Result<String, UsjError> {

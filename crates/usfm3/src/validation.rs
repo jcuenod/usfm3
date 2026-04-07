@@ -98,7 +98,8 @@ impl<'a> Validator<'a> {
                 }
             }
             Some(Node::Text(_)) => {
-                self.diagnostics.push(Diagnostic::text_before_id(span_of(first_source)));
+                self.diagnostics
+                    .push(Diagnostic::text_before_id(span_of(first_source)));
                 self.diagnostics.push(Diagnostic::missing_id_marker());
             }
             _ => {
@@ -110,7 +111,8 @@ impl<'a> Validator<'a> {
             match node {
                 Node::Book { .. } => {
                     if self.saw_book {
-                        self.diagnostics.push(Diagnostic::duplicate_id(span_of(Some(source))));
+                        self.diagnostics
+                            .push(Diagnostic::duplicate_id(span_of(Some(source))));
                     }
                     self.saw_book = true;
                 }
@@ -134,10 +136,11 @@ impl<'a> Validator<'a> {
                         && marker.kind() == MarkerKind::Paragraph
                         && !is_introduction_marker(marker.as_str())
                     {
-                        self.diagnostics.push(Diagnostic::body_paragraph_before_chapter(
-                            marker.as_str(),
-                            span_of(Some(source)),
-                        ));
+                        self.diagnostics
+                            .push(Diagnostic::body_paragraph_before_chapter(
+                                marker.as_str(),
+                                span_of(Some(source)),
+                            ));
                     }
                 }
                 _ => {}
@@ -196,10 +199,11 @@ impl<'a> Validator<'a> {
                 attributes,
             } => {
                 if !inside_note && is_note_only_marker(marker.as_str()) {
-                    self.diagnostics.push(Diagnostic::note_submarker_outside_note(
-                        marker.as_str(),
-                        span_of(Some(source)),
-                    ));
+                    self.diagnostics
+                        .push(Diagnostic::note_submarker_outside_note(
+                            marker.as_str(),
+                            span_of(Some(source)),
+                        ));
                 }
                 if content.iter().any(|n| matches!(n, Node::Verse { .. })) {
                     self.diagnostics.push(Diagnostic::char_crosses_verse(
@@ -211,20 +215,22 @@ impl<'a> Validator<'a> {
                 let clean_marker = marker.strip_prefix('+').unwrap_or(marker.as_str());
                 for &req in markers::required_attributes(clean_marker) {
                     if !attributes.iter().any(|a| a.key == req) {
-                        self.diagnostics.push(Diagnostic::missing_required_attribute(
-                            clean_marker,
-                            req,
-                            span_of(Some(source)),
-                        ));
+                        self.diagnostics
+                            .push(Diagnostic::missing_required_attribute(
+                                clean_marker,
+                                req,
+                                span_of(Some(source)),
+                            ));
                     }
                 }
                 if attributes.iter().any(|a| a.key == "default")
                     && markers::default_attribute(clean_marker).is_none()
                 {
-                    self.diagnostics.push(Diagnostic::default_attribute_not_defined(
-                        clean_marker,
-                        span_of(Some(source)),
-                    ));
+                    self.diagnostics
+                        .push(Diagnostic::default_attribute_not_defined(
+                            clean_marker,
+                            span_of(Some(source)),
+                        ));
                 }
                 if attributes.iter().any(|a| a.value.trim().is_empty()) {
                     self.diagnostics
@@ -237,10 +243,7 @@ impl<'a> Validator<'a> {
                 self.walk_children(content, source, inside_note);
             }
             Node::Note { content, .. } => self.walk_children(content, source, true),
-            Node::Figure {
-                content,
-                ..
-            } => {
+            Node::Figure { content, .. } => {
                 if content_is_blank(content) {
                     self.diagnostics
                         .push(Diagnostic::empty_figure(span_of(Some(source))));
@@ -300,11 +303,12 @@ impl<'a> Validator<'a> {
                 continue;
             };
             if start_col != expected {
-                self.diagnostics.push(Diagnostic::invalid_table_column_sequence(
-                    expected,
-                    start_col,
-                    span_of(Some(source)),
-                ));
+                self.diagnostics
+                    .push(Diagnostic::invalid_table_column_sequence(
+                        expected,
+                        start_col,
+                        span_of(Some(source)),
+                    ));
             }
             expected = end_col + 1;
         }
@@ -315,8 +319,10 @@ impl<'a> Validator<'a> {
             let end_count = self.milestone_ends.get(marker).map_or(0, Vec::len);
             if spans.len() > end_count {
                 for span in spans.iter().skip(end_count) {
-                    self.diagnostics
-                        .push(Diagnostic::milestone_mismatch(&format!("{marker}-s"), span.clone()));
+                    self.diagnostics.push(Diagnostic::milestone_mismatch(
+                        &format!("{marker}-s"),
+                        span.clone(),
+                    ));
                 }
             }
         }
@@ -324,15 +330,20 @@ impl<'a> Validator<'a> {
             let start_count = self.milestone_starts.get(marker).map_or(0, Vec::len);
             if spans.len() > start_count {
                 for span in spans.iter().skip(start_count) {
-                    self.diagnostics
-                        .push(Diagnostic::milestone_mismatch(&format!("{marker}-e"), span.clone()));
+                    self.diagnostics.push(Diagnostic::milestone_mismatch(
+                        &format!("{marker}-e"),
+                        span.clone(),
+                    ));
                 }
             }
         }
     }
 }
 
-fn zip_nodes<'a>(nodes: &'a [Node], sources: &'a [SourceNode]) -> impl Iterator<Item = (&'a Node, &'a SourceNode)> {
+fn zip_nodes<'a>(
+    nodes: &'a [Node],
+    sources: &'a [SourceNode],
+) -> impl Iterator<Item = (&'a Node, &'a SourceNode)> {
     nodes.iter().zip(sources.iter())
 }
 
@@ -407,7 +418,9 @@ fn is_body_header_marker(marker: &str) -> bool {
 }
 
 fn milestone_base(marker: &str) -> Option<&str> {
-    marker.strip_suffix("-s").or_else(|| marker.strip_suffix("-e"))
+    marker
+        .strip_suffix("-s")
+        .or_else(|| marker.strip_suffix("-e"))
 }
 
 #[cfg(test)]

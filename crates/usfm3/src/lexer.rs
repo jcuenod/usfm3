@@ -141,7 +141,11 @@ fn token_to_export(token: Token<'_>, span: Span) -> TokenSpan {
         Token::NestedMarker(text) => (
             "marker".to_string(),
             text.to_string(),
-            Some(strip_marker_backslash(text).trim_start_matches('+').to_string()),
+            Some(
+                strip_marker_backslash(text)
+                    .trim_start_matches('+')
+                    .to_string(),
+            ),
             Some("nested".to_string()),
         ),
         Token::NestedClosingMarker(text) => (
