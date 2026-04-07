@@ -157,7 +157,7 @@ impl<'a> LowerCtx<'a> {
             if node.kind.is_leaf() {
                 // Stray closing markers produce diagnostics.
                 if let CstKind::ClosingMarkerToken { normalized, .. } = &node.kind {
-                    self.push_diagnostic(
+                    self.push_diagnostic(|| 
                         Diagnostic::stray_close(normalized.as_str(), node.span.clone())
                             .with_anchor_cst(id.index()),
                     );
@@ -166,7 +166,7 @@ impl<'a> LowerCtx<'a> {
                 if let CstKind::MarkerToken { normalized, .. } = &node.kind
                     && normalized.kind() == MarkerKind::SidebarEnd
                 {
-                    self.push_diagnostic(
+                    self.push_diagnostic(|| 
                         Diagnostic::stray_close(normalized.as_str(), node.span.clone())
                             .with_anchor_cst(id.index()),
                     );
@@ -177,7 +177,7 @@ impl<'a> LowerCtx<'a> {
             if parent_is_root && matches!(node.kind, CstKind::Verse { .. }) {
                 if !verse_warned {
                     verse_warned = true;
-                    self.push_diagnostic(
+                    self.push_diagnostic(|| 
                         Diagnostic::verse_outside_paragraph(node.span.clone())
                             .with_anchor_cst(id.index()),
                     );
@@ -358,7 +358,7 @@ impl<'a> LowerCtx<'a> {
                 CstKind::MarkerToken { normalized, .. } => {
                     // Stray \esbe inside a paragraph/element
                     if normalized.kind() == MarkerKind::SidebarEnd {
-                        self.push_diagnostic(
+                        self.push_diagnostic(|| 
                             Diagnostic::stray_close(normalized.as_str(), child.span.clone())
                                 .with_anchor_cst(child_id.index()),
                         );
@@ -376,7 +376,7 @@ impl<'a> LowerCtx<'a> {
                         after_open = false;
                         pending_space = false;
                     } else {
-                        self.push_diagnostic(
+                        self.push_diagnostic(|| 
                             Diagnostic::stray_close(normalized.as_str(), child.span.clone())
                                 .with_anchor_cst(child_id.index()),
                         );
@@ -418,7 +418,7 @@ impl<'a> LowerCtx<'a> {
                     let parsed = match parse_attributes(text) {
                         Some(attrs) => attrs,
                         None => {
-                            self.push_diagnostic(
+                            self.push_diagnostic(|| 
                                 Diagnostic::malformed_attributes(child.span.clone())
                                     .with_anchor_cst(child_id.index()),
                             );
@@ -518,9 +518,9 @@ impl<'a> LowerCtx<'a> {
         children
     }
 
-    fn push_diagnostic(&mut self, diagnostic: Diagnostic) {
+    fn push_diagnostic(&mut self, make_diagnostic: impl FnOnce() -> Diagnostic) {
         if self.collect_diagnostics {
-            self.diagnostics.push(diagnostic);
+            self.diagnostics.push(make_diagnostic());
         }
     }
 
@@ -536,7 +536,7 @@ impl<'a> LowerCtx<'a> {
     ) -> Option<SpannedNode<'a>> {
         if marker == "id" {
             if self.seen_id {
-                self.push_diagnostic(
+                self.push_diagnostic(|| 
                     Diagnostic::duplicate_id(node.span.clone()).with_anchor_cst(id.index()),
                 );
                 return None;
@@ -625,13 +625,13 @@ impl<'a> LowerCtx<'a> {
         let number: Cow<'a, str> = Cow::Owned(number_str);
 
         if number.is_empty() {
-            self.push_diagnostic(
+            self.push_diagnostic(|| 
                 Diagnostic::missing_chapter_number(marker_span.clone()).with_anchor_cst(id.index()),
             );
         }
 
         if number.starts_with('0') && number.len() > 1 {
-            self.push_diagnostic(
+            self.push_diagnostic(|| 
                 Diagnostic::leading_zeros(&number, marker_span.clone()).with_anchor_cst(id.index()),
             );
         }
@@ -667,13 +667,13 @@ impl<'a> LowerCtx<'a> {
         let number: Cow<'a, str> = Cow::Owned(number_str);
 
         if number.is_empty() {
-            self.push_diagnostic(
+            self.push_diagnostic(|| 
                 Diagnostic::missing_verse_number(marker_span.clone()).with_anchor_cst(id.index()),
             );
         }
 
         if number.starts_with('0') && number.len() > 1 {
-            self.push_diagnostic(
+            self.push_diagnostic(|| 
                 Diagnostic::leading_zeros(&number, marker_span.clone()).with_anchor_cst(id.index()),
             );
         }
@@ -716,7 +716,7 @@ impl<'a> LowerCtx<'a> {
         }
 
         if marker == "addpn" {
-            self.push_diagnostic(
+            self.push_diagnostic(|| 
                 Diagnostic::deprecated_marker(
                     marker.as_str(),
                     "nested \\pn ...\\pn* within \\add ...\\add*",
@@ -761,7 +761,7 @@ impl<'a> LowerCtx<'a> {
         let nested = self.is_nested_marker(node);
 
         if marker == "addpn" {
-            self.push_diagnostic(
+            self.push_diagnostic(|| 
                 Diagnostic::deprecated_marker(
                     marker.as_str(),
                     "nested \\pn ...\\pn* within \\add ...\\add*",
@@ -938,7 +938,7 @@ impl<'a> LowerCtx<'a> {
                             attributes.extend(resolved);
                         }
                     } else {
-                        self.push_diagnostic(
+                        self.push_diagnostic(|| 
                             Diagnostic::malformed_attributes(child.span.clone())
                                 .with_anchor_cst(child_id.index()),
                         );
@@ -994,7 +994,7 @@ impl<'a> LowerCtx<'a> {
 
         // Check for unclosed note
         if close_span.is_none() {
-            self.push_diagnostic(
+            self.push_diagnostic(|| 
                 Diagnostic::unclosed_note(marker.as_str(), node.span.clone())
                     .with_anchor_cst(id.index()),
             );
@@ -1047,7 +1047,7 @@ impl<'a> LowerCtx<'a> {
         }
 
         if !has_milestone_end {
-            self.push_diagnostic(
+            self.push_diagnostic(|| 
                 Diagnostic::missing_milestone_self_close(marker.as_str(), node.span.clone())
                     .with_anchor_cst(id.index()),
             );
@@ -1119,7 +1119,7 @@ impl<'a> LowerCtx<'a> {
         );
 
         if close_span.is_none() {
-            self.push_diagnostic(
+            self.push_diagnostic(|| 
                 Diagnostic::unclosed_at_eof(marker.as_str(), node.span.clone())
                     .with_anchor_cst(id.index()),
             );
@@ -1370,7 +1370,7 @@ impl<'a> LowerCtx<'a> {
         }
 
         if !marker.as_str().starts_with('z') {
-            self.push_diagnostic(
+            self.push_diagnostic(|| 
                 Diagnostic::unknown_marker(marker.as_str(), node.span.clone())
                     .with_anchor_cst(id.index()),
             );
@@ -1433,7 +1433,7 @@ impl<'a> LowerCtx<'a> {
                     ) {
                         if node.span.end < self.doc.source().len() {
                             let closer = self.find_implicit_closer(node);
-                            self.push_diagnostic(
+                            self.push_diagnostic(|| 
                                 Diagnostic::implicitly_closed(
                                     marker.as_str(),
                                     node.span.clone(),
@@ -1442,7 +1442,7 @@ impl<'a> LowerCtx<'a> {
                                 .with_anchor_cst(id.index()),
                             );
                         } else {
-                            self.push_diagnostic(
+                            self.push_diagnostic(|| 
                                 Diagnostic::unclosed_at_eof(marker.as_str(), node.span.clone())
                                     .with_anchor_cst(id.index()),
                             );
@@ -1462,7 +1462,7 @@ impl<'a> LowerCtx<'a> {
                             };
 
                             if !is_parent_note_closer {
-                                self.push_diagnostic(
+                                self.push_diagnostic(|| 
                                     Diagnostic::misnested_close(
                                         marker.as_str(),
                                         normalized.as_str(),
@@ -1473,20 +1473,20 @@ impl<'a> LowerCtx<'a> {
                             }
                         }
                     } else if node.span.end >= self.doc.source().len() {
-                        self.push_diagnostic(
+                        self.push_diagnostic(|| 
                             Diagnostic::unclosed_at_eof(marker.as_str(), node.span.clone())
                                 .with_anchor_cst(id.index()),
                         );
                     }
                 } else {
-                    self.push_diagnostic(
+                    self.push_diagnostic(|| 
                         Diagnostic::unclosed_at_eof(marker.as_str(), node.span.clone())
                             .with_anchor_cst(id.index()),
                     );
                 }
             }
             MarkerKind::Figure => {
-                self.push_diagnostic(
+                self.push_diagnostic(|| 
                     Diagnostic::unclosed_at_eof(marker.as_str(), node.span.clone())
                         .with_anchor_cst(id.index()),
                 );
