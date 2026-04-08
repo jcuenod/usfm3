@@ -157,7 +157,7 @@ export interface AstDocument {
 
 export interface ParsedAstDocument {
   ast: AstDocument;
-  source_map: SourceMap;
+  sourceMap: SourceMap;
   diagnostics?: Diagnostic[];
 }
 
@@ -419,6 +419,14 @@ pub fn parse_cst(usfm: &str) -> Result<JsValue, JsError> {
     to_js_value(&usfm3_lib::cst::export(&cst))
 }
 
+#[derive(Serialize)]
+struct JsAstDocument<'a> {
+    ast: &'a usfm3_lib::ast::Document<'a>,
+    #[serde(rename = "sourceMap")]
+    source_map: &'a usfm3_lib::source_map::SourceMap,
+    diagnostics: &'a Option<Vec<usfm3_lib::diagnostics::Diagnostic>>,
+}
+
 #[wasm_bindgen(skip_typescript, js_name = "parseAst")]
 pub fn parse_ast(usfm: &str, options: Option<ParseOptions>) -> Result<JsValue, JsError> {
     let options = options.unwrap_or_default();
@@ -428,7 +436,12 @@ pub fn parse_ast(usfm: &str, options: Option<ParseOptions>) -> Result<JsValue, J
             diagnostics: options.diagnostics,
         },
     );
-    to_js_value(&ast_document)
+    let js_doc = JsAstDocument {
+        ast: &ast_document.ast,
+        source_map: &ast_document.source_map,
+        diagnostics: &ast_document.diagnostics,
+    };
+    to_js_value(&js_doc)
 }
 
 #[wasm_bindgen(skip_typescript)]

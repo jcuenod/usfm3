@@ -58,7 +58,7 @@ Returns:
 ```ts
 {
   ast: ...,
-  source_map: ...,
+  sourceMap: ...,
   diagnostics?: Diagnostic[]
 }
 ```

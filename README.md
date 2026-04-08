@@ -1,10 +1,14 @@
 # usfm3
 
-An error-tolerant USFM 3.x parser written in Rust, with CLI, Python, and WebAssembly bindings.
+> ⚠️ **Beta Notice**: This project is in beta and the API may change before reaching stability. I will, of course, try to minimize breaking changes and follow `semver`. But until there's a 1.0.0, I will break things at my own discretion. If you want to be notified beforehand, let me know. Otherwise, I will assume no one is using this in anything mission critical.
+
+A fast, flexible, error-tolerant USFM 3.x parser written in Rust, with CLI, Python, and WebAssembly bindings.
 
 The public API is staged:
 
-`tokenize -> parse_cst -> parse_ast / lower_cst -> serialize`
+```
+tokenize -> parse_cst -> parse_ast / lower_cst -> serialize
+```
 
 That lets editor-style integrations stay on the cheap token/CST path, while AST-dependent work like USJ, USX, USFM, vref, and diagnostics is only paid for when requested.
 

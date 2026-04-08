@@ -383,7 +383,7 @@ check("cst.children is array", Array.isArray(cst.children));
 const parsedAst: ParsedAstDocument = parseAst(USFM, { diagnostics: true });
 
 check("parseAst.ast.content is array", Array.isArray(parsedAst.ast.content));
-check("parseAst.source_map.content is array", Array.isArray(parsedAst.source_map.content));
+check("parseAst.sourceMap.content is array", Array.isArray(parsedAst.sourceMap.content));
 for (const node of parsedAst.ast.content) checkAstNode(node);
 
 // ── parse() + diagnostics() ───────────────────────────────────────────────────
