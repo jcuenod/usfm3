@@ -460,9 +460,9 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(value["content"][0]["spans"]["node"], json!([0, 20]));
-        assert_eq!(value["content"][0]["spans"]["code"], json!([4, 7]));
-        assert_eq!(value["content"][1]["spans"]["number"], json!([24, 25]));
+        assert_eq!(value["content"][0]["spans"]["node"], json!({"start": 0, "end": 20}));
+        assert_eq!(value["content"][0]["spans"]["code"], json!({"start": 4, "end": 7}));
+        assert_eq!(value["content"][1]["spans"]["number"], json!({"start": 24, "end": 25}));
         assert!(value["content"][2]["content"][1].is_string());
     }
 

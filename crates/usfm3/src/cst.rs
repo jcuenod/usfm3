@@ -545,11 +545,7 @@ impl<'a> CstParser<'a> {
             }
             self.refresh_span(chapter_id);
             if !rest.is_empty() {
-                self.append_leaf(
-                    CstKind::TextToken,
-                    span.start + number.len()..span.end,
-                    Some(rest),
-                );
+                self.append_rest_tokens(&span, number.len(), rest);
             }
             return;
         }
@@ -562,11 +558,7 @@ impl<'a> CstParser<'a> {
             }
             self.refresh_span(verse_id);
             if !rest.is_empty() {
-                self.append_leaf(
-                    CstKind::TextToken,
-                    span.start + number.len()..span.end,
-                    Some(rest),
-                );
+                self.append_rest_tokens(&span, number.len(), rest);
             }
             return;
         }
@@ -1082,6 +1074,29 @@ impl<'a> CstParser<'a> {
             // debug_assert_eq!(text, actual);
         }
         self.push_node(kind, span, parent)
+    }
+
+    /// After splitting a verse/chapter number from text, emit the remainder:
+    /// leading whitespace as a `WhitespaceToken`, then any remaining content
+    /// as a `TextToken`.  This keeps trivia distinct from text content.
+    fn append_rest_tokens(&mut self, span: &Span, number_len: usize, rest: &str) {
+        let rest_start = span.start + number_len;
+        let ws_len = rest.len() - rest.trim_start().len();
+        if ws_len > 0 {
+            self.append_leaf(
+                CstKind::WhitespaceToken,
+                rest_start..rest_start + ws_len,
+                Some(&rest[..ws_len]),
+            );
+        }
+        let content = &rest[ws_len..];
+        if !content.is_empty() {
+            self.append_leaf(
+                CstKind::TextToken,
+                rest_start + ws_len..span.end,
+                Some(content),
+            );
+        }
     }
 
     fn current_parent(&self) -> CstNodeId {

@@ -202,9 +202,16 @@ impl<'a> LowerCtx<'a> {
                     if next.kind.is_leaf() {
                         match &next.kind {
                             CstKind::TextToken => {
-                                after_verse = false;
-                                let text = self.doc.source_text(next_id);
-                                self.append_normalized_text(&mut para_children, text);
+                                let raw = self.doc.source_text(next_id);
+                                let text = if after_verse {
+                                    raw.trim_start_matches(|c: char| c == ' ' || c == '\t')
+                                } else {
+                                    raw
+                                };
+                                if !text.is_empty() {
+                                    after_verse = false;
+                                    self.append_normalized_text(&mut para_children, text);
+                                }
                             }
                             CstKind::WhitespaceToken => {
                                 if !after_verse {
