@@ -1,5 +1,6 @@
 /// Semantic validation pass for parsed USFM documents.
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 
 use crate::ast::{Document, Node};
 use crate::diagnostics::{Diagnostic, DiagnosticList, Span};
@@ -29,22 +30,65 @@ const NOTE_ONLY_MARKERS: &[&str] = &[
     "fr", "ft", "fk", "fq", "fqa", "fl", "fw", "fp", "fv", "fdc", "xop", "xot", "xnt", "xdc",
 ];
 
-fn parse_verse_start(s: &str) -> Option<u32> {
+/// A verse number with an optional alphabetic suffix, e.g. `3` or `3b`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct VersePart {
+    num: u32,
+    /// Letter suffix such as `'a'` or `'b'`; `None` for plain integers.
+    suffix: Option<char>,
+}
+
+impl VersePart {
+    fn next_expected(self) -> Self {
+        match self.suffix {
+            None => Self { num: self.num + 1, suffix: None },
+            Some(c) => Self { num: self.num, suffix: Some((c as u8 + 1) as char) },
+        }
+    }
+}
+
+impl fmt::Display for VersePart {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.suffix {
+            None => write!(f, "{}", self.num),
+            Some(c) => write!(f, "{}{}", self.num, c),
+        }
+    }
+}
+
+fn parse_verse_part(s: &str) -> Option<VersePart> {
     let s = s.trim_start();
     let end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
     let digits = &s[..end];
     if digits.is_empty() {
-        None
+        return None;
+    }
+    let num = digits.parse().ok()?;
+    let suffix = s[end..].chars().next().filter(|c| c.is_ascii_lowercase());
+    Some(VersePart { num, suffix })
+}
+
+fn parse_verse_range_end(s: &str) -> Option<VersePart> {
+    if let Some(pos) = s.find('-') {
+        parse_verse_part(&s[pos + 1..])
     } else {
-        digits.parse().ok()
+        parse_verse_part(s)
     }
 }
 
-fn parse_verse_end(s: &str) -> Option<u32> {
-    if let Some(pos) = s.find('-') {
-        parse_verse_start(&s[pos + 1..])
+/// Returns `true` if `actual` is a valid next verse given `expected`.
+///
+/// Allows:
+/// - Same integer, suffix advances (or no suffix expected yet): `3` → `3`, `3` → `3a`, `3a` → `3b`
+/// - Next integer after a suffix sequence: `3a` or `3b` → `4`
+/// - Standard integer increment: `3` → `4`
+fn is_valid_verse_sequence(expected: VersePart, actual: VersePart) -> bool {
+    if actual.num != expected.num {
+        // Different integer: gap/backward unless transitioning from a suffix sequence to the next integer
+        expected.suffix.is_some() && actual.num == expected.num + 1
     } else {
-        parse_verse_start(s)
+        // Same integer: suffix must not go backward (None < Some('a') < Some('b') < …)
+        actual.suffix >= expected.suffix
     }
 }
 
@@ -70,7 +114,7 @@ struct Validator<'a> {
     diagnostics: &'a mut DiagnosticList,
     expected_chapter: u32,
     seen_chapters: HashSet<u32>,
-    expected_verse: u32,
+    expected_verse: VersePart,
     saw_book: bool,
     has_chapter: bool,
     body_started: bool,
@@ -84,7 +128,7 @@ impl<'a> Validator<'a> {
             diagnostics,
             expected_chapter: 1,
             seen_chapters: HashSet::new(),
-            expected_verse: 1,
+            expected_verse: VersePart { num: 1, suffix: None },
             saw_book: false,
             has_chapter: false,
             body_started: false,
@@ -125,7 +169,7 @@ impl<'a> Validator<'a> {
                 Node::Chapter(_) => {
                     self.body_started = true;
                     self.has_chapter = true;
-                    self.expected_verse = 1;
+                    self.expected_verse = VersePart { num: 1, suffix: None };
                     self.handle_chapter_sequence(node, source);
                 }
                 Node::Para { marker, .. } => {
@@ -188,15 +232,17 @@ impl<'a> Validator<'a> {
     fn walk(&mut self, node: &Node, source: &SourceNode, inside_note: bool) {
         match node {
             Node::Verse(data) => {
-                if let Some(v_start) = parse_verse_start(&data.number) {
-                    if v_start != self.expected_verse {
+                if let Some(v_start) = parse_verse_part(&data.number) {
+                    if !is_valid_verse_sequence(self.expected_verse, v_start) {
                         self.diagnostics.push(Diagnostic::invalid_verse_sequence(
                             &self.expected_verse.to_string(),
                             &data.number,
                             span_of(Some(source)),
                         ));
                     }
-                    self.expected_verse = parse_verse_end(&data.number).unwrap_or(v_start) + 1;
+                    self.expected_verse = parse_verse_range_end(&data.number)
+                        .unwrap_or(v_start)
+                        .next_expected();
                 }
             }
             Node::Char(data) => {
@@ -470,14 +516,15 @@ mod tests {
 
     #[test]
     fn parse_verse_helpers_cover_ranges_and_suffixes() {
-        assert_eq!(parse_verse_start("1"), Some(1));
-        assert_eq!(parse_verse_start("3-4"), Some(3));
-        assert_eq!(parse_verse_start("2b"), Some(2));
-        assert_eq!(parse_verse_start("abc"), None);
+        let vp = |num, suffix| Some(VersePart { num, suffix });
+        assert_eq!(parse_verse_part("1"), vp(1, None));
+        assert_eq!(parse_verse_part("3-4"), vp(3, None));
+        assert_eq!(parse_verse_part("2b"), vp(2, Some('b')));
+        assert_eq!(parse_verse_part("abc"), None);
 
-        assert_eq!(parse_verse_end("1"), Some(1));
-        assert_eq!(parse_verse_end("3-4"), Some(4));
-        assert_eq!(parse_verse_end("2b-3a"), Some(3));
+        assert_eq!(parse_verse_range_end("1"), vp(1, None));
+        assert_eq!(parse_verse_range_end("3-4"), vp(4, None));
+        assert_eq!(parse_verse_range_end("2b-3a"), vp(3, Some('a')));
     }
 
     #[test]
@@ -1052,5 +1099,62 @@ mod tests {
         ]);
 
         assert!(validate_doc(&doc).is_empty());
+    }
+
+    #[test]
+    fn verse_sequence_handles_sub_verse_letters() {
+        fn make_doc(numbers: &[&'static str]) -> Document<'static> {
+            let verses = numbers
+                .iter()
+                .map(|n| {
+                    Node::Verse(Box::new(VerseData {
+                        marker: "v".into(),
+                        number: (*n).into(),
+                        sid: None,
+                        altnumber: None,
+                        pubnumber: None,
+                    }))
+                })
+                .collect();
+            doc_with(vec![
+                Node::Book {
+                    marker: "id".into(),
+                    code: "GEN".into(),
+                    content: vec![],
+                },
+                Node::Chapter(Box::new(ChapterData {
+                    marker: "c".into(),
+                    number: "1".into(),
+                    sid: None,
+                    altnumber: None,
+                    pubnumber: None,
+                })),
+                Node::Para {
+                    marker: "p".into(),
+                    content: verses,
+                },
+            ])
+        }
+        fn has_seq_err(numbers: &[&'static str]) -> bool {
+            validate_doc(&make_doc(numbers))
+                .iter()
+                .any(|d| d.code == DiagnosticCode::InvalidVerseSequence)
+        }
+
+        // Single sub-verse is fine — treated as that integer's position
+        assert!(!has_seq_err(&["1", "2", "3b", "4"]));
+        // Full sub-verse sequence then next integer
+        assert!(!has_seq_err(&["1", "2", "3a", "3b", "4"]));
+        // Longer sub-verse sequence
+        assert!(!has_seq_err(&["1", "2", "3a", "3b", "3c", "4"]));
+        // Sub-verse then skip to next integer (3a, then 4 — 3b never appears)
+        assert!(!has_seq_err(&["1", "2", "3a", "4"]));
+
+        // Repeated sub-verse is an error
+        assert!(has_seq_err(&["1", "2", "3a", "3a", "4"]));
+        // Backward sub-verse is an error
+        assert!(has_seq_err(&["1", "2", "3b", "3a", "4"]));
+        // Plain verse after a sub-verse of the same integer is an error
+        assert!(has_seq_err(&["1", "2", "3a", "3", "4"]));
     }
 }

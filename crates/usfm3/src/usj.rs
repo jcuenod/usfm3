@@ -307,15 +307,27 @@ fn insert_attributes(
 
 fn serialize_spans(spans: &SourceSpans) -> Value {
     let mut map = Map::new();
-    map.insert("node".into(), json!([spans.node.start, spans.node.end]));
+    map.insert("node".into(), json!({
+        "start": spans.node.start,
+        "end": spans.node.end
+    }));
     if let Some(code) = &spans.code {
-        map.insert("code".into(), json!([code.start, code.end]));
+        map.insert("code".into(), json!({
+            "start": code.start,
+            "end": code.end
+        }));
     }
     if let Some(number) = &spans.number {
-        map.insert("number".into(), json!([number.start, number.end]));
+        map.insert("number".into(), json!({
+            "start": number.start,
+            "end": number.end
+        }));
     }
     if let Some(close) = &spans.close {
-        map.insert("close".into(), json!([close.start, close.end]));
+        map.insert("close".into(), json!({
+            "start": close.start,
+            "end": close.end
+        }));
     }
     Value::Object(map)
 }

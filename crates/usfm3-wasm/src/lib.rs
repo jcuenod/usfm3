@@ -28,22 +28,319 @@ export interface UsjOptions {
   spans?: boolean;
 }
 
+// ── Primitives ───────────────────────────────────────────────────────────────
+
+export interface Span {
+  start: number;
+  end: number;
+}
+
+// ── Diagnostics ──────────────────────────────────────────────────────────────
+
+export type Severity = "info" | "warning" | "error";
+
+export type DiagnosticCode =
+  | "UnknownMarker"
+  | "DeprecatedMarker"
+  | "UnclosedMarker"
+  | "StrayCloseMarker"
+  | "MisnestedMarker"
+  | "MissingNestingPrefix"
+  | "ImplicitClose"
+  | "UnclosedNote"
+  | "UnclosedAtEof"
+  | "InvalidChapterSequence"
+  | "InvalidVerseSequence"
+  | "DuplicateChapter"
+  | "DuplicateId"
+  | "MissingIdMarker"
+  | "InvalidBookCode"
+  | "NoteSubmarkerOutsideNote"
+  | "TextBeforeId"
+  | "HeaderAfterBody"
+  | "MilestoneMismatch"
+  | "InvalidAttributes"
+  | "MissingChapterNumber"
+  | "MissingVerseNumber"
+  | "VerseOutsideParagraph"
+  | "MissingChapterMarker"
+  | "CharCrossesVerseBoundary"
+  | "EmptyFigure"
+  | "UnquotedAttributeValue"
+  | "MissingRequiredAttribute"
+  | "DefaultAttributeNotDefined"
+  | "BodyParagraphBeforeChapter"
+  | "NonEmptyBlankLine"
+  | "LeadingZeros"
+  | "EmptyWordMarker"
+  | "MissingMilestoneSelfClose"
+  | "InvalidTableColumnSequence";
+
+export interface Diagnostic {
+  severity: Severity;
+  span: Span;
+  message: string;
+  code: DiagnosticCode;
+  anchor_cst?: number;
+}
+
+// ── Tokens ───────────────────────────────────────────────────────────────────
+
+export interface TokenSpan {
+  kind: "whitespace" | "marker" | "closing_marker" | "milestone_end" | "attributes" | "text" | "newline";
+  text: string;
+  start: number;
+  end: number;
+  normalized_marker?: string;
+  token_kind?: "chapter" | "verse" | "milestone" | "nested" | "regular";
+}
+
+// ── CST ──────────────────────────────────────────────────────────────────────
+
+export interface ExportedCstNode {
+  type: string;
+  span: Span;
+  marker?: string;
+  token_kind?: string;
+  text?: string;
+  children?: ExportedCstNode[];
+}
+
+// ── Source Map ────────────────────────────────────────────────────────────────
+
+export interface SourceSpans {
+  node: Span;
+  code?: Span;
+  number?: Span;
+  close?: Span;
+}
+
+export interface SourceNode {
+  spans?: SourceSpans;
+  children?: SourceNode[];
+  anchor_cst?: number;
+}
+
+export interface SourceMap {
+  content: SourceNode[];
+}
+
+// ── AST ───────────────────────────────────────────────────────────────────────
+
+export interface AstAttribute {
+  key: string;
+  value: string;
+}
+
+export type AstNode =
+  | { Book: { marker: string; code: string; content: AstNode[] } }
+  | { Chapter: { marker: string; number: string; sid?: string; altnumber?: string; pubnumber?: string } }
+  | { Verse: { marker: string; number: string; sid?: string; altnumber?: string; pubnumber?: string } }
+  | { Para: { marker: string; content: AstNode[] } }
+  | { Char: { marker: string; content: AstNode[]; attributes: AstAttribute[] } }
+  | { Note: { marker: string; caller: string; category?: string; content: AstNode[] } }
+  | { Milestone: { marker: string; attributes: AstAttribute[] } }
+  | { Figure: { marker: string; content: AstNode[]; attributes: AstAttribute[] } }
+  | { Sidebar: { marker: string; category?: string; content: AstNode[] } }
+  | { Periph: { alt?: string; content: AstNode[]; attributes: AstAttribute[] } }
+  | { Table: { content: AstNode[] } }
+  | { TableRow: { marker: string; content: AstNode[] } }
+  | { TableCell: { marker: string; align: string; content: AstNode[] } }
+  | { Ref: { content: AstNode[]; attributes: AstAttribute[] } }
+  | { Unknown: { marker: string; content: AstNode[] } }
+  | { Text: string }
+  | "OptBreak";
+
+export interface AstDocument {
+  content: AstNode[];
+}
+
+export interface ParsedAstDocument {
+  ast: AstDocument;
+  source_map: SourceMap;
+  diagnostics?: Diagnostic[];
+}
+
+// ── USJ ───────────────────────────────────────────────────────────────────────
+
+export interface UsjAttribute {
+  key: string;
+  value: string;
+}
+
+/** Byte-offset spans; only present when `UsjOptions.spans` is `true`. */
+export interface UsjSpans {
+  node: Span;
+  code?: Span;
+  number?: Span;
+  close?: Span;
+}
+
+export interface UsjBook {
+  type: "book";
+  marker: string;
+  code: string;
+  content?: UsjContentNode[];
+  spans?: UsjSpans;
+}
+
+export interface UsjChapter {
+  type: "chapter";
+  marker: string;
+  number: string;
+  sid?: string;
+  altnumber?: string;
+  pubnumber?: string;
+  spans?: UsjSpans;
+}
+
+export interface UsjVerse {
+  type: "verse";
+  marker: string;
+  number: string;
+  sid?: string;
+  altnumber?: string;
+  pubnumber?: string;
+  spans?: UsjSpans;
+}
+
+export interface UsjPara {
+  type: "para";
+  marker: string;
+  content?: UsjContentNode[];
+  spans?: UsjSpans;
+}
+
+export interface UsjChar {
+  type: "char";
+  marker: string;
+  content?: UsjContentNode[];
+  attributes?: UsjAttribute[];
+  spans?: UsjSpans;
+}
+
+export interface UsjNote {
+  type: "note";
+  marker: string;
+  caller: string;
+  category?: string;
+  content?: UsjContentNode[];
+  spans?: UsjSpans;
+}
+
+export interface UsjMilestone {
+  type: "ms";
+  marker: string;
+  attributes?: UsjAttribute[];
+  spans?: UsjSpans;
+}
+
+export interface UsjFigure {
+  type: "figure";
+  marker: string;
+  content?: UsjContentNode[];
+  attributes?: UsjAttribute[];
+  spans?: UsjSpans;
+}
+
+export interface UsjSidebar {
+  type: "sidebar";
+  marker: string;
+  category?: string;
+  content?: UsjContentNode[];
+  spans?: UsjSpans;
+}
+
+export interface UsjPeriph {
+  type: "periph";
+  alt?: string;
+  content?: UsjContentNode[];
+  attributes?: UsjAttribute[];
+  spans?: UsjSpans;
+}
+
+export interface UsjTable {
+  type: "table";
+  content?: UsjContentNode[];
+  spans?: UsjSpans;
+}
+
+export interface UsjTableRow {
+  type: "table:row";
+  marker: string;
+  content?: UsjContentNode[];
+  spans?: UsjSpans;
+}
+
+export interface UsjTableCell {
+  type: "table:cell";
+  marker: string;
+  align: string;
+  content?: UsjContentNode[];
+  spans?: UsjSpans;
+}
+
+export interface UsjRef {
+  type: "ref";
+  content?: UsjContentNode[];
+  attributes?: UsjAttribute[];
+  spans?: UsjSpans;
+}
+
+export interface UsjUnknown {
+  type: "unknown";
+  marker: string;
+  content?: UsjContentNode[];
+  spans?: UsjSpans;
+}
+
+export interface UsjOptBreak {
+  type: "optbreak";
+}
+
+export type UsjContentNode =
+  | string
+  | UsjBook
+  | UsjChapter
+  | UsjVerse
+  | UsjPara
+  | UsjChar
+  | UsjNote
+  | UsjMilestone
+  | UsjFigure
+  | UsjSidebar
+  | UsjPeriph
+  | UsjTable
+  | UsjTableRow
+  | UsjTableCell
+  | UsjRef
+  | UsjUnknown
+  | UsjOptBreak;
+
+export interface UsjDocument {
+  type: "USJ";
+  version: string;
+  content: UsjContentNode[];
+}
+
+// ── ParsedDocument class ─────────────────────────────────────────────────────
+
 export class ParsedDocument {
   free(): void;
-  cst(): any;
-  ast(): any;
-  sourceMap(): any;
-  diagnostics(): any[] | undefined;
-  toUsj(options?: UsjOptions): any;
+  cst(): ExportedCstNode;
+  ast(): AstDocument;
+  sourceMap(): SourceMap;
+  diagnostics(): Diagnostic[] | undefined;
+  toUsj(options?: UsjOptions): UsjDocument;
   toUsx(): string;
   toUsfm(): string;
   toVref(): Record<string, string>;
 }
 
 export function parse(usfm: string, options?: ParseOptions): ParsedDocument;
-export function parseCst(usfm: string): any;
-export function parseAst(usfm: string, options?: ParseOptions): any;
-export function tokenize(usfm: string): any[];
+export function parseCst(usfm: string): ExportedCstNode;
+export function parseAst(usfm: string, options?: ParseOptions): ParsedAstDocument;
+export function tokenize(usfm: string): TokenSpan[];
 "#;
 
 #[wasm_bindgen(skip_typescript)]
@@ -140,5 +437,8 @@ pub fn tokenize(usfm: &str) -> Result<JsValue, JsError> {
 }
 
 fn to_js_value<T: Serialize>(value: &T) -> Result<JsValue, JsError> {
-    serde_wasm_bindgen::to_value(value).map_err(|error| JsError::new(&error.to_string()))
+    let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+    value
+        .serialize(&serializer)
+        .map_err(|error| JsError::new(&error.to_string()))
 }

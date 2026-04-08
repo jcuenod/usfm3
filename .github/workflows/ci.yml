@@ -70,7 +70,7 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
-  wasm-check:
+  wasm-build:
     name: WASM Build
     runs-on: ubuntu-latest
     steps:
@@ -90,8 +90,45 @@ jobs:
           key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-wasm-
 
+      # Sandbox the wasm-pack installation
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        run: env -i PATH="$PATH" HOME="$HOME" curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | env -i PATH="$PATH" HOME="$HOME" sh
 
-      - name: Build WASM
+      - name: Build WASM (web)
         run: wasm-pack build crates/usfm3-wasm --target web
+
+      - name: Build WASM (nodejs)
+        run: wasm-pack build crates/usfm3-wasm --target nodejs --out-dir pkg-node
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm-pkg
+          path: |
+            crates/usfm3-wasm/pkg
+            crates/usfm3-wasm/pkg-node
+
+  wasm-type-check:
+    name: WASM Type Check
+    needs: wasm-build
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm-pkg
+          path: crates/usfm3-wasm
+
+      - name: Install type checking tools
+        run: npm install -g typescript tsx
+
+      - name: Type check (tsc)
+        run: tsc --noEmit --strict --skipLibCheck --moduleResolution bundler --module esnext crates/usfm3-wasm/type-check-runtime.ts
+
+      - name: Type check (runtime)
+        run: tsx crates/usfm3-wasm/type-check-runtime.ts

@@ -2618,4 +2618,46 @@ mod tests {
         });
         assert!(has_addpn_char, "\\addpn should parse as a character node");
     }
+
+    #[test]
+    fn test_verse_bridge_parsed_correctly() {
+        let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 12-83 text");
+        let verse = result.ast.content.iter().find_map(|n| {
+            if let Node::Para { content, .. } = n {
+                content.iter().find_map(|c| {
+                    if let Node::Verse(data) = c {
+                        Some(data.as_ref())
+                    } else {
+                        None
+                    }
+                })
+            } else {
+                None
+            }
+        });
+        let verse = verse.expect("should find a Verse node");
+        assert_eq!(verse.number.as_ref(), "12-83");
+        assert_eq!(verse.sid.as_deref(), Some("GEN 1:12-83"));
+    }
+
+    #[test]
+    fn test_verse_subverse_letter_parsed_correctly() {
+        let result = parse("\\id GEN\n\\c 1\n\\p\n\\v 3b text");
+        let verse = result.ast.content.iter().find_map(|n| {
+            if let Node::Para { content, .. } = n {
+                content.iter().find_map(|c| {
+                    if let Node::Verse(data) = c {
+                        Some(data.as_ref())
+                    } else {
+                        None
+                    }
+                })
+            } else {
+                None
+            }
+        });
+        let verse = verse.expect("should find a Verse node");
+        assert_eq!(verse.number.as_ref(), "3b");
+        assert_eq!(verse.sid.as_deref(), Some("GEN 1:3b"));
+    }
 }
