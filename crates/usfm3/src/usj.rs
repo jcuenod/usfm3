@@ -307,27 +307,39 @@ fn insert_attributes(
 
 fn serialize_spans(spans: &SourceSpans) -> Value {
     let mut map = Map::new();
-    map.insert("node".into(), json!({
-        "start": spans.node.start,
-        "end": spans.node.end
-    }));
+    map.insert(
+        "node".into(),
+        json!({
+            "start": spans.node.start,
+            "end": spans.node.end
+        }),
+    );
     if let Some(code) = &spans.code {
-        map.insert("code".into(), json!({
-            "start": code.start,
-            "end": code.end
-        }));
+        map.insert(
+            "code".into(),
+            json!({
+                "start": code.start,
+                "end": code.end
+            }),
+        );
     }
     if let Some(number) = &spans.number {
-        map.insert("number".into(), json!({
-            "start": number.start,
-            "end": number.end
-        }));
+        map.insert(
+            "number".into(),
+            json!({
+                "start": number.start,
+                "end": number.end
+            }),
+        );
     }
     if let Some(close) = &spans.close {
-        map.insert("close".into(), json!({
-            "start": close.start,
-            "end": close.end
-        }));
+        map.insert(
+            "close".into(),
+            json!({
+                "start": close.start,
+                "end": close.end
+            }),
+        );
     }
     Value::Object(map)
 }
@@ -460,9 +472,18 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(value["content"][0]["spans"]["node"], json!({"start": 0, "end": 20}));
-        assert_eq!(value["content"][0]["spans"]["code"], json!({"start": 4, "end": 7}));
-        assert_eq!(value["content"][1]["spans"]["number"], json!({"start": 24, "end": 25}));
+        assert_eq!(
+            value["content"][0]["spans"]["node"],
+            json!({"start": 0, "end": 20})
+        );
+        assert_eq!(
+            value["content"][0]["spans"]["code"],
+            json!({"start": 4, "end": 7})
+        );
+        assert_eq!(
+            value["content"][1]["spans"]["number"],
+            json!({"start": 24, "end": 25})
+        );
         assert!(value["content"][2]["content"][1].is_string());
     }
 

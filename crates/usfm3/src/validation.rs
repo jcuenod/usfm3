@@ -41,8 +41,14 @@ struct VersePart {
 impl VersePart {
     fn next_expected(self) -> Self {
         match self.suffix {
-            None => Self { num: self.num + 1, suffix: None },
-            Some(c) => Self { num: self.num, suffix: Some((c as u8 + 1) as char) },
+            None => Self {
+                num: self.num + 1,
+                suffix: None,
+            },
+            Some(c) => Self {
+                num: self.num,
+                suffix: Some((c as u8 + 1) as char),
+            },
         }
     }
 }
@@ -128,7 +134,10 @@ impl<'a> Validator<'a> {
             diagnostics,
             expected_chapter: 1,
             seen_chapters: HashSet::new(),
-            expected_verse: VersePart { num: 1, suffix: None },
+            expected_verse: VersePart {
+                num: 1,
+                suffix: None,
+            },
             saw_book: false,
             has_chapter: false,
             body_started: false,
@@ -169,7 +178,10 @@ impl<'a> Validator<'a> {
                 Node::Chapter(_) => {
                     self.body_started = true;
                     self.has_chapter = true;
-                    self.expected_verse = VersePart { num: 1, suffix: None };
+                    self.expected_verse = VersePart {
+                        num: 1,
+                        suffix: None,
+                    };
                     self.handle_chapter_sequence(node, source);
                 }
                 Node::Para { marker, .. } => {
