@@ -1,0 +1,15 @@
+{
+  "name": "usfm3",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jcuenod/usfm3.git"
+  },
+  "files": ["usfm3_wasm_bg.wasm", "usfm3_wasm.js", "usfm3_wasm.d.ts", "node.js"],
+  "keywords": ["usfm", "usj", "usx", "vref", "parser", "bible", "scripture"],
+  "exports": {
+    ".": {
+      "node": { "import": "./node.js" },
+      "default": "./usfm3_wasm.js"
+    }
+  }
+}

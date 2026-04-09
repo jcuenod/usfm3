@@ -55,6 +55,9 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Remove deprecated always-auth from npmrc
+        run: npm config delete always-auth
+
       - name: Build WASM package
         run: wasm-pack build crates/usfm3-wasm --target web
 
@@ -66,16 +69,8 @@ jobs:
           node -e "
             const fs = require('fs');
             const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.name = 'usfm3';
-            pkg.version = '${TAG_VERSION}';
-            pkg.files = ['usfm3_wasm_bg.wasm', 'usfm3_wasm.js', 'usfm3_wasm.d.ts', 'node.js'];
-            pkg.keywords = ['usfm', 'usj', 'usx', 'vref', 'parser', 'bible', 'scripture'];
-            pkg.exports = {
-              '.': {
-                node: { import: './node.js' },
-                default: './usfm3_wasm.js'
-              }
-            };
+            const overrides = JSON.parse(fs.readFileSync('../package-overrides.json', 'utf8'));
+            Object.assign(pkg, overrides, { version: '${TAG_VERSION}' });
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
 
