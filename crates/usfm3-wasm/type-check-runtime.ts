@@ -424,8 +424,7 @@ for (const node of usj.content) checkUsjNode(node);
 // ── Result ────────────────────────────────────────────────────────────────────
 
 if (failures > 0) {
-  console.error(`\n${failures} check(s) failed.`);
-  process.exit(1);
+  throw new Error(`${failures} check(s) failed.`);
 } else {
   console.log("All checks passed.");
 }
