@@ -693,6 +693,47 @@ fn paragraph_text_whitespace_is_normalized_to_single_spaces() {
     );
 }
 
+#[test]
+fn verse_continuation_paragraphs_restore_word_boundaries_in_vref() {
+    let usfm = r#"\id LUK
+\c 1
+\p
+\v 48 for he has been mindful
+\q2 of the humble state of his servant.
+\q1 From now on all generations will call me blessed,
+\q2
+\v 49 for the Mighty One has done great things for me—
+\q2 holy is his name.
+"#;
+
+    let vref = parse_to_vref(usfm);
+    assert_eq!(
+        vref.get("LUK 1:48").and_then(|v| v.as_str()),
+        Some("for he has been mindful of the humble state of his servant. From now on all generations will call me blessed,")
+    );
+    assert_eq!(
+        vref.get("LUK 1:49").and_then(|v| v.as_str()),
+        Some("for the Mighty One has done great things for me—holy is his name.")
+    );
+}
+
+#[test]
+fn quoted_poetry_continuations_restore_word_boundaries_in_vref() {
+    let usfm = r#"\id LUK
+\c 4
+\p
+\v 10 For it is written:
+\q1 “‘He will command his angels concerning you
+\q2 to guard you carefully;
+"#;
+
+    let vref = parse_to_vref(usfm);
+    assert_eq!(
+        vref.get("LUK 4:10").and_then(|v| v.as_str()),
+        Some("For it is written: “‘He will command his angels concerning you to guard you carefully;")
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Combined parse and export
 // ---------------------------------------------------------------------------

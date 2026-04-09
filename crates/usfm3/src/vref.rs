@@ -53,6 +53,50 @@ fn collect_text(node: &Node, buf: &mut String) {
     }
 }
 
+fn is_opening_punctuation(ch: char) -> bool {
+    matches!(
+        ch,
+        '"' | '\'' | '(' | '[' | '{' | '<' | '“' | '‘' | '«' | '‹'
+    )
+}
+
+fn starts_boundary_separated_content(text: &str) -> bool {
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.peek().copied() {
+        if ch.is_whitespace() || is_opening_punctuation(ch) {
+            chars.next();
+            continue;
+        }
+        if !is_opening_punctuation(ch) {
+            break;
+        }
+    }
+    chars.peek().is_some_and(|ch| ch.is_alphanumeric())
+}
+
+fn ends_with_tight_joiner(text: &str) -> bool {
+    matches!(
+        text.chars().rev().find(|ch| !ch.is_whitespace()),
+        Some('-' | '\u{2010}' | '\u{2011}' | '\u{2012}' | '\u{2013}' | '\u{2014}' | '\u{2015}')
+    )
+}
+
+fn append_vref_text(buf: &mut String, text: &str, needs_boundary_space: bool) {
+    if text.is_empty() {
+        return;
+    }
+
+    if needs_boundary_space
+        && !buf.is_empty()
+        && !buf.ends_with(char::is_whitespace)
+        && !text.starts_with(char::is_whitespace)
+    {
+        buf.push(' ');
+    }
+
+    buf.push_str(text);
+}
+
 /// Serialize a [`Document`] to a JSON object mapping verse references to plain text.
 ///
 /// The output is a flat `{ "GEN 1:1": "In the beginning ...", ... }` dictionary.
@@ -84,6 +128,8 @@ pub fn to_vref_map(doc: &Document) -> serde_json::Map<String, serde_json::Value>
                 if !is_verse_paragraph(marker) {
                     continue;
                 }
+                let mut verse_opened_in_para = false;
+                let mut appended_visible_text = false;
                 for child in content {
                     if let Node::Verse(data) = child {
                         // Flush the previous verse.
@@ -96,8 +142,23 @@ pub fn to_vref_map(doc: &Document) -> serde_json::Map<String, serde_json::Value>
                         }
                         current_ref = format!("{} {}:{}", book, chapter, data.number);
                         current_text = String::new();
+                        verse_opened_in_para = true;
+                        appended_visible_text = false;
                     } else if !current_ref.is_empty() {
-                        collect_text(child, &mut current_text);
+                        let mut fragment = String::new();
+                        collect_text(child, &mut fragment);
+                        if !fragment.is_empty() {
+                            let needs_boundary_space = !verse_opened_in_para
+                                && !appended_visible_text
+                                && starts_boundary_separated_content(&fragment)
+                                && !ends_with_tight_joiner(&current_text);
+                            append_vref_text(
+                                &mut current_text,
+                                &fragment,
+                                needs_boundary_space,
+                            );
+                            appended_visible_text = true;
+                        }
                     }
                 }
             }
@@ -381,7 +442,7 @@ mod tests {
         assert_eq!(map.len(), 1);
         assert_eq!(
             map.get("GEN 1:1").and_then(|v| v.as_str()),
-            Some("First part.Second part.")
+            Some("First part. Second part.")
         );
     }
 
