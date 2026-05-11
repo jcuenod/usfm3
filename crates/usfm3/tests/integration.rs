@@ -734,6 +734,65 @@ fn quoted_poetry_continuations_restore_word_boundaries_in_vref() {
     );
 }
 
+#[test]
+fn poetry_continuations_preserve_spaces_around_quotes_in_vref() {
+    let usfm = r#"\id MRK
+\c 1
+\p
+\v 2 As it is written in Isaiah the prophet,
+\q1 “Behold, I send my messenger before your face.
+\q1 He will prepare your way.
+\q1
+\v 3 A voice cries in the wilderness,
+\q1 ‘Prepare the way of the Lord,
+\q1 make his paths straight.’”"#;
+
+    let vref = parse_to_vref(usfm);
+    assert_eq!(
+        vref.get("MRK 1:2").and_then(|v| v.as_str()),
+        Some("As it is written in Isaiah the prophet, “Behold, I send my messenger before your face. He will prepare your way.")
+    );
+    assert_eq!(
+        vref.get("MRK 1:3").and_then(|v| v.as_str()),
+        Some("A voice cries in the wilderness, ‘Prepare the way of the Lord, make his paths straight.’”")
+    );
+}
+
+#[test]
+fn paragraph_continuations_restore_sentence_break_spaces_in_vref() {
+    let usfm = r#"\id MRK
+\c 5
+\p
+\v 40 And they laughed at him.
+\p He put them all outside and took the child's father and mother and those who were with him into the room."#;
+
+    let vref = parse_to_vref(usfm);
+    assert_eq!(
+        vref.get("MRK 5:40").and_then(|v| v.as_str()),
+        Some("And they laughed at him. He put them all outside and took the child's father and mother and those who were with him into the room.")
+    );
+}
+
+#[test]
+fn root_level_verse_before_heading_is_kept_in_vref() {
+    let usfm = r#"\id MRK
+\c 9
+\v 1 Truly I say to you, some standing here will not taste death.
+\s The Transfiguration
+\p
+\v 2 After six days Jesus took Peter with him."#;
+
+    let vref = parse_to_vref(usfm);
+    assert_eq!(
+        vref.get("MRK 9:1").and_then(|v| v.as_str()),
+        Some("Truly I say to you, some standing here will not taste death.")
+    );
+    assert_eq!(
+        vref.get("MRK 9:2").and_then(|v| v.as_str()),
+        Some("After six days Jesus took Peter with him.")
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Combined parse and export
 // ---------------------------------------------------------------------------
