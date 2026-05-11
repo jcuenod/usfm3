@@ -360,6 +360,7 @@ fn lookup_known_marker_exact(name: &str) -> Option<KnownMarker> {
         "fe" => ("fe", MarkerInfo::new(MarkerKind::Note)),
         "x" => ("x", MarkerInfo::new(MarkerKind::Note)),
         "ef" => ("ef", MarkerInfo::new(MarkerKind::Note)),
+        "efe" => ("efe", MarkerInfo::new(MarkerKind::Note)),
         "ex" => ("ex", MarkerInfo::new(MarkerKind::Note)),
         "fr" => ("fr", MarkerInfo::note_sub(MarkerKind::Character)),
         "ft" => ("ft", MarkerInfo::note_sub(MarkerKind::Character)),
@@ -392,6 +393,8 @@ fn lookup_known_marker_exact(name: &str) -> Option<KnownMarker> {
         "ord" => ("ord", MarkerInfo::new(MarkerKind::Character)),
         "pn" => ("pn", MarkerInfo::new(MarkerKind::Character)),
         "png" => ("png", MarkerInfo::new(MarkerKind::Character)),
+        "ndx" => ("ndx", MarkerInfo::new(MarkerKind::Character)),
+        "qac" => ("qac", MarkerInfo::new(MarkerKind::Character)),
         "qs" => ("qs", MarkerInfo::new(MarkerKind::Character)),
         "qt" => ("qt", MarkerInfo::new(MarkerKind::Character)),
         "sig" => ("sig", MarkerInfo::new(MarkerKind::Character)),
@@ -418,6 +421,8 @@ fn lookup_known_marker_exact(name: &str) -> Option<KnownMarker> {
         "fm" => ("fm", MarkerInfo::new(MarkerKind::Character)),
         "jmp" => ("jmp", MarkerInfo::new(MarkerKind::Character)),
         "ref" => ("ref", MarkerInfo::new(MarkerKind::Character)),
+        "lik" => ("lik", MarkerInfo::new(MarkerKind::Character)),
+        "liv" => ("liv", MarkerInfo::new(MarkerKind::Character)),
         "th" => ("th", MarkerInfo::new(MarkerKind::TableCell)),
         "th1" => ("th1", MarkerInfo::new(MarkerKind::TableCell)),
         "th2" => ("th2", MarkerInfo::new(MarkerKind::TableCell)),
@@ -605,7 +610,7 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
         // =============================================================
         // Note markers (footnote, endnote, cross-reference)
         // =============================================================
-        "f" | "fe" | "x" | "ef" | "ex"
+        "f" | "fe" | "x" | "ef" | "efe" | "ex"
         => MarkerInfo::new(MarkerKind::Note),
 
         // =============================================================
@@ -627,7 +632,7 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
         // -- special text --
         "add" | "addpn" | "bk" | "dc" | "ior" | "iqt"
         | "k" | "litl" | "nd" | "ord"
-        | "pn" | "png" | "qs" | "qt" | "sig"
+        | "pn" | "png" | "ndx" | "qac" | "qs" | "qt" | "sig"
         | "sls" | "tl" | "wj"
 
         // -- formatting --
@@ -643,7 +648,7 @@ pub fn lookup_marker(name: &str) -> MarkerInfo {
         | "jmp" | "ref"
 
         // -- acrostic / liturgical --
-        | "qac" | "lik" | "liv"
+        | "lik" | "liv"
 
         => MarkerInfo::new(MarkerKind::Character),
 
@@ -786,7 +791,7 @@ mod tests {
     // -----------------------------------------------------------------
     #[test]
     fn note_markers() {
-        for marker in &["f", "fe", "x", "ef", "ex"] {
+        for marker in &["f", "fe", "x", "ef", "efe", "ex"] {
             let info = lookup_marker(marker);
             assert_eq!(
                 info.kind,
@@ -829,9 +834,10 @@ mod tests {
     #[test]
     fn character_markers() {
         let chars = [
-            "add", "bk", "dc", "ior", "iqt", "k", "litl", "nd", "ord", "pn", "png", "qs", "qt",
-            "sig", "sls", "tl", "wj", "em", "bd", "bdit", "it", "no", "sc", "sup", "rb", "pro",
-            "w", "wg", "wh", "wa", "rq", "ca", "va", "vp", "jmp", "fm", "addpn",
+            "add", "bk", "dc", "ior", "iqt", "k", "litl", "nd", "ndx", "ord", "pn", "png", "qac",
+            "qs", "qt", "sig", "sls", "tl", "wj", "em", "bd", "bdit", "it", "no", "sc", "sup",
+            "rb", "pro", "w", "wg", "wh", "wa", "rq", "ca", "va", "vp", "jmp", "fm", "addpn",
+            "lik", "liv", "ref",
         ];
         for marker in &chars {
             let info = lookup_marker(marker);
