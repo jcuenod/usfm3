@@ -75,10 +75,18 @@ fn starts_boundary_separated_content(text: &str) -> bool {
 }
 
 fn ends_with_tight_joiner(text: &str) -> bool {
-    matches!(
-        text.chars().rev().find(|ch| !ch.is_whitespace()),
-        Some('-' | '\u{2010}' | '\u{2011}' | '\u{2012}' | '\u{2013}' | '\u{2014}' | '\u{2015}')
-    )
+    let mut chars = text.chars().rev().skip_while(|ch| ch.is_whitespace());
+    let Some(last) = chars.next() else {
+        return false;
+    };
+    if !matches!(
+        last,
+        '-' | '\u{2010}' | '\u{2011}' | '\u{2012}' | '\u{2013}' | '\u{2014}' | '\u{2015}'
+    ) {
+        return false;
+    }
+
+    chars.next().is_some_and(|prev| !prev.is_whitespace())
 }
 
 fn append_vref_text(buf: &mut String, text: &str, needs_boundary_space: bool) {

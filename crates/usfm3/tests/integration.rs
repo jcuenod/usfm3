@@ -745,6 +745,24 @@ fn quoted_poetry_continuations_restore_word_boundaries_in_vref() {
 }
 
 #[test]
+fn standalone_dash_at_line_end_restores_boundary_space_in_vref() {
+    let usfm = r#"\id DEU
+\c 32
+\q1 \v 31 Because their rock is not like our Rock;
+\q2 even our enemies themselves -
+\q2 they agree that it is so.
+"#;
+
+    let vref = parse_to_vref(usfm);
+    assert_eq!(
+        vref.get("DEU 32:31").and_then(|v| v.as_str()),
+        Some(
+            "Because their rock is not like our Rock; even our enemies themselves - they agree that it is so."
+        )
+    );
+}
+
+#[test]
 fn poetry_continuations_preserve_spaces_around_quotes_in_vref() {
     let usfm = r#"\id MRK
 \c 1
