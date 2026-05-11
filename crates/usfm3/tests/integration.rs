@@ -52,6 +52,12 @@ fn parse_to_usx(usfm: &str) -> String {
     usfm3::usx::to_usx_string(&doc).expect("USX serialization failed")
 }
 
+/// Parse USFM and return normalized USFM output.
+fn parse_to_usfm(usfm: &str) -> String {
+    let doc = get_ast(usfm);
+    usfm3::usfm::to_usfm_string(&doc)
+}
+
 #[test]
 fn cst_round_trip_preserves_source_exactly() {
     let usfm = "\\id GEN\r\n\\c 1\r\n\\p  \\v 1  In the beginning\\nd Lord\\nd*\r\n";
@@ -709,7 +715,9 @@ fn verse_continuation_paragraphs_restore_word_boundaries_in_vref() {
     let vref = parse_to_vref(usfm);
     assert_eq!(
         vref.get("LUK 1:48").and_then(|v| v.as_str()),
-        Some("for he has been mindful of the humble state of his servant. From now on all generations will call me blessed,")
+        Some(
+            "for he has been mindful of the humble state of his servant. From now on all generations will call me blessed,"
+        )
     );
     assert_eq!(
         vref.get("LUK 1:49").and_then(|v| v.as_str()),
@@ -730,7 +738,9 @@ fn quoted_poetry_continuations_restore_word_boundaries_in_vref() {
     let vref = parse_to_vref(usfm);
     assert_eq!(
         vref.get("LUK 4:10").and_then(|v| v.as_str()),
-        Some("For it is written: “‘He will command his angels concerning you to guard you carefully;")
+        Some(
+            "For it is written: “‘He will command his angels concerning you to guard you carefully;"
+        )
     );
 }
 
@@ -750,11 +760,15 @@ fn poetry_continuations_preserve_spaces_around_quotes_in_vref() {
     let vref = parse_to_vref(usfm);
     assert_eq!(
         vref.get("MRK 1:2").and_then(|v| v.as_str()),
-        Some("As it is written in Isaiah the prophet, “Behold, I send my messenger before your face. He will prepare your way.")
+        Some(
+            "As it is written in Isaiah the prophet, “Behold, I send my messenger before your face. He will prepare your way."
+        )
     );
     assert_eq!(
         vref.get("MRK 1:3").and_then(|v| v.as_str()),
-        Some("A voice cries in the wilderness, ‘Prepare the way of the Lord, make his paths straight.’”")
+        Some(
+            "A voice cries in the wilderness, ‘Prepare the way of the Lord, make his paths straight.’”"
+        )
     );
 }
 
@@ -769,7 +783,9 @@ fn paragraph_continuations_restore_sentence_break_spaces_in_vref() {
     let vref = parse_to_vref(usfm);
     assert_eq!(
         vref.get("MRK 5:40").and_then(|v| v.as_str()),
-        Some("And they laughed at him. He put them all outside and took the child's father and mother and those who were with him into the room.")
+        Some(
+            "And they laughed at him. He put them all outside and took the child's father and mother and those who were with him into the room."
+        )
     );
 }
 
@@ -791,6 +807,83 @@ fn root_level_verse_before_heading_is_kept_in_vref() {
         vref.get("MRK 9:2").and_then(|v| v.as_str()),
         Some("After six days Jesus took Peter with him.")
     );
+}
+
+#[test]
+fn usfm_serialization_normalizes_spacing_for_continuation_cases() {
+    let poetry = parse_to_usfm(
+        r#"\id MRK
+\c 1
+\p
+\v 2 As it is written in Isaiah the prophet,
+\q1 “Behold, I send my messenger before your face.
+\q1 He will prepare your way.
+\q1
+\v 3 A voice cries in the wilderness,
+\q1 ‘Prepare the way of the Lord,
+\q1 make his paths straight.’”"#,
+    );
+    assert!(poetry.contains(r#"\p \v 2 As it is written in Isaiah the prophet,"#));
+    assert!(poetry.contains(r#"\q1 \v 3 A voice cries in the wilderness,"#));
+    assert!(!poetry.contains(r#"\v 2  As it is written"#));
+    assert!(!poetry.contains(r#"\v 3  A voice cries"#));
+
+    let paragraph = parse_to_usfm(
+        r#"\id MRK
+\c 5
+\p
+\v 40 And they laughed at him.
+\p He put them all outside and took the child's father and mother and those who were with him into the room."#,
+    );
+    assert!(paragraph.contains(r#"\p \v 40 And they laughed at him."#));
+    assert!(!paragraph.contains(r#"\v 40  And they laughed at him."#));
+
+    let root = parse_to_usfm(
+        r#"\id MRK
+\c 9
+\v 1 Truly I say to you, some standing here will not taste death.
+\s The Transfiguration
+\p
+\v 2 After six days Jesus took Peter with him."#,
+    );
+    assert!(
+        root.contains(r#"\p \v 1 Truly I say to you, some standing here will not taste death."#)
+    );
+    assert!(root.contains("\\s The Transfiguration"));
+    assert!(root.contains(r#"\p \v 2 After six days Jesus took Peter with him."#));
+    assert!(!root.contains("death. \n\\s"));
+    assert!(!root.contains(r#"\v 2  After six days Jesus took Peter with him."#));
+}
+
+#[test]
+fn usx_serialization_preserves_structure_for_continuation_cases() {
+    let poetry = parse_to_usx(
+        r#"\id MRK
+\c 1
+\p
+\v 2 As it is written in Isaiah the prophet,
+\q1 “Behold, I send my messenger before your face.
+\q1 He will prepare your way.
+\q1
+\v 3 A voice cries in the wilderness,
+\q1 ‘Prepare the way of the Lord,
+\q1 make his paths straight.’”"#,
+    );
+    assert!(poetry.contains(r#"<para style="p"><verse number="2" style="v" sid="MRK 1:2"/> As it is written in Isaiah the prophet,</para>"#));
+    assert!(poetry.contains(r#"<para style="q1"><verse eid="MRK 1:2"/><verse number="3" style="v" sid="MRK 1:3"/> A voice cries in the wilderness,</para>"#));
+    assert!(poetry.contains(r#"<para style="q1">make his paths straight.’”</para>"#));
+
+    let root = parse_to_usx(
+        r#"\id MRK
+\c 9
+\v 1 Truly I say to you, some standing here will not taste death.
+\s The Transfiguration
+\p
+\v 2 After six days Jesus took Peter with him."#,
+    );
+    assert!(root.contains(r#"<para style="p"><verse number="1" style="v" sid="MRK 9:1"/>Truly I say to you, some standing here will not taste death.</para>"#));
+    assert!(root.contains(r#"<para style="s">The Transfiguration</para>"#));
+    assert!(root.contains(r#"<para style="p"><verse eid="MRK 9:1"/><verse number="2" style="v" sid="MRK 9:2"/> After six days Jesus took Peter with him.</para>"#));
 }
 
 // ---------------------------------------------------------------------------

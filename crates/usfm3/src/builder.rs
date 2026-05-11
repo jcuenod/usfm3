@@ -213,10 +213,8 @@ impl<'a> LowerCtx<'a> {
                                     self.append_normalized_text(&mut para_children, text);
                                 }
                             }
-                            CstKind::WhitespaceToken => {
-                                if !after_verse {
-                                    Self::append_text_to(&mut para_children, " ");
-                                }
+                            CstKind::WhitespaceToken if !after_verse => {
+                                Self::append_text_to(&mut para_children, " ");
                             }
                             CstKind::NewlineToken => {
                                 after_verse = false;

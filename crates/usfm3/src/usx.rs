@@ -217,8 +217,17 @@ fn serialize_node<W: std::io::Write>(
                 writer.write_event(Event::Empty(elem))?;
             } else {
                 writer.write_event(Event::Start(elem))?;
-                for child in content {
-                    serialize_node(writer, child, state)?;
+                for (index, child) in content.iter().enumerate() {
+                    if index + 1 == content.len()
+                        && let Node::Text(text) = child
+                    {
+                        let trimmed = text.trim_end_matches(' ');
+                        if !trimmed.is_empty() {
+                            writer.write_event(Event::Text(BytesText::new(trimmed)))?;
+                        }
+                    } else {
+                        serialize_node(writer, child, state)?;
+                    }
                 }
                 writer.write_event(Event::End(BytesEnd::new("para")))?;
             }

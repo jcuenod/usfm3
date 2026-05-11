@@ -152,11 +152,7 @@ pub fn to_vref_map(doc: &Document) -> serde_json::Map<String, serde_json::Value>
                                 && !appended_visible_text
                                 && starts_boundary_separated_content(&fragment)
                                 && !ends_with_tight_joiner(&current_text);
-                            append_vref_text(
-                                &mut current_text,
-                                &fragment,
-                                needs_boundary_space,
-                            );
+                            append_vref_text(&mut current_text, &fragment, needs_boundary_space);
                             appended_visible_text = true;
                         }
                     }

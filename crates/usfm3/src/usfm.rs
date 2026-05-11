@@ -253,6 +253,10 @@ impl<'a> UsfmSerializer<'a> {
         for child in content {
             self.serialize_node(child);
         }
+
+        while self.output.ends_with(' ') {
+            self.output.pop();
+        }
     }
 
     /// Character-level inline marker: `\nd Lord\nd*` or `\w word|lemma="grace"\w*`
@@ -343,8 +347,13 @@ impl<'a> UsfmSerializer<'a> {
 
     /// Plain text -- emitted verbatim.
     fn serialize_text(&mut self, s: &str) {
-        self.output.push_str(s);
-        self.at_line_start = s.ends_with('\n');
+        let text = if self.output.ends_with(' ') {
+            s.trim_start_matches(' ')
+        } else {
+            s
+        };
+        self.output.push_str(text);
+        self.at_line_start = text.ends_with('\n');
     }
 
     /// Unknown / custom marker: `\marker content\marker*`
