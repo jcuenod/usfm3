@@ -763,6 +763,28 @@ fn standalone_dash_at_line_end_restores_boundary_space_in_vref() {
 }
 
 #[test]
+fn standalone_opening_punctuation_restores_boundary_space_in_vref() {
+    let usfm = r#"\id ACT
+\c 1
+\p
+\v 17 He was counted among us.”
+\p (\v 18 Then he acquired a field.)
+\p
+\v 28 They will listen.”
+\p [\v 29 Then they departed.]"#;
+
+    let vref = parse_to_vref(usfm);
+    assert_eq!(
+        vref.get("ACT 1:17").and_then(|v| v.as_str()),
+        Some("He was counted among us.” (")
+    );
+    assert_eq!(
+        vref.get("ACT 1:28").and_then(|v| v.as_str()),
+        Some("They will listen.” [")
+    );
+}
+
+#[test]
 fn poetry_continuations_preserve_spaces_around_quotes_in_vref() {
     let usfm = r#"\id MRK
 \c 1

@@ -61,17 +61,22 @@ fn is_opening_punctuation(ch: char) -> bool {
 }
 
 fn starts_boundary_separated_content(text: &str) -> bool {
+    let mut saw_opening_punctuation = false;
     let mut chars = text.chars().peekable();
     while let Some(ch) = chars.peek().copied() {
-        if ch.is_whitespace() || is_opening_punctuation(ch) {
+        if ch.is_whitespace() {
             chars.next();
             continue;
         }
-        if !is_opening_punctuation(ch) {
-            break;
+        if is_opening_punctuation(ch) {
+            saw_opening_punctuation = true;
+            chars.next();
+            continue;
         }
+        break;
     }
-    chars.peek().is_some_and(|ch| ch.is_alphanumeric())
+
+    saw_opening_punctuation || chars.peek().is_some_and(|ch| ch.is_alphanumeric())
 }
 
 fn ends_with_tight_joiner(text: &str) -> bool {
