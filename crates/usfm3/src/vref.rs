@@ -122,13 +122,10 @@ fn flush_current_ref(
 
     if let Some(existing) = map.get_mut(current_ref).and_then(|value| value.as_str()) {
         let mut merged = existing.to_string();
-        let needs_boundary_space = starts_boundary_separated_content(trimmed)
-            && !ends_with_tight_joiner(&merged);
+        let needs_boundary_space =
+            starts_boundary_separated_content(trimmed) && !ends_with_tight_joiner(&merged);
         append_vref_text(&mut merged, trimmed, needs_boundary_space);
-        map.insert(
-            current_ref.to_string(),
-            serde_json::Value::String(merged),
-        );
+        map.insert(current_ref.to_string(), serde_json::Value::String(merged));
     } else {
         map.insert(
             current_ref.to_string(),

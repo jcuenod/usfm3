@@ -906,8 +906,12 @@ fn attached_lettered_subdivisions_remain_same_verse_across_exports() {
     assert!(!usfm_out.contains(r#"\v 9‘A’"#));
 
     let usx_out = parse_to_usx(usfm);
-    assert!(usx_out.contains(r#"<verse number="9" style="v" sid="JOB 2:9"/> How long will you hold fast your integrity?"#));
-    assert!(usx_out.contains(r#"<verse number="9" style="v" sid="JOB 2:9"/>‘A’ I will wait a little longer."#));
+    assert!(usx_out.contains(
+        r#"<verse number="9" style="v" sid="JOB 2:9"/> How long will you hold fast your integrity?"#
+    ));
+    assert!(usx_out.contains(
+        r#"<verse number="9" style="v" sid="JOB 2:9"/>‘A’ I will wait a little longer."#
+    ));
     assert!(usx_out.contains(r#"<verse number="10" style="v" sid="JOB 2:10"/> But he said to her, “You speak as one of the foolish women speaks.”"#));
     assert!(!usx_out.contains(r#"number="9‘A’""#));
 }
