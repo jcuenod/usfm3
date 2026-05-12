@@ -538,7 +538,7 @@ impl<'a> CstParser<'a> {
         }
 
         if let Some(chapter_id) = self.pending_chapter.take() {
-            let (number, rest) = split_first_word(text);
+            let (number, rest) = split_chapter_number(text);
             if !number.is_empty() {
                 let number_span = span.start..span.start + number.len();
                 self.append_leaf_to(CstKind::TextToken, number_span, chapter_id, Some(number));
@@ -551,7 +551,7 @@ impl<'a> CstParser<'a> {
         }
 
         if let Some(verse_id) = self.pending_verse.take() {
-            let (number, rest) = split_first_word(text);
+            let (number, rest) = split_verse_number(text);
             if !number.is_empty() {
                 let number_span = span.start..span.start + number.len();
                 self.append_leaf_to(CstKind::TextToken, number_span, verse_id, Some(number));
@@ -1342,6 +1342,48 @@ impl<'a> CstParser<'a> {
 
 fn split_first_word(s: &str) -> (&str, &str) {
     let idx = s.find(char::is_whitespace).unwrap_or(s.len());
+    (&s[..idx], &s[idx..])
+}
+
+fn split_chapter_number(s: &str) -> (&str, &str) {
+    let digits_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    if digits_end == 0 {
+        return split_first_word(s);
+    }
+    (&s[..digits_end], &s[digits_end..])
+}
+
+fn split_verse_number(s: &str) -> (&str, &str) {
+    let bytes = s.as_bytes();
+    let mut idx = 0;
+
+    while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+        idx += 1;
+    }
+    if idx == 0 {
+        return split_first_word(s);
+    }
+
+    if idx < bytes.len() && bytes[idx].is_ascii_lowercase() {
+        idx += 1;
+    }
+
+    if idx < bytes.len() && bytes[idx] == b'-' {
+        let range_start = idx;
+        let mut lookahead = idx + 1;
+        while lookahead < bytes.len() && bytes[lookahead].is_ascii_digit() {
+            lookahead += 1;
+        }
+        if lookahead > idx + 1 {
+            idx = lookahead;
+            if idx < bytes.len() && bytes[idx].is_ascii_lowercase() {
+                idx += 1;
+            }
+        } else {
+            idx = range_start;
+        }
+    }
+
     (&s[..idx], &s[idx..])
 }
 

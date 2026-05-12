@@ -110,6 +110,33 @@ fn append_vref_text(buf: &mut String, text: &str, needs_boundary_space: bool) {
     buf.push_str(text);
 }
 
+fn flush_current_ref(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    current_ref: &str,
+    current_text: &str,
+) {
+    let trimmed = current_text.trim();
+    if current_ref.is_empty() || trimmed.is_empty() {
+        return;
+    }
+
+    if let Some(existing) = map.get_mut(current_ref).and_then(|value| value.as_str()) {
+        let mut merged = existing.to_string();
+        let needs_boundary_space = starts_boundary_separated_content(trimmed)
+            && !ends_with_tight_joiner(&merged);
+        append_vref_text(&mut merged, trimmed, needs_boundary_space);
+        map.insert(
+            current_ref.to_string(),
+            serde_json::Value::String(merged),
+        );
+    } else {
+        map.insert(
+            current_ref.to_string(),
+            serde_json::Value::String(trimmed.to_string()),
+        );
+    }
+}
+
 /// Serialize a [`Document`] to a JSON object mapping verse references to plain text.
 ///
 /// The output is a flat `{ "GEN 1:1": "In the beginning ...", ... }` dictionary.
@@ -146,13 +173,7 @@ pub fn to_vref_map(doc: &Document) -> serde_json::Map<String, serde_json::Value>
                 for child in content {
                     if let Node::Verse(data) = child {
                         // Flush the previous verse.
-                        let trimmed = current_text.trim();
-                        if !current_ref.is_empty() && !trimmed.is_empty() {
-                            map.insert(
-                                current_ref.clone(),
-                                serde_json::Value::String(trimmed.to_string()),
-                            );
-                        }
+                        flush_current_ref(&mut map, &current_ref, &current_text);
                         current_ref = format!("{} {}:{}", book, chapter, data.number);
                         current_text = String::new();
                         verse_opened_in_para = true;
@@ -175,13 +196,7 @@ pub fn to_vref_map(doc: &Document) -> serde_json::Map<String, serde_json::Value>
             // siblings of paragraphs in chapter content).
             Node::Verse(data) => {
                 // Flush the previous verse.
-                let trimmed = current_text.trim();
-                if !current_ref.is_empty() && !trimmed.is_empty() {
-                    map.insert(
-                        current_ref.clone(),
-                        serde_json::Value::String(trimmed.to_string()),
-                    );
-                }
+                flush_current_ref(&mut map, &current_ref, &current_text);
                 current_ref = format!("{} {}:{}", book, chapter, data.number);
                 current_text = String::new();
             }
@@ -194,10 +209,7 @@ pub fn to_vref_map(doc: &Document) -> serde_json::Map<String, serde_json::Value>
     }
 
     // Flush the last verse.
-    let trimmed = current_text.trim();
-    if !current_ref.is_empty() && !trimmed.is_empty() {
-        map.insert(current_ref, serde_json::Value::String(trimmed.to_string()));
-    }
+    flush_current_ref(&mut map, &current_ref, &current_text);
 
     map
 }

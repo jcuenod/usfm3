@@ -850,6 +850,69 @@ fn root_level_verse_before_heading_is_kept_in_vref() {
 }
 
 #[test]
+fn repeated_same_verse_markers_are_merged_in_vref() {
+    let usfm = r#"\id 2CH
+\c 35
+\p
+\v 19 The Passover was kept in the eighteenth year of the king.
+\p
+\v 19 ‘A’ The king burned the idols.
+\v 19 ‘B’ No king before him turned to the Lord like this.
+\v 19 ‘C’ Yet the fierce anger of the Lord did not turn away.
+\v 19 ‘D’ The Lord said, “I will remove Judah from before me.”
+\v 20 After all this, the king went out to battle."#;
+
+    let vref = parse_to_vref(usfm);
+    assert_eq!(
+        vref.get("2CH 35:19").and_then(|v| v.as_str()),
+        Some(
+            "The Passover was kept in the eighteenth year of the king. ‘A’ The king burned the idols. ‘B’ No king before him turned to the Lord like this. ‘C’ Yet the fierce anger of the Lord did not turn away. ‘D’ The Lord said, “I will remove Judah from before me.”"
+        )
+    );
+    assert_eq!(
+        vref.get("2CH 35:20").and_then(|v| v.as_str()),
+        Some("After all this, the king went out to battle.")
+    );
+}
+
+#[test]
+fn attached_lettered_subdivisions_remain_same_verse_across_exports() {
+    let usfm = r#"\id JOB
+\c 2
+\p
+\v 9 How long will you hold fast your integrity?
+\v 9‘A’ I will wait a little longer.
+\v 9‘B’ My name has vanished from the earth.
+\v 9‘C’ You sit in decay through the whole night.
+\v 9‘D’ Curse God and die.
+\v 10 But he said to her, “You speak as one of the foolish women speaks.”"#;
+
+    let vref = parse_to_vref(usfm);
+    assert_eq!(
+        vref.get("JOB 2:9").and_then(|v| v.as_str()),
+        Some(
+            "How long will you hold fast your integrity? ‘A’ I will wait a little longer. ‘B’ My name has vanished from the earth. ‘C’ You sit in decay through the whole night. ‘D’ Curse God and die."
+        )
+    );
+    assert_eq!(
+        vref.get("JOB 2:10").and_then(|v| v.as_str()),
+        Some("But he said to her, “You speak as one of the foolish women speaks.”")
+    );
+
+    let usfm_out = parse_to_usfm(usfm);
+    assert!(usfm_out.contains(r#"\p \v 9 How long will you hold fast your integrity?"#));
+    assert!(usfm_out.contains(r#"\v 9 ‘A’ I will wait a little longer."#));
+    assert!(usfm_out.contains(r#"\v 9 ‘D’ Curse God and die."#));
+    assert!(!usfm_out.contains(r#"\v 9‘A’"#));
+
+    let usx_out = parse_to_usx(usfm);
+    assert!(usx_out.contains(r#"<verse number="9" style="v" sid="JOB 2:9"/> How long will you hold fast your integrity?"#));
+    assert!(usx_out.contains(r#"<verse number="9" style="v" sid="JOB 2:9"/>‘A’ I will wait a little longer."#));
+    assert!(usx_out.contains(r#"<verse number="10" style="v" sid="JOB 2:10"/> But he said to her, “You speak as one of the foolish women speaks.”"#));
+    assert!(!usx_out.contains(r#"number="9‘A’""#));
+}
+
+#[test]
 fn usfm_serialization_normalizes_spacing_for_continuation_cases() {
     let poetry = parse_to_usfm(
         r#"\id MRK
