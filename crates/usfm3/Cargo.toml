@@ -1,0 +1,21 @@
+[package]
+name = "usfm3"
+description = "Error-tolerant, blazingly fast USFM parser with a flat tape IR"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# SIMD-accelerated, stable-Rust scanning for the structural (stage 1) pass.
+memchr = "2"
+# Perfect-hash marker-name lookup; tables are generated at build time.
+phf = "0.11"
+
+[build-dependencies]
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+phf_codegen = "0.11"
+
+[dev-dependencies]
+serde_json = "1"

@@ -1,0 +1,138 @@
+# USFM marker specification — the single source of truth for the parser.
+#
+# `build.rs` reads this and generates per-version `MarkerTable`s (with a phf
+# perfect-hash name->id map) into $OUT_DIR/marker_tables.rs.
+#
+# Each [groups.<id>] entry shares one profile across many marker `names`:
+#   category : identification | chapter | verse | paragraph | character | note | milestone | other  (required)
+#   role     : content | excluded | boundary   (vref TextRole; default by category)
+#   closing  : none | optional | required       (default by category)
+#   usx      : USX element name                 (default by category)
+#   since    : first USFM version ("3.0" default); until : last version (optional)
+#
+# Version deltas: set `since`/`until` per group. Until the exact 3.1↔3.2
+# additions are verified, everything is "3.0" (present in both tables); the
+# filtering machinery is wired and ready for real deltas.
+#
+# Defaults by category:
+#   role:    character->content, note->excluded, paragraph->boundary,
+#            identification->excluded, chapter/verse->boundary, milestone->excluded
+#   usx:     paragraph/identification->para, character->char, note->note,
+#            chapter->chapter, verse->verse, milestone->ms
+
+# --- identification / headers (not verse text) -----------------------------
+[groups.id]
+category = "identification"
+usx = "book"
+names = ["id"]
+
+[groups.ident]
+category = "identification"
+names = ["usfm", "ide", "sts", "rem", "h", "h1", "h2", "h3",
+         "toc1", "toc2", "toc3", "toca1", "toca2", "toca3"]
+
+# --- introductions (excluded from verse text) ------------------------------
+[groups.intro_para]
+category = "paragraph"
+role = "excluded"
+names = ["imt", "imt1", "imt2", "imt3", "imt4", "imte", "imte1", "imte2",
+         "is", "is1", "is2", "ip", "ipi", "im", "imi", "ipq", "imq", "ipr",
+         "iq", "iq1", "iq2", "iq3", "ib", "ili", "ili1", "ili2",
+         "iot", "io", "io1", "io2", "io3", "io4", "iex", "ie"]
+
+[groups.intro_char]
+category = "character"
+role = "excluded"
+names = ["ior", "iqt"]
+
+# --- titles / section headings / references (excluded from verse text) ------
+[groups.titles]
+category = "paragraph"
+role = "excluded"
+names = ["mt", "mt1", "mt2", "mt3", "mt4", "mte", "mte1", "mte2",
+         "ms", "ms1", "ms2", "ms3", "mr", "s", "s1", "s2", "s3", "s4", "s5",
+         "sr", "r", "sp", "sd", "sd1", "sd2", "sd3", "sd4", "d", "qa",
+         "cl", "cd"]
+
+# --- chapter / verse --------------------------------------------------------
+[groups.chapter]
+category = "chapter"
+names = ["c"]
+
+[groups.verse]
+category = "verse"
+names = ["v"]
+
+[groups.alt_numbering]
+category = "character"
+role = "excluded"
+closing = "required"
+names = ["ca", "va", "vp", "cp"]
+
+# --- verse-bearing paragraphs (their text IS verse content) -----------------
+[groups.para_text]
+category = "paragraph"
+role = "boundary"
+names = ["p", "m", "po", "pr", "cls", "pmo", "pm", "pmc", "pmr",
+         "pi", "pi1", "pi2", "pi3", "mi", "nb", "pc", "ph", "ph1", "ph2", "ph3",
+         "b", "pb", "q", "q1", "q2", "q3", "q4", "qr", "qc", "qm", "qm1", "qm2",
+         "qm3", "qd", "lh", "li", "li1", "li2", "li3", "li4", "lf", "lim",
+         "lim1", "lim2", "lit", "tr"]
+
+# --- character markers (drop tag, keep inner text) --------------------------
+[groups.char_text]
+category = "character"
+role = "content"
+names = ["add", "addpn", "bk", "dc", "k", "k1", "k2", "nd", "ndx", "ord",
+         "pn", "png", "pro", "qac", "qs", "qt", "sig", "sls", "tl", "wj",
+         "em", "bd", "bdit", "it", "no", "sc", "sup", "w", "wa", "wg", "wh",
+         "lik", "liv", "liv1", "liv2", "liv3", "liv4", "jmp", "rb",
+         # closed note-internal markers (nest inside a note, unlike fr/ft/fq)
+         "fv", "fdc", "fm", "cat", "ref", "litl"]
+
+# Cross-reference-quote: present in text flow but excluded from verse text.
+[groups.char_excluded]
+category = "character"
+role = "excluded"
+names = ["rq"]
+
+# Table cells carry content text.
+[groups.table_cells]
+category = "character"
+role = "content"
+closing = "none"
+usx = "cell"
+names = ["th", "th1", "th2", "th3", "th4", "th5", "thr", "thr1", "thr2", "thr3",
+         "thc", "thc1", "thc2", "thc3",
+         "tc", "tc1", "tc2", "tc3", "tc4", "tc5", "tc6",
+         "tcr", "tcr1", "tcr2", "tcr3",
+         "tcc", "tcc1", "tcc2", "tcc3", "tcc4"]
+
+# --- notes & figures (whole subtree excluded from verse text) ---------------
+[groups.notes]
+category = "note"
+names = ["f", "fe", "ef", "x", "ex"]
+
+# Figures are inline, paired, take attributes, and are excluded from verse text.
+[groups.figure]
+category = "character"
+role = "excluded"
+closing = "required"
+usx = "figure"
+names = ["fig"]
+
+# Note-internal markers: live inside an excluded note subtree, so role is moot;
+# listed so they parse cleanly rather than warning as unknown.
+[groups.note_content]
+category = "character"
+role = "content"
+closing = "none"
+names = ["fr", "fk", "fq", "fqa", "fl", "fw", "fp", "ft",
+         "xo", "xk", "xq", "xt", "xta", "xop", "xot", "xnt", "xdc"]
+
+# --- milestones (self-closing via `\*`) -------------------------------------
+[groups.milestones]
+category = "milestone"
+closing = "none"
+names = ["qt-s", "qt-e", "qt1-s", "qt1-e", "qt2-s", "qt2-e", "ts-s", "ts-e", "ts",
+         "zaln-s", "zaln-e", "zms", "k-s", "k-e"]
