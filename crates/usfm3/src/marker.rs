@@ -103,6 +103,11 @@ pub struct MarkerInfo {
     pub closing: Closing,
     /// Element name when serializing to USX (e.g. `"para"`, `"char"`, `"note"`).
     pub usx_element: &'static str,
+    /// `Some(replacement guidance)` when this marker is deprecated *in this
+    /// version's table* (a `DeprecatedMarker` advisory); `None` otherwise. Version
+    /// awareness is baked in at table-generation time, so the same marker can be
+    /// current in one version's table and deprecated in a later one.
+    pub deprecated: Option<&'static str>,
 }
 
 /// A resolved set of markers for one USFM version: the entry slice plus a
@@ -123,15 +128,51 @@ impl MarkerTable {
 
     /// Resolve a marker name (without the leading `\`, without any trailing `*`)
     /// to its id. O(1) via the perfect hash.
+    ///
+    /// Many USFM markers are a base plus a numeric level (`\q1`, `\mt2`, `\s3`)
+    /// or, for table cells, a column / column-range (`\tc3`, `\tcr1-2`). Rather
+    /// than enumerate every variant, the table stores the base (`q`, `mt`, `tc`,
+    /// `tcr`, …) and we fall back to it by stripping a trailing `\d+(-\d+)?`.
     #[inline]
     pub fn lookup(&self, name: &str) -> Option<MarkerId> {
-        self.index.get(name).copied().map(MarkerId)
+        if let Some(id) = self.index.get(name) {
+            return Some(MarkerId(*id));
+        }
+        let base = strip_level_suffix(name);
+        if base.len() != name.len() {
+            self.index.get(base).copied().map(MarkerId)
+        } else {
+            None
+        }
     }
 
     #[inline]
     pub fn info(&self, id: MarkerId) -> Option<&MarkerInfo> {
         self.entries.get(id.0 as usize)
     }
+}
+
+/// Strip a trailing numeric level / column-range suffix: `q1`→`q`, `tcr1-2`→`tcr`,
+/// `tc3-4`→`tc`. Leaves names without such a suffix (and milestones like `qt-s`,
+/// which end in a letter) unchanged.
+fn strip_level_suffix(name: &str) -> &str {
+    let bytes = name.as_bytes();
+    let mut end = bytes.len();
+    // Optional `-<digits>` (column-span tail).
+    let mut i = end;
+    while i > 0 && bytes[i - 1].is_ascii_digit() {
+        i -= 1;
+    }
+    if i > 0 && i < end && bytes[i - 1] == b'-' {
+        end = i - 1;
+    }
+    // Leading `<digits>` of the level/column.
+    let mut j = end;
+    while j > 0 && bytes[j - 1].is_ascii_digit() {
+        j -= 1;
+    }
+    // Only treat it as a suffix if a non-empty base remains.
+    if j > 0 && j < end { &name[..j] } else { name }
 }
 
 include!(concat!(env!("OUT_DIR"), "/marker_tables.rs"));

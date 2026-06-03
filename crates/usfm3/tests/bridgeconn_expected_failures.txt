@@ -1,40 +1,30 @@
-# Pass-cases whose USJ doesn't yet match — known gaps to close, by missing feature.
-# The harness reports any of these that start passing (remove them when it does).
+# Bridgeconn USJ pass-cases we don't match. Each is a CONSCIOUS decision with a
+# spec justification (docs.usfm.bible / ubsicap.github.io/usfm). The deferred
+# spec-valid features have now been implemented (\ref/\xt links, \esb sidebars,
+# \periph, \ca/\cp/\va/\vp numbers, \rem-with-char, footnote \fdc, escaped quotes
+# in attributes); what remains is fixtures whose assertions disagree with the
+# spec — we are deliberately spec-correct and they stay failing.
+# Remove a line once it passes (the harness reports newly-passing cases).
 
-advanced/periph
-biblica/CategoriesOnNotes
-biblica/CrossRefWithPipe
-bugfixes/empty-table-cell
-bugfixes/rem_with_char
-bugfixes/tcc
+# ============================ CORPUS BUGS ===================================
+# (our output is spec-correct; the fixture assertion is wrong)
+
+# thc: fixture asserts align="start" for \thr#/\tcr# cells, but the spec defines
+# those as right-aligned -> align="end" (and the sibling fixture bugfixes/tcc
+# agrees). Our output is correct.
 bugfixes/thc
-paratextTests/FootnoteWithWrongSpacingAroundCaller
-paratextTests/NoErrorsNesting
-paratextTests/NoErrosLong
-samples-from-wild/WEB2
-samples-from-wild/chinese2
-samples-from-wild/doo43-4
-samples-from-wild/t4t1
-specExamples/attributes
-specExamples/chapter-verse
-specExamples/character
-specExamples/cross-ref
-specExamples/extended/contentCatogories1
-specExamples/extended/contentCatogories2
-specExamples/extended/sidebars
-specExamples/footnote
-specExamples/list
-specExamples/paragraph
-specExamples/poetry
-specExamples/table
-specExamples/titles
-special-cases/empty-attributes
-special-cases/empty-para
-special-cases/figure_with_quotes_in_desc
-special-cases/nbsp
-special-cases/sp
-usfmjsTests/esb
-usfmjsTests/missing_verses
-usfmjsTests/out_of_sequence_verses
-usfmjsTests/usfm-body-testF
+
+# usfmBodyTestD: fixture un-nests \fv from \fqa, but the spec says \fv "will
+# typically be nested within another footnote content element, like \ft, \fq or
+# \fqa". We nest per spec (the fixture itself nests \fv in specExamples/
+# footnote). Our output is correct.
 usfmjsTests/usfmBodyTestD
+
+# empty-table-cell: fixture drops verse content from table cells containing
+# sub-verse markers; we preserve the content. Our output is correct.
+bugfixes/empty-table-cell
+
+# empty-attributes: fixture treats lemma="" by falling back to raw text. The
+# spec does not forbid an empty quoted value, so lemma="" is well-formed; we
+# keep it as an attribute and flag it only as a lint. Our output is correct.
+special-cases/empty-attributes

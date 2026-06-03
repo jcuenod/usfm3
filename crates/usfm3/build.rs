@@ -23,6 +23,11 @@ struct Group {
     usx: Option<String>,
     since: Option<String>,
     until: Option<String>,
+    /// First version in which these markers are deprecated (still valid, but
+    /// advised against), e.g. "3.0". Pairs with `deprecated_for`.
+    deprecated_since: Option<String>,
+    /// Replacement guidance shown in the `DeprecatedMarker` advisory.
+    deprecated_for: Option<String>,
     names: Vec<String>,
 }
 
@@ -34,6 +39,8 @@ struct Marker {
     usx: String,
     since: u32,
     until: Option<u32>,
+    deprecated_since: Option<u32>,
+    deprecated_for: Option<String>,
 }
 
 /// USFM versions we emit a table for: (Rust `Version` variant, minor rank).
@@ -62,6 +69,10 @@ fn main() {
         let usx = g.usx.clone().unwrap_or_else(|| default_usx(&g.category).to_string());
         let since = ver_rank(g.since.as_deref().unwrap_or("3.0"));
         let until = g.until.as_deref().map(ver_rank);
+        let deprecated_since = g.deprecated_since.as_deref().map(ver_rank);
+        if deprecated_since.is_some() && g.deprecated_for.is_none() {
+            panic!("group `{gid}`: `deprecated_since` requires `deprecated_for`");
+        }
         for name in &g.names {
             if !seen.insert(name.clone()) {
                 panic!("marker `{name}` appears in more than one group (group `{gid}`)");
@@ -74,6 +85,8 @@ fn main() {
                 usx: usx.clone(),
                 since,
                 until,
+                deprecated_since,
+                deprecated_for: g.deprecated_for.clone(),
             });
         }
     }
@@ -90,10 +103,16 @@ fn main() {
         // Entries slice.
         writeln!(code, "static {variant}_ENTRIES: &[MarkerInfo] = &[").unwrap();
         for m in &filtered {
+            // Deprecation is version-aware: only flagged once this table's version
+            // reaches the marker's `deprecated_since`.
+            let deprecated = match (m.deprecated_since, &m.deprecated_for) {
+                (Some(since), Some(repl)) if *rank >= since => format!("Some({repl:?})"),
+                _ => "None".to_string(),
+            };
             writeln!(
                 code,
-                "    MarkerInfo {{ name: {:?}, category: Category::{}, text_role: TextRole::{}, closing: Closing::{}, usx_element: {:?} }},",
-                m.name, m.category, m.role, m.closing, m.usx
+                "    MarkerInfo {{ name: {:?}, category: Category::{}, text_role: TextRole::{}, closing: Closing::{}, usx_element: {:?}, deprecated: {} }},",
+                m.name, m.category, m.role, m.closing, m.usx, deprecated
             )
             .unwrap();
         }

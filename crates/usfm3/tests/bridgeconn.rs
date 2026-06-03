@@ -133,8 +133,9 @@ fn bridgeconn_usj() {
     let mut fail_detected = 0usize;
     for c in &fail_cases {
         if let Ok(usfm) = std::fs::read_to_string(&c.usfm) {
-            let doc = usfm3::parse(&usfm, usfm3::Version::V3_1);
-            if doc.diagnostics().iter().any(|d| d.severity == usfm3::diagnostic::Severity::Error) {
+            let opts = usfm3::ParseOptions { diagnostics: true };
+            let doc = usfm3::parse_with(&usfm, usfm3::Version::V3_1, opts);
+            if doc.diagnostics().iter().any(|d| d.severity == usfm3::Severity::Error) {
                 fail_detected += 1;
             }
         }
@@ -172,4 +173,40 @@ fn bridgeconn_usj() {
     }
 
     assert!(unexpected.is_empty(), "{} unexpected USJ failures", unexpected.len());
+}
+
+/// Exporting to USFM and re-parsing must yield the same USJ (whitespace-normalized)
+/// for every pass-case we already serialize correctly — i.e. the exporter is
+/// faithful wherever the serializer is.
+#[test]
+fn bridgeconn_usfm_roundtrip() {
+    let expected_failures = load_expected_failures();
+    let mut checked = 0usize;
+    let mut broken: Vec<String> = Vec::new();
+
+    for case in discover().iter().filter(|c| c.validated_pass) {
+        // Only round-trip cases whose USJ we already match (skip known gaps).
+        if expected_failures.contains(&case.name) || compare_usj(case).is_err() {
+            continue;
+        }
+        checked += 1;
+        let usfm = std::fs::read_to_string(&case.usfm).unwrap();
+        let direct = usfm3::parse(&usfm, usfm3::Version::V3_1).to_usj();
+        let exported = usfm3::parse(&usfm, usfm3::Version::V3_1).to_usfm();
+        let round = usfm3::parse(&exported, usfm3::Version::V3_1).to_usj();
+
+        let mut a: Value = serde_json::from_str(&direct).unwrap();
+        let mut b: Value = serde_json::from_str(&round).unwrap();
+        normalize(&mut a);
+        normalize(&mut b);
+        if a != b {
+            broken.push(case.name.clone());
+        }
+    }
+
+    eprintln!("\nUSFM round-trip: {}/{} matched", checked - broken.len(), checked);
+    for name in &broken {
+        eprintln!("  ROUND-TRIP DIFF {name}");
+    }
+    assert!(broken.is_empty(), "{} round-trip mismatches", broken.len());
 }

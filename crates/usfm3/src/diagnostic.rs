@@ -29,25 +29,122 @@ impl Severity {
     }
 }
 
-/// A single diagnostic. `code` is a stable, machine-readable identifier
-/// (e.g. `"unknown-marker"`, `"unclosed-char-marker"`) suitable for editor
-/// rule configuration; `message` is the human-facing string.
+/// Machine-readable diagnostic code. The CamelCase variant names are the stable
+/// identifiers (matching the rsusfm3 vocabulary) and serialize as their name,
+/// e.g. `"InvalidBookCode"`. Variants not yet emitted are reserved for upcoming
+/// rules so the vocabulary stays aligned.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DiagnosticCode {
+    // Parser (lexical/structural)
+    UnknownMarker,
+    UnclosedMarker,
+    StrayCloseMarker,
+    StrayBackslash,
+    // Validation (semantic)
+    MissingIdMarker,
+    InvalidBookCode,
+    DuplicateId,
+    TextBeforeId,
+    MissingChapterMarker,
+    InvalidChapterSequence,
+    DuplicateChapter,
+    InvalidVerseSequence,
+    VerseOutsideParagraph,
+    NoteSubmarkerOutsideNote,
+    NonEmptyBlankLine,
+    LeadingZeros,
+    MilestoneMismatch,
+    InvalidAttributes,
+    MissingChapterNumber,
+    MissingVerseNumber,
+    CharCrossesVerseBoundary,
+    EmptyFigure,
+    UnquotedAttributeValue,
+    MissingRequiredAttribute,
+    BodyParagraphBeforeChapter,
+    EmptyWordMarker,
+    MissingMilestoneSelfClose,
+    InvalidTableColumnSequence,
+    DeprecatedMarker,
+    ImplicitClose,
+    UnclosedNote,
+    UnclosedAtEof,
+    DefaultAttributeNotDefined,
+    // Reserved — these conditions are currently reported via a more general code
+    // (a misnested close surfaces as StrayCloseMarker) or are niche advisories not
+    // yet split out.
+    MisnestedMarker,
+    MissingNestingPrefix,
+    HeaderAfterBody,
+}
+
+impl DiagnosticCode {
+    /// The stable string identifier (the CamelCase variant name).
+    pub fn as_str(self) -> &'static str {
+        // `{:?}` on a fieldless variant is exactly its name; cheap and exhaustive.
+        // Mapped through a tiny lookup so the wire format is explicit, not Debug.
+        DIAGNOSTIC_CODE_NAMES[self as usize]
+    }
+}
+
+/// Parallel to the `DiagnosticCode` declaration order.
+static DIAGNOSTIC_CODE_NAMES: &[&str] = &[
+    "UnknownMarker",
+    "UnclosedMarker",
+    "StrayCloseMarker",
+    "StrayBackslash",
+    "MissingIdMarker",
+    "InvalidBookCode",
+    "DuplicateId",
+    "TextBeforeId",
+    "MissingChapterMarker",
+    "InvalidChapterSequence",
+    "DuplicateChapter",
+    "InvalidVerseSequence",
+    "VerseOutsideParagraph",
+    "NoteSubmarkerOutsideNote",
+    "NonEmptyBlankLine",
+    "LeadingZeros",
+    "MilestoneMismatch",
+    "InvalidAttributes",
+    "MissingChapterNumber",
+    "MissingVerseNumber",
+    "CharCrossesVerseBoundary",
+    "EmptyFigure",
+    "UnquotedAttributeValue",
+    "MissingRequiredAttribute",
+    "BodyParagraphBeforeChapter",
+    "EmptyWordMarker",
+    "MissingMilestoneSelfClose",
+    "InvalidTableColumnSequence",
+    "DeprecatedMarker",
+    "ImplicitClose",
+    "UnclosedNote",
+    "UnclosedAtEof",
+    "DefaultAttributeNotDefined",
+    "MisnestedMarker",
+    "MissingNestingPrefix",
+    "HeaderAfterBody",
+];
+
+/// A single diagnostic. `code` is the machine-readable [`DiagnosticCode`];
+/// `message` is the human-facing string; `span` points at the offending bytes.
 #[derive(Clone, Debug)]
 pub struct Diagnostic {
     pub severity: Severity,
-    pub code: &'static str,
+    pub code: DiagnosticCode,
     pub message: String,
     pub span: Span,
 }
 
 impl Diagnostic {
-    pub fn error(code: &'static str, span: Span, message: impl Into<String>) -> Self {
+    pub fn error(code: DiagnosticCode, span: Span, message: impl Into<String>) -> Self {
         Self { severity: Severity::Error, code, span, message: message.into() }
     }
-    pub fn warning(code: &'static str, span: Span, message: impl Into<String>) -> Self {
+    pub fn warning(code: DiagnosticCode, span: Span, message: impl Into<String>) -> Self {
         Self { severity: Severity::Warning, code, span, message: message.into() }
     }
-    pub fn lint(code: &'static str, span: Span, message: impl Into<String>) -> Self {
+    pub fn lint(code: DiagnosticCode, span: Span, message: impl Into<String>) -> Self {
         Self { severity: Severity::Lint, code, span, message: message.into() }
     }
 }

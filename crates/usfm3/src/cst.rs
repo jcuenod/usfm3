@@ -11,7 +11,7 @@
 
 use crate::marker::{MarkerInfo, MarkerTable};
 use crate::span::Span;
-use crate::tape::{Node, NodeKind, Tape};
+use crate::tape::{Node, NodeKind, Tape, flags};
 
 #[derive(Clone, Copy)]
 pub struct Cursor<'a> {
@@ -54,6 +54,12 @@ impl<'a> Cursor<'a> {
         self.node().is_synthetic()
     }
 
+    /// Whether a character marker was opened with the `+` nesting prefix (`\+nd`).
+    #[inline]
+    pub fn is_nested(&self) -> bool {
+        self.node().flags & flags::NESTED != 0
+    }
+
     /// For `\c`/`\v` leaves, the parsed chapter/verse number (packed in `link`).
     #[inline]
     pub fn number(&self) -> Option<u32> {
@@ -70,6 +76,19 @@ impl<'a> Cursor<'a> {
             NodeKind::MarkerOpen => Some(self.at(self.node().link)),
             _ => None,
         }
+    }
+
+    /// The marker's actual name as written, recovered from the token (e.g. `q1`,
+    /// `tcr1-2`, `nd`) — distinct from [`marker_info`](Self::marker_info)`.name`,
+    /// which is the table's *base* (`q`, `tcr`, `nd`). Empty for non-markers.
+    pub fn marker_name(&self) -> &'a str {
+        let s = self.text();
+        let s = s.strip_prefix('\\').unwrap_or(s);
+        let s = s.strip_prefix('+').unwrap_or(s);
+        let end = s
+            .find(|c: char| c.is_whitespace() || c == '*' || c == '|' || c == '\\')
+            .unwrap_or(s.len());
+        &s[..end]
     }
 
     /// Marker metadata for marker-bearing nodes.

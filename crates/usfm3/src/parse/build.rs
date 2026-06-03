@@ -10,8 +10,8 @@
 //! exactly one node. Marker tokens own their `\tag`/`\tag*` bytes (and, for
 //! chapter/verse, the trailing number token); everything else is `Text`.
 
-use crate::diagnostic::Diagnostic;
-use crate::marker::{Category, Closing, MarkerId, MarkerTable};
+use crate::diagnostic::{Diagnostic, DiagnosticCode};
+use crate::marker::{Category, Closing, MarkerId, MarkerTable, TextRole};
 use crate::span::Span;
 use crate::tape::{flags, Node, NodeKind, Tape};
 
@@ -22,8 +22,8 @@ pub struct BuildOutput {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-pub fn build(source: &str, table: &MarkerTable) -> BuildOutput {
-    Builder::new(source, table).run()
+pub fn build(source: &str, table: &MarkerTable, diagnostics: bool) -> BuildOutput {
+    Builder::new(source, table, diagnostics).run()
 }
 
 struct Builder<'a> {
@@ -32,13 +32,15 @@ struct Builder<'a> {
     table: &'a MarkerTable,
     nodes: Vec<Node>,
     diags: Vec<Diagnostic>,
+    /// Whether to collect diagnostics at all (off on the hot path).
+    collect_diags: bool,
     /// Indices of currently open container nodes (paragraphs, char spans, notes),
     /// innermost last.
     stack: Vec<u32>,
 }
 
 impl<'a> Builder<'a> {
-    fn new(src: &'a str, table: &'a MarkerTable) -> Self {
+    fn new(src: &'a str, table: &'a MarkerTable, collect_diags: bool) -> Self {
         let bytes = src.as_bytes();
         let mut nodes = Vec::with_capacity(scan::estimate_nodes(bytes));
         // Root at index 0; its `link` (matching close) is patched at the end.
@@ -50,7 +52,15 @@ impl<'a> Builder<'a> {
             len: bytes.len() as u32,
             link: 0,
         });
-        Self { src, bytes, table, nodes, diags: Vec::new(), stack: Vec::new() }
+        Self { src, bytes, table, nodes, diags: Vec::new(), collect_diags, stack: Vec::new() }
+    }
+
+    /// Record a diagnostic (no-op when diagnostics are disabled).
+    #[inline]
+    fn report(&mut self, make: impl FnOnce() -> Diagnostic) {
+        if self.collect_diags {
+            self.diags.push(make());
+        }
     }
 
     fn run(mut self) -> BuildOutput {
@@ -65,13 +75,45 @@ impl<'a> Builder<'a> {
                 }
                 Some(rel) => {
                     let b = pos + rel;
+                    // An escaped quote (`\"`) inside an attribute value is literal,
+                    // not a marker. The spec is silent on this, but the reference
+                    // tooling and real translations use it for quotes in captions,
+                    // so capture the whole `|…` region (to the marker's real close)
+                    // as one Attribute node rather than letting the `\"` fragment it.
+                    // The `bytes[b+1] == '"'` guard keeps this off the common path.
+                    if b + 1 < len
+                        && self.bytes[b + 1] == b'"'
+                        && self.top_takes_attributes()
+                    {
+                        if let Some(bar_rel) = memchr::memchr(b'|', &self.bytes[pos..b]) {
+                            let bar = pos + bar_rel;
+                            if bar > pos {
+                                self.push_leaf(
+                                    NodeKind::Text,
+                                    Span::new(pos as u32, (bar - pos) as u32),
+                                    MarkerId::UNKNOWN,
+                                );
+                            }
+                            let end = self.scan_attr_region(bar);
+                            self.push_leaf(
+                                NodeKind::Attribute,
+                                Span::new(bar as u32, (end - bar) as u32),
+                                MarkerId::UNKNOWN,
+                            );
+                            if let Some(&open) = self.stack.last() {
+                                self.nodes[open as usize].flags |= flags::HAS_ATTRS;
+                            }
+                            pos = end;
+                            continue;
+                        }
+                    }
                     self.emit_text(pos, b);
                     pos = self.parse_marker(b);
                 }
             }
         }
-        // Close anything still open at EOF.
-        self.close_blocks_down_to(0, len);
+        // Close anything still open at EOF (closer = None → "still open at EOF").
+        self.close_blocks_down_to(0, len, None);
         let last = (self.nodes.len() - 1) as u32;
         self.nodes[0].link = last;
         BuildOutput { tape: Tape { nodes: self.nodes }, diagnostics: self.diags }
@@ -136,34 +178,170 @@ impl<'a> Builder<'a> {
     // --- stack helpers -----------------------------------------------------
 
     /// Whether the innermost open marker takes `|key="value"` attributes — char
-    /// markers (`\w …|lemma="…"\w*`) and milestones (`\qt-s |who="…"\*`).
+    /// markers (`\w …|lemma="…"\w*`), milestones (`\qt-s |who="…"\*`), and `\periph`
+    /// (`\periph My Title|id="title"`).
     fn top_takes_attributes(&self) -> bool {
         self.stack
             .last()
             .and_then(|&i| self.table.info(self.nodes[i as usize].marker))
-            .map(|m| matches!(m.category, Category::Character | Category::Milestone))
+            .map(|m| matches!(m.category, Category::Character | Category::Milestone) || m.usx_element == "periph")
             .unwrap_or(false)
     }
 
+    /// The stack length to close down to when a new ordinary block begins: just
+    /// inside the innermost open block container (`\esb`, `\periph`), so its
+    /// paragraphs nest within it, or `0` at the top level.
+    fn container_floor(&self) -> usize {
+        self.stack
+            .iter()
+            .rposition(|&oi| self.is_container(oi))
+            .map(|p| p + 1)
+            .unwrap_or(0)
+    }
+
+    /// Scan an attribute region starting at the `|`, returning the byte offset of
+    /// the marker's real close. Escaped quotes (`\"`) are skipped so embedded
+    /// quotes don't prematurely end the region.
+    fn scan_attr_region(&self, from: usize) -> usize {
+        let len = self.bytes.len();
+        let mut p = from;
+        loop {
+            match memchr::memchr(b'\\', &self.bytes[p..]) {
+                None => return len,
+                Some(rel) => {
+                    let m = p + rel;
+                    if m + 1 < len && self.bytes[m + 1] == b'"' {
+                        p = m + 2; // escaped quote — part of the value
+                        continue;
+                    }
+                    return m; // the marker's closing token
+                }
+            }
+        }
+    }
+
+    /// Close an open `\rem` (and anything still open inside it) — used when a verse
+    /// ends a remark nested mid-paragraph, leaving the paragraph itself open.
+    fn close_rem(&mut self, at: usize) {
+        if let Some(pos) = self.stack.iter().rposition(|&oi| {
+            self.table.info(self.nodes[oi as usize].marker).map(|m| m.usx_element) == Some("rem")
+        }) {
+            self.close_blocks_down_to(pos, at, Some("v"));
+        }
+    }
+
+    /// Whether the open node at `idx` is a block container (sidebar / periph).
+    fn is_container(&self, idx: u32) -> bool {
+        matches!(
+            self.table.info(self.nodes[idx as usize].marker).map(|m| m.usx_element),
+            Some("sidebar") | Some("periph")
+        )
+    }
+
+    /// Lookahead: is there an explicit `\<tag>*` close for this marker before the
+    /// enclosing note or block boundary? Resolves dual-mode markers (`\xt`): a
+    /// closed one nests; an unclosed one is a note-text sibling. Bounded by the
+    /// surrounding note/paragraph, so it stays local (and cheap) on the parse path.
+    fn has_close_ahead(&self, tag: &str, from: usize) -> bool {
+        let len = self.bytes.len();
+        let mut p = from;
+        while p < len {
+            let Some(rel) = memchr::memchr(b'\\', &self.bytes[p..]) else { return false };
+            let m = p + rel;
+            let mut k = m + 1;
+            if k < len && self.bytes[k] == b'+' {
+                k += 1;
+            }
+            let ts = k;
+            while k < len && (self.bytes[k].is_ascii_alphanumeric() || self.bytes[k] == b'-') {
+                k += 1;
+            }
+            let mtag = &self.src[ts..k];
+            let is_close = k < len && self.bytes[k] == b'*';
+            if is_close && mtag == tag {
+                return true;
+            }
+            // A block marker, or the close of an enclosing note, ends the search.
+            if let Some(info) = self.table.lookup(mtag).and_then(|id| self.table.info(id)) {
+                let boundary = if is_close {
+                    info.category == Category::Note
+                } else {
+                    matches!(
+                        info.category,
+                        Category::Paragraph | Category::Identification | Category::Chapter
+                    )
+                };
+                if boundary {
+                    return false;
+                }
+            }
+            p = if is_close { k + 1 } else { k };
+        }
+        false
+    }
+
     /// Close open containers until the stack has `target_len` entries, at byte
-    /// `at`. Required-closing markers closed this way produce a warning.
-    fn close_blocks_down_to(&mut self, target_len: usize, at: usize) {
+    /// `at`. A marker left open here is diagnosed by *why* it closed: the close was
+    /// triggered either by a following marker (`closer = Some("p")`) or by reaching
+    /// end of input (`closer = None`). The specific code mirrors rsusfm3's
+    /// vocabulary so editors can phrase the fix precisely.
+    fn close_blocks_down_to(&mut self, target_len: usize, at: usize, closer: Option<&str>) {
         while self.stack.len() > target_len {
             let open = self.stack.pop().unwrap();
             let info = self.table.info(self.nodes[open as usize].marker);
-            let (kind, required) = match info.map(|m| (m.usx_element, m.closing)) {
-                Some(("para", _)) | Some(("book", _)) => (NodeKind::BlockEnd, false),
-                Some((_, Closing::Required)) => (NodeKind::MarkerClose, true),
-                _ => (NodeKind::BlockEnd, false),
+            let category = info.map(|m| m.category);
+            let usx = info.map(|m| m.usx_element);
+            let name = info.map(|m| m.name).unwrap_or("?");
+            let span = self.nodes[open as usize].span();
+            // Does an implicit close of this marker warrant a diagnostic? Notes and
+            // explicit-closing characters do; sidebars do; paragraphs / note-text
+            // siblings (`\fr`, `\ft`, …) are designed to end at a boundary.
+            let kind = match info.map(|m| (m.usx_element, m.closing)) {
+                Some(("para", _)) | Some(("book", _)) => NodeKind::BlockEnd,
+                Some((_, Closing::Required)) => NodeKind::MarkerClose,
+                _ => NodeKind::BlockEnd,
             };
-            if required {
-                let span = self.nodes[open as usize].span();
-                let name = info.map(|m| m.name).unwrap_or("?");
-                self.diags.push(Diagnostic::warning(
-                    "unclosed-marker",
-                    span,
-                    format!("\\{name} was left unclosed and was closed implicitly at a block boundary"),
-                ));
+            let diagnose = matches!(info.map(|m| m.closing), Some(Closing::Required))
+                || usx == Some("sidebar")
+                || category == Some(Category::Milestone);
+
+            if diagnose {
+                let make: Box<dyn FnOnce() -> Diagnostic> = if category == Some(Category::Milestone) {
+                    // Every milestone must self-close with `\*` (`\zaln-s |…\*`).
+                    Box::new(move || {
+                        Diagnostic::error(
+                            DiagnosticCode::MissingMilestoneSelfClose,
+                            span,
+                            format!("milestone \\{name} is missing its self-closing \\*"),
+                        )
+                    })
+                } else if category == Some(Category::Note) {
+                    Box::new(move || {
+                        Diagnostic::error(
+                            DiagnosticCode::UnclosedNote,
+                            span,
+                            format!("note \\{name} was not closed before a paragraph/chapter boundary"),
+                        )
+                    })
+                } else if let Some(by) = closer {
+                    let by = by.to_string();
+                    Box::new(move || {
+                        Diagnostic::error(
+                            DiagnosticCode::ImplicitClose,
+                            span,
+                            format!("\\{name} is missing its explicit \\{name}*; it was closed implicitly by \\{by}"),
+                        )
+                    })
+                } else {
+                    Box::new(move || {
+                        Diagnostic::error(
+                            DiagnosticCode::UnclosedAtEof,
+                            span,
+                            format!("\\{name} was still open at end of input"),
+                        )
+                    })
+                };
+                self.report(make);
                 self.nodes[open as usize].flags |= flags::HAS_ERROR;
             }
             self.emit_close(open, at, kind, true);
@@ -203,11 +381,13 @@ impl<'a> Builder<'a> {
 
         // Bare `\` at end of input → recover as an error node.
         if j >= len {
-            self.diags.push(Diagnostic::error(
-                "stray-backslash",
-                Span::new(b as u32, (j - b) as u32),
-                "stray '\\' at end of input",
-            ));
+            self.report(|| {
+                Diagnostic::error(
+                    DiagnosticCode::StrayBackslash,
+                    Span::new(b as u32, (j - b) as u32),
+                    "stray '\\' at end of input",
+                )
+            });
             self.push_leaf(NodeKind::Error, Span::new(b as u32, (j - b) as u32), MarkerId::UNKNOWN);
             return j;
         }
@@ -229,11 +409,13 @@ impl<'a> Builder<'a> {
         }
 
         if tag.is_empty() {
-            self.diags.push(Diagnostic::error(
-                "stray-backslash",
-                Span::new(b as u32, (j - b) as u32),
-                "'\\' not followed by a marker tag",
-            ));
+            self.report(|| {
+                Diagnostic::error(
+                    DiagnosticCode::StrayBackslash,
+                    Span::new(b as u32, (j - b) as u32),
+                    "'\\' not followed by a marker tag",
+                )
+            });
             self.push_leaf(NodeKind::Error, Span::new(b as u32, (j - b) as u32), MarkerId::UNKNOWN);
             return j;
         }
@@ -244,26 +426,90 @@ impl<'a> Builder<'a> {
             return self.handle_close(b, j, id, tag);
         }
 
+        // Deprecated-but-valid markers parse normally and carry an advisory. The
+        // deprecation (and its version) is data from the marker table; the lookup is
+        // gated so the hot path (diagnostics off) pays nothing.
+        if self.collect_diags {
+            if let Some(replacement) = id.and_then(|id| self.table.info(id)).and_then(|m| m.deprecated)
+            {
+                let span = Span::new(b as u32, (j - b) as u32);
+                self.diags.push(Diagnostic::warning(
+                    DiagnosticCode::DeprecatedMarker,
+                    span,
+                    format!("\\{tag} is deprecated; prefer {replacement}"),
+                ));
+            }
+        }
+
         match id.and_then(|id| self.table.info(id).map(|m| (id, m.category))) {
             Some((id, Category::Paragraph)) | Some((id, Category::Identification)) => {
-                // A new block ends every currently-open block (and any unclosed
-                // inline markers within it).
-                self.close_blocks_down_to(0, b);
+                let usx = self.table.info(id).map(|m| m.usx_element).unwrap_or("");
+                if usx == "sidebar-end" {
+                    // `\esbe` closes the nearest open sidebar and anything inside it,
+                    // owning its own token bytes as the sidebar's close node.
+                    let sidebar = self.stack.iter().rposition(|&oi| {
+                        self.table.info(self.nodes[oi as usize].marker).map(|m| m.usx_element)
+                            == Some("sidebar")
+                    });
+                    if let Some(pos) = sidebar {
+                        self.close_blocks_down_to(pos + 1, b, Some(tag));
+                        let open = self.stack.pop().unwrap();
+                        self.emit_close(open, b, NodeKind::BlockEnd, false);
+                        self.nodes.last_mut().unwrap().len = (j - b) as u32;
+                    } else {
+                        self.report(|| {
+                            Diagnostic::error(
+                                DiagnosticCode::StrayCloseMarker,
+                                Span::new(b as u32, (j - b) as u32),
+                                "\\esbe has no matching \\esb".to_string(),
+                            )
+                        });
+                        self.push_leaf(NodeKind::Error, Span::new(b as u32, (j - b) as u32), id);
+                    }
+                    return j;
+                }
+                if usx == "rem" {
+                    // Inside a body paragraph, \rem nests as a child remark instead
+                    // of ending the paragraph; at the top level it is an ordinary block.
+                    let nest = self.stack.last().is_some_and(|&top| {
+                        self.table.info(self.nodes[top as usize].marker).map(|m| {
+                            (m.category, m.text_role)
+                        }) == Some((Category::Paragraph, TextRole::Boundary))
+                    });
+                    if nest {
+                        let idx = self.push_open(Span::new(b as u32, (j - b) as u32), id);
+                        self.stack.push(idx);
+                        return j;
+                    }
+                }
+                // Containers (`\esb`, `\periph`) start a fresh block group at the top
+                // level; ordinary blocks only close down to the innermost container,
+                // so they nest inside an open sidebar/periph.
+                let is_container = matches!(usx, "sidebar" | "periph");
+                let target = if is_container { 0 } else { self.container_floor() };
+                self.close_blocks_down_to(target, b, Some(tag));
                 let idx = self.push_open(Span::new(b as u32, (j - b) as u32), id);
                 self.stack.push(idx);
                 j
             }
             Some((id, Category::Chapter)) => {
-                self.close_blocks_down_to(0, b);
-                let (num, end) = self.read_number(j);
+                self.close_blocks_down_to(0, b, Some(tag));
+                let (num, end) = self.read_number_from_tag_or_text(id, tag, j);
+                // Absorb any inline text on the same line as \c (e.g. `\c 4 Title`).
+                // Old translations sometimes embed a chapter title directly on the \c
+                // line. Extending the span consumes it so it is never emitted as a
+                // floating root-level Text node in USJ/USX (chapters have no text body).
+                let end = self.consume_line_remainder(end);
                 let idx = self.push_leaf(NodeKind::Chapter, Span::new(b as u32, (end - b) as u32), id);
                 self.nodes[idx as usize].link = num as u32; // number, not a jump pointer
                 self.nodes[idx as usize].flags |= flags::SELF_CLOSING;
                 end
             }
             Some((id, Category::Verse)) => {
-                // A verse is inline within its paragraph; it does not close blocks.
-                let (num, end) = self.read_number(j);
+                // A verse is inline within its paragraph; it does not close blocks
+                // — except a \rem nested in the paragraph, which ends at the verse.
+                self.close_rem(b);
+                let (num, end) = self.read_number_from_tag_or_text(id, tag, j);
                 let idx = self.push_leaf(NodeKind::Verse, Span::new(b as u32, (end - b) as u32), id);
                 self.nodes[idx as usize].link = num as u32;
                 self.nodes[idx as usize].flags |= flags::SELF_CLOSING;
@@ -276,17 +522,27 @@ impl<'a> Builder<'a> {
                 // Note-internal markers (`\fr \ft \fq` — Character + no explicit
                 // close) don't nest: an unprefixed one implicitly closes an open
                 // sibling of the same kind, so they serialize as siblings. Markers
-                // with explicit closing (`\bk \nd …`) nest until their `\xxx*`.
+                // with explicit closing (`\bk \nd …`) nest until their `\xxx*`. A
+                // dual-mode marker (`\xt`, Closing::Optional) nests when it is
+                // explicitly closed ahead, else behaves as a note-text sibling.
                 let info = self.table.info(id);
-                let implicit_sibling = !nested
-                    && info.map(|m| m.category == Category::Character && m.closing == Closing::None)
-                        == Some(true);
-                if implicit_sibling {
+                let acts_as_sibling = !nested
+                    && match info.map(|m| (m.category, m.closing)) {
+                        Some((Category::Character, Closing::None)) => true,
+                        Some((Category::Character, Closing::Optional)) => {
+                            !self.has_close_ahead(tag, j)
+                        }
+                        _ => false,
+                    };
+                if acts_as_sibling {
                     if let Some(&top) = self.stack.last() {
                         let top_is_sibling = self
                             .table
                             .info(self.nodes[top as usize].marker)
-                            .map(|m| m.category == Category::Character && m.closing == Closing::None)
+                            .map(|m| {
+                                m.category == Category::Character
+                                    && matches!(m.closing, Closing::None | Closing::Optional)
+                            })
                             == Some(true);
                         if top_is_sibling {
                             self.stack.pop();
@@ -295,17 +551,26 @@ impl<'a> Builder<'a> {
                     }
                 }
                 let idx = self.push_open(Span::new(b as u32, (j - b) as u32), id);
+                if nested {
+                    self.nodes[idx as usize].flags |= flags::NESTED;
+                }
                 self.stack.push(idx);
                 j
             }
             None => {
                 // Unknown marker: keep its text (error-tolerant), but don't give it
-                // block/close semantics we can't know.
-                self.diags.push(Diagnostic::warning(
-                    "unknown-marker",
-                    Span::new(b as u32, (j - b) as u32),
-                    format!("\\{tag} is not a known marker for this USFM version"),
-                ));
+                // block/close semantics we can't know. Markers in the `z` namespace
+                // are the spec's user-extension space, so they're allowed silently;
+                // any other unrecognized marker is an error.
+                if !tag.starts_with('z') {
+                    self.report(|| {
+                        Diagnostic::error(
+                            DiagnosticCode::UnknownMarker,
+                            Span::new(b as u32, (j - b) as u32),
+                            format!("\\{tag} is not a known marker for this USFM version"),
+                        )
+                    });
+                }
                 let idx = self.push_open(Span::new(b as u32, (j - b) as u32), MarkerId::UNKNOWN);
                 self.nodes[idx as usize].flags |= flags::HAS_ERROR | flags::SELF_CLOSING;
                 j
@@ -320,8 +585,9 @@ impl<'a> Builder<'a> {
         });
         match matching {
             Some(pos_in_stack) => {
-                // Close any inner markers left open inside this one (warnings).
-                self.close_blocks_down_to(pos_in_stack + 1, b);
+                // Close any inner markers left open inside this one — they were
+                // implicitly closed by this explicit `\tag*`.
+                self.close_blocks_down_to(pos_in_stack + 1, b, Some(tag));
                 let open = self.stack.pop().unwrap();
                 self.emit_close(open, b, NodeKind::MarkerClose, false);
                 // The explicit `\tag*` token itself is a real (lossless) node.
@@ -330,14 +596,50 @@ impl<'a> Builder<'a> {
                 j
             }
             None => {
-                self.diags.push(Diagnostic::warning(
-                    "stray-close",
-                    span,
-                    format!("\\{tag}* has no matching opening marker"),
-                ));
+                self.report(|| {
+                    Diagnostic::error(
+                        DiagnosticCode::StrayCloseMarker,
+                        span,
+                        format!("\\{tag}* has no matching opening marker"),
+                    )
+                });
                 self.push_leaf(NodeKind::Error, span, id.unwrap_or(MarkerId::UNKNOWN));
                 j
             }
+        }
+    }
+
+    /// Scan forward from `from` consuming everything until the next `\n` or `\`.
+    /// Used to absorb inline text on the same line as a `\c` marker (old-style
+    /// chapter titles embedded on the `\c` line) into the chapter's span, so they
+    /// are never tokenized as floating root-level Text nodes.
+    fn consume_line_remainder(&self, from: usize) -> usize {
+        let bytes = self.bytes;
+        let mut i = from;
+        while i < bytes.len() && bytes[i] != b'\n' && bytes[i] != b'\\' {
+            i += 1;
+        }
+        i
+    }
+
+    /// Read the verse/chapter number for a Chapter or Verse marker.
+    ///
+    /// Normally the number follows the marker as the first text token (`\v 11`).
+    /// But malformed USFM sometimes omits the space (`\v11`), embedding the number
+    /// in the marker name itself. When the tag is longer than the base marker name
+    /// and starts with a digit after the base letters, extract the number from the
+    /// tag rather than reading it from the text after the marker.
+    fn read_number_from_tag_or_text(&self, id: MarkerId, tag: &str, after_tag: usize) -> (u32, usize) {
+        let base_len = self.table.info(id).map_or(0, |m| m.name.len());
+        let suffix = &tag[base_len..];
+        if suffix.starts_with(|c: char| c.is_ascii_digit()) {
+            let value = suffix
+                .bytes()
+                .take_while(|b| b.is_ascii_digit())
+                .fold(0u32, |acc, b| acc.saturating_mul(10).saturating_add((b - b'0') as u32));
+            (value, after_tag) // number came from tag; no extra bytes consumed
+        } else {
+            self.read_number(after_tag)
         }
     }
 

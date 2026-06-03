@@ -17,22 +17,38 @@
 //! for (r, text) in vrefs.iter() { println!("{r} = {text}"); }
 //! ```
 
-pub mod cst;
-pub mod diagnostic;
-pub mod marker;
+// Internal representation. The crate root exposes a curated high-level API
+// (below); the flat tape, marker table, and CST cursor are available — opt-in —
+// through [`low_level`] for editor tooling and advanced consumers.
+mod cst;
+mod diagnostic;
+mod marker;
 mod parse;
-pub mod span;
-pub mod tape;
-pub mod vref;
+mod serialize;
+mod span;
+mod tape;
+mod validate;
 
 use cst::Cursor;
-use diagnostic::Diagnostic;
-use marker::{Category, MarkerTable, TextRole};
-use tape::{NodeKind, Tape};
-use vref::VerseRef;
-pub use vref::{BookId, VrefText};
+use marker::MarkerTable;
+use tape::Tape;
 
-mod serialize;
+// --- public API surface ----------------------------------------------------
+
+pub use diagnostic::{Diagnostic, DiagnosticCode, Severity};
+pub use serialize::vref::{BOOK_CODES, BookId, VerseRef, VrefRow, VrefText};
+
+/// Low-level access to the parse representation — the flat [`Tape`], the
+/// version-aware [`MarkerTable`], and the zero-allocation CST [`Cursor`] — for
+/// editor tooling and advanced consumers. The high-level API at the crate root
+/// (parse, [`Document`], `to_usx`/`to_usj`/`to_usfm`, vref, diagnostics) covers
+/// most needs; reach in here only when you need the raw structure.
+pub mod low_level {
+    pub use crate::cst::Cursor;
+    pub use crate::marker::{Category, Closing, MarkerId, MarkerInfo, MarkerTable, TextRole};
+    pub use crate::span::Span;
+    pub use crate::tape::{Node, NodeKind, Tape, flags};
+}
 
 /// USFM specification version. Selects the [`MarkerTable`] and lint rules.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -47,20 +63,41 @@ impl Default for Version {
     }
 }
 
-/// Parse `source` against the given USFM `version`.
+/// Options controlling a parse.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ParseOptions {
+    /// Collect diagnostics (lexical/structural errors + a semantic validation
+    /// pass). Off by default so the hot path (e.g. vref) pays nothing.
+    pub diagnostics: bool,
+}
+
+/// Parse `source` against the given USFM `version`, with diagnostics OFF.
 ///
-/// Never fails: malformed input is recorded in [`Document::diagnostics`] and
-/// recovered from. The returned [`Document`] borrows `source` for zero-copy views.
+/// Never fails: the parser recovers from malformed input. Use [`parse_with`] to
+/// opt into diagnostics. The returned [`Document`] borrows `source` (zero-copy).
 pub fn parse(source: &str, version: Version) -> Document<'_> {
+    parse_with(source, version, ParseOptions::default())
+}
+
+/// Parse with explicit [`ParseOptions`]. With `diagnostics: true`, the parser
+/// records lexical/structural diagnostics and runs a semantic validation pass.
+pub fn parse_with(source: &str, version: Version, options: ParseOptions) -> Document<'_> {
     let table = MarkerTable::for_version(version);
-    let out = parse::build::build(source, table);
-    Document {
+    let out = parse::build::build(source, table, options.diagnostics);
+    let mut doc = Document {
         source,
         version,
         table,
         tape: out.tape,
         diagnostics: out.diagnostics,
+    };
+    if options.diagnostics {
+        doc.validate();
+        // Emit in source order. Stable, so parser vs. validation order is kept
+        // for diagnostics at the same offset.
+        doc.diagnostics.sort_by_key(|d| (d.span.start, d.span.end()));
     }
+    doc
 }
 
 /// A parsed USFM document: the tape, diagnostics, and zero-copy views over the
@@ -90,320 +127,22 @@ impl<'src> Document<'src> {
         &self.tape
     }
 
+    /// Semantic validation pass (run by [`parse_with`] when diagnostics are on).
+    /// Appends warnings/errors for things the recovering parser tolerates.
+    fn validate(&mut self) {
+        let mut extra = validate::validate(self.cursor());
+        self.diagnostics.append(&mut extra);
+    }
+
     /// A cursor at the document root for CST traversal / typed-AST construction.
     pub fn cursor(&self) -> Cursor<'_> {
         Cursor::new(&self.tape, self.source, self.table, 0)
     }
-
-    // --- serialization -----------------------------------------------------
-
-    pub fn write_usx<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
-        serialize::write_usx(self.cursor(), out)
-    }
-    pub fn write_usj<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
-        serialize::write_usj(self.cursor(), out)
-    }
-    pub fn to_usx(&self) -> String {
-        let mut s = String::new();
-        let _ = self.write_usx(&mut s);
-        s
-    }
-    pub fn to_usj(&self) -> String {
-        let mut s = String::new();
-        let _ = self.write_usj(&mut s);
-        s
-    }
-
-    /// CST as JSON, for editor decoration (token spans, marker categories, tree
-    /// structure). See [`serialize::write_cst_json`].
-    pub fn write_cst_json<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
-        serialize::write_cst_json(self.cursor(), out)
-    }
-    pub fn to_cst_json(&self) -> String {
-        let mut s = String::new();
-        let _ = self.write_cst_json(&mut s);
-        s
-    }
-
-    /// Diagnostics (errors + warnings) as a JSON array. See
-    /// [`serialize::write_diagnostics_json`].
-    pub fn write_diagnostics_json<W: std::fmt::Write>(&self, out: &mut W) -> std::fmt::Result {
-        serialize::write_diagnostics_json(&self.diagnostics, self.source, out)
-    }
-    pub fn to_diagnostics_json(&self) -> String {
-        let mut s = String::new();
-        let _ = self.write_diagnostics_json(&mut s);
-        s
-    }
-
-    // --- verse references --------------------------------------------------
-
-    /// Zero-copy raw verse slices: the contiguous source between each `\v` and the
-    /// next verse/chapter boundary (markers and notes included verbatim).
-    pub fn vrefs_raw(&self) -> Vec<(VerseRef, &'src str)> {
-        let mut out = Vec::new();
-        self.walk_verses(|hit| {
-            out.push((hit.reference, &self.source[hit.raw_start..hit.raw_end]));
-        });
-        out
-    }
-
-    /// Cleaned verse text into a single arena: notes excluded, character-marker
-    /// tags dropped (inner text kept), whitespace collapsed and trimmed. Driven by
-    /// [`TextRole`], so it is correct per version automatically.
-    pub fn vref_text(&self) -> VrefText {
-        let mut buf = String::with_capacity(self.source.len());
-        let mut index = Vec::new();
-        self.walk_verses(|hit| {
-            let begin = buf.len() as u32;
-            hit.body.write_clean(self, &mut buf);
-            let cleaned_end = buf.len() as u32;
-            index.push((hit.reference, begin..cleaned_end));
-        });
-        VrefText { buf, index }
-    }
-
-    /// The headline use-case, streaming: invokes `f` once per verse with a
-    /// borrowed [`VrefRow`] (reference parts + cleaned text). Allocation-free per
-    /// verse beyond one reused text buffer — this is the path for `cat`-speed
-    /// extraction straight to a sink.
-    pub fn for_each_vref(&self, mut f: impl FnMut(VrefRow<'_>)) {
-        let mut buf = String::new();
-        self.walk_verses(|hit| {
-            buf.clear();
-            hit.body.write_clean(self, &mut buf);
-            f(VrefRow {
-                book: hit.book,
-                chapter: hit.chapter,
-                verse: hit.reference.verse(),
-                label: hit.label,
-                text: &buf,
-            });
-        });
-    }
-
-    /// Convenience: an ordered `{ "GEN 1:1" => "In the beginning…" }` dictionary,
-    /// suitable for direct JSON serialization. Keys preserve the original verse
-    /// label (so ranges like `1-2` survive).
-    ///
-    /// Unlike the faithful primitives ([`Document::for_each_vref`],
-    /// [`Document::vref_text`], [`Document::vrefs_raw`]), this is a *map* and so:
-    /// - **drops verses whose cleaned text is empty** (e.g. a `\v` whose only
-    ///   content is a footnote, or a number-only milestone), and
-    /// - **merges duplicate references** (a verse split across structure, or
-    ///   malformed repeats) by joining their text with a space — so the result
-    ///   has unique keys and is valid as a JSON object.
-    ///
-    /// Allocates per entry; prefer the primitives on the hot path.
-    pub fn vref_dict(&self) -> Vec<(String, String)> {
-        // Fast path: collect every verse with only the two String allocations the
-        // output inherently needs (key + cleaned text) — no dedup bookkeeping.
-        let mut rows: Vec<(String, String)> = Vec::new();
-        self.for_each_vref(|row| {
-            if !row.text.is_empty() {
-                rows.push((row.key(), row.text.to_string()));
-            }
-        });
-
-        // Duplicate references are anomalous (a split or malformed verse). Detect
-        // them in one read-only pass over borrowed keys — no clones, one hash each.
-        let has_duplicates = {
-            let mut seen = std::collections::HashSet::with_capacity(rows.len());
-            rows.iter().any(|(key, _)| !seen.insert(key.as_str()))
-        };
-        if !has_duplicates {
-            return rows; // overwhelmingly common case
-        }
-
-        // Rare path: merge duplicate keys (join text with a space), keep order.
-        let mut order: Vec<(String, String)> = Vec::with_capacity(rows.len());
-        let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        for (key, text) in rows {
-            match index.get(&key) {
-                Some(&i) => {
-                    let slot: &mut String = &mut order[i].1;
-                    slot.push(' ');
-                    slot.push_str(&text);
-                }
-                None => {
-                    index.insert(key.clone(), order.len());
-                    order.push((key, text));
-                }
-            }
-        }
-        order
-    }
-
-    /// Shared verse traversal: invokes `f` once per `\v`, with the reference, the
-    /// raw label, the raw byte range, and a [`VerseBody`] handle for cleaning.
-    fn walk_verses(&self, mut f: impl FnMut(VerseHit<'src>)) {
-        let nodes = &self.tape.nodes;
-        let mut book = BookId::UNKNOWN;
-        let mut chapter: u16 = 0;
-        let mut expect_book = false;
-        // (reference, label, body_start, open_idx)
-        let mut pending: Option<(VerseRef, &'src str, usize, usize)> = None;
-
-        // Emits the pending verse (if any) with the given context. Takes context
-        // by value so the loop can keep mutating `book`/`chapter`.
-        fn flush<'s>(
-            pending: &mut Option<(VerseRef, &'s str, usize, usize)>,
-            book: BookId,
-            chapter: u16,
-            boundary: usize,
-            f: &mut dyn FnMut(VerseHit<'s>),
-        ) {
-            if let Some((reference, label, body_start, open_idx)) = pending.take() {
-                f(VerseHit {
-                    reference,
-                    book,
-                    chapter,
-                    label,
-                    raw_start: body_start,
-                    raw_end: boundary,
-                    body: VerseBody { open_idx, boundary },
-                });
-            }
-        }
-
-        for (i, node) in nodes.iter().enumerate() {
-            match node.kind {
-                NodeKind::MarkerOpen
-                    if self.table.info(node.marker).map(|m| m.category)
-                        == Some(Category::Identification) =>
-                {
-                    expect_book = self.table.info(node.marker).map(|m| m.name) == Some("id");
-                }
-                NodeKind::Text if expect_book => {
-                    if let Some(code) = node.span().text(self.source).split_whitespace().next() {
-                        if let Some(b) = BookId::from_code(code) {
-                            book = b;
-                        }
-                    }
-                    expect_book = false;
-                }
-                NodeKind::Chapter => {
-                    flush(&mut pending, book, chapter, node.start as usize, &mut f);
-                    chapter = node.link as u16; // number packed in `link`
-                }
-                NodeKind::Verse => {
-                    flush(&mut pending, book, chapter, node.start as usize, &mut f);
-                    let reference = VerseRef::new(book, chapter, node.link as u16);
-                    let label = node.span().text(self.source).split_whitespace().nth(1).unwrap_or("");
-                    pending = Some((reference, label, node.span().end() as usize, i));
-                }
-                _ => {}
-            }
-        }
-        flush(&mut pending, book, chapter, self.source.len(), &mut f);
-    }
 }
-
-/// A single verse, as seen by [`Document::for_each_vref`]. `text` and `label`
-/// borrow internal buffers and are only valid for the duration of the callback.
-pub struct VrefRow<'a> {
-    pub book: BookId,
-    pub chapter: u16,
-    /// Leading integer of the verse number (e.g. `1` for `1-2`).
-    pub verse: u16,
-    /// The raw verse label as written (`"1"`, `"1-2"`, `"1a"`); may be empty.
-    pub label: &'a str,
-    /// Cleaned verse text (notes excluded, char tags dropped, whitespace collapsed).
-    pub text: &'a str,
-}
-
-impl VrefRow<'_> {
-    /// Format the reference as `"GEN 1:1"` (preserving a range/sub-verse label).
-    pub fn key(&self) -> String {
-        if self.label.is_empty() {
-            format!("{} {}:{}", self.book.code(), self.chapter, self.verse)
-        } else {
-            format!("{} {}:{}", self.book.code(), self.chapter, self.label)
-        }
-    }
-}
-
-/// One verse occurrence yielded by [`Document::walk_verses`].
-struct VerseHit<'a> {
-    reference: VerseRef,
-    book: BookId,
-    chapter: u16,
-    label: &'a str,
-    raw_start: usize,
-    raw_end: usize,
-    body: VerseBody,
-}
-
-/// Handle to a verse's content on the tape, for cleaned-text extraction.
-struct VerseBody {
-    open_idx: usize,
-    boundary: usize,
-}
-
-impl VerseBody {
-    /// Append cleaned text for this verse to `buf`, using [`TextRole`] to decide
-    /// which nodes contribute, skipping excluded subtrees via the `link` pointer,
-    /// and collapsing/trimming whitespace.
-    fn write_clean(&self, doc: &Document<'_>, buf: &mut String) {
-        let nodes = &doc.tape.nodes;
-        let mut i = self.open_idx + 1;
-        let start_len = buf.len();
-        // Carried across nodes: did we just pass whitespace that a following
-        // non-space character should turn into a single separator? This is what
-        // keeps a marker boundary with no surrounding whitespace (e.g. a footnote
-        // wedged between `.` and `”`) from inserting a spurious space.
-        let mut pending_space = false;
-        while i < nodes.len() {
-            let node = &nodes[i];
-            if node.start as usize >= self.boundary {
-                break;
-            }
-            match node.kind {
-                NodeKind::Text => {
-                    push_collapsed(node.span().text(doc.source), buf, start_len, &mut pending_space);
-                    i += 1;
-                }
-                NodeKind::MarkerOpen => {
-                    match doc.table.info(node.marker).map(|m| m.text_role) {
-                        Some(TextRole::Excluded) => {
-                            i = (node.link as usize) + 1; // skip subtree
-                        }
-                        // Content/Boundary markers contribute no characters of their
-                        // own; spacing is decided purely by the source whitespace
-                        // around them, handled in `push_collapsed`.
-                        _ => i += 1,
-                    }
-                }
-                _ => i += 1,
-            }
-        }
-    }
-}
-
-/// Append `s` to `buf`, collapsing each run of whitespace to at most one space.
-/// A separator is emitted only before a non-space character that follows
-/// whitespace *and* only when the verse already has content — so leading and
-/// trailing whitespace are dropped, and adjacent characters split solely by a
-/// (dropped) marker stay adjacent. `verse_start` marks where this verse began in
-/// the shared arena; `pending_space` carries the "saw whitespace" state across
-/// the node boundary.
-fn push_collapsed(s: &str, buf: &mut String, verse_start: usize, pending_space: &mut bool) {
-    for ch in s.chars() {
-        if ch.is_whitespace() {
-            *pending_space = true;
-        } else {
-            if *pending_space && buf.len() > verse_start {
-                buf.push(' ');
-            }
-            *pending_space = false;
-            buf.push(ch);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostic::DiagnosticCode;
 
     #[test]
     fn parses_and_exposes_views() {
@@ -470,16 +209,298 @@ mod tests {
     #[test]
     fn milestone_does_not_error() {
         // \qt-s\* ... \qt-e\* milestones parse cleanly; the quoted text is kept.
-        let doc = parse("\\c 1\n\\v 1 He said \\qt-s\\*Follow me\\qt-e\\* today.", Version::V3_1);
+        let opts = ParseOptions { diagnostics: true };
+        let doc = parse_with("\\id MAT\n\\c 1\n\\p\n\\v 1 He said \\qt-s\\*Follow me\\qt-e\\* today.", Version::V3_1, opts);
         assert!(doc.diagnostics().is_empty(), "{:?}", doc.diagnostics());
         assert_eq!(doc.vref_dict()[0].1, "He said Follow me today.");
     }
 
     #[test]
-    fn warns_on_unclosed_char_marker() {
-        // \add never closed; the \p block boundary closes it implicitly → warning.
-        let doc = parse("\\c 1\n\\v 1 \\add words\n\\p more", Version::V3_1);
-        assert!(doc.diagnostics().iter().any(|d| d.code == "unclosed-marker"));
+    fn warns_on_verse_outside_paragraph() {
+        let opts = ParseOptions { diagnostics: true };
+        // \v directly after \c with no \p.
+        let outside = parse_with("\\id GEN\n\\c 1\n\\v 1 text", Version::V3_1, opts);
+        assert!(outside.diagnostics().iter().any(|d| d.code == DiagnosticCode::VerseOutsideParagraph));
+        // Same content but inside \p → no such warning.
+        let inside = parse_with("\\id GEN\n\\c 1\n\\p\n\\v 1 text", Version::V3_1, opts);
+        assert!(!inside.diagnostics().iter().any(|d| d.code == DiagnosticCode::VerseOutsideParagraph));
+    }
+
+    #[test]
+    fn warns_on_invalid_book_code_and_verse_in_heading() {
+        let opts = ParseOptions { diagnostics: true };
+        // Bad book code.
+        let bad = parse_with("\\id XYZ\n\\c 1\n\\p\n\\v 1 t", Version::V3_1, opts);
+        assert!(bad.diagnostics().iter().any(|d| d.code == DiagnosticCode::InvalidBookCode));
+        // Valid deuterocanonical code → no InvalidBookCode.
+        let good = parse_with("\\id TOB\n\\c 1\n\\p\n\\v 1 t", Version::V3_1, opts);
+        assert!(!good.diagnostics().iter().any(|d| d.code == DiagnosticCode::InvalidBookCode));
+        // \v inside a \s heading (no body \p) → verse-outside-paragraph.
+        let heading = parse_with("\\id GEN\n\\c 1\n\\s Heading\n\\v 1 t", Version::V3_1, opts);
+        assert!(heading.diagnostics().iter().any(|d| d.code == DiagnosticCode::VerseOutsideParagraph));
+    }
+
+    #[test]
+    fn diagnostics_are_opt_in() {
+        let src = "\\c 1\n\\v 1 \\add words\n\\p more"; // \add closed implicitly by \p
+        // Off by default (hot path): no diagnostics.
+        assert!(parse(src, Version::V3_1).diagnostics().is_empty());
+        // Opt-in: the \add closed by the following \p is reported, plus a
+        // missing-id validation error.
+        let doc = parse_with(src, Version::V3_1, ParseOptions { diagnostics: true });
+        assert!(doc.diagnostics().iter().any(|d| d.code == DiagnosticCode::ImplicitClose));
+        assert!(doc.diagnostics().iter().any(|d| d.code == DiagnosticCode::MissingIdMarker));
+    }
+
+    /// Helper: does parsing `src` (with diagnostics on) emit `code` at `severity`?
+    fn emits(src: &str, code: DiagnosticCode, sev: crate::diagnostic::Severity) -> bool {
+        let doc = parse_with(src, Version::V3_1, ParseOptions { diagnostics: true });
+        doc.diagnostics().iter().any(|d| d.code == code && d.severity == sev)
+    }
+
+    #[test]
+    fn structural_validation_errors() {
+        use crate::diagnostic::Severity::Error;
+        // A second \id is an error.
+        assert!(emits("\\id GEN\n\\c 1\n\\p\n\\v 1 t\n\\id MAT", DiagnosticCode::DuplicateId, Error));
+        // A body paragraph before the first \c (in a scripture book).
+        assert!(emits("\\id GAL\n\\p before\n\\c 1\n\\p\n\\v 1 t", DiagnosticCode::BodyParagraphBeforeChapter, Error));
+        // An unknown marker (outside the \z user namespace).
+        assert!(emits("\\id GEN\n\\c 1\n\\p\n\\v 1 t\n\\ix bad", DiagnosticCode::UnknownMarker, Error));
+        // A \z… custom marker is allowed silently.
+        assert!(!emits("\\id GEN\n\\c 1\n\\p\n\\v 1 t \\zwhatever x", DiagnosticCode::UnknownMarker, Error));
+        // A \esb sidebar with no \esbe, left open at EOF.
+        assert!(emits("\\id GEN\n\\c 1\n\\p \\v 1 text\\esb", DiagnosticCode::UnclosedAtEof, Error));
+    }
+
+    #[test]
+    fn content_validation_errors() {
+        use crate::diagnostic::Severity::Error;
+        // \w with neither content nor attributes.
+        assert!(emits("\\id GEN\n\\c 1\n\\p\n\\v 1 a \\w \\w* b", DiagnosticCode::EmptyWordMarker, Error));
+        // \rb missing its required gloss attribute.
+        assert!(emits("\\id GEN\n\\c 1\n\\p\n\\v 1 \\rb text\\rb*", DiagnosticCode::MissingRequiredAttribute, Error));
+        // …but providing the gloss (default attribute) clears it.
+        assert!(!emits("\\id GEN\n\\c 1\n\\p\n\\v 1 \\rb text|gloss\\rb*", DiagnosticCode::MissingRequiredAttribute, Error));
+        // A milestone missing its self-closing \*.
+        assert!(emits("\\id GEN\n\\c 1\n\\p\n\\v 1 \\zaln-s |x-lemma=\"a\"\n\\w b\\w*", DiagnosticCode::MissingMilestoneSelfClose, Error));
+        // …but a properly self-closed milestone is fine.
+        assert!(!emits("\\id GEN\n\\c 1\n\\p\n\\v 1 \\qt-s |who=\"X\"\\*hi\\qt-e\\*", DiagnosticCode::MissingMilestoneSelfClose, Error));
+    }
+
+    // --- marker-handling minutiae (ported from rsusfm3's builder/markers tests,
+    //     adapted to the tape/Cursor + USJ API) -----------------------------
+
+    /// Does the document's USJ contain a char node with the given marker?
+    fn usj_has_char(src: &str, marker: &str) -> bool {
+        let usj = parse(src, Version::V3_1).to_usj();
+        usj.contains(&format!("\"type\":\"char\",\"marker\":\"{marker}\""))
+    }
+
+    #[test]
+    fn fm_marker_parses_as_character() {
+        // \fm (footnote reference mark) is a known character marker, not unknown.
+        let src = "\\id GEN\n\\c 1\n\\p\n\\v 17 text\\fm GEN 2:9\\fm* more text";
+        assert!(!emits(src, DiagnosticCode::UnknownMarker, crate::diagnostic::Severity::Error));
+        assert!(usj_has_char(src, "fm"));
+    }
+
+    #[test]
+    fn addpn_parses_as_character_with_deprecation_warning() {
+        use crate::diagnostic::Severity::{Error, Warning};
+        let src = "\\id GEN\n\\c 1\n\\p\n\\v 1 text \\addpn Added Name\\addpn* more";
+        assert!(!emits(src, DiagnosticCode::UnknownMarker, Error), "\\addpn is known");
+        assert!(usj_has_char(src, "addpn"), "\\addpn parses as a char node");
+        let doc = parse_with(src, Version::V3_1, ParseOptions { diagnostics: true });
+        let deprecations = doc
+            .diagnostics()
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeprecatedMarker && d.severity == Warning)
+            .count();
+        assert_eq!(deprecations, 1, "exactly one \\addpn deprecation warning");
+    }
+
+    #[test]
+    fn implicit_close_vs_unclosed_at_eof_vs_unclosed_note() {
+        use crate::diagnostic::Severity::Error;
+        // \add crossing a paragraph boundary → ImplicitClose, naming both markers.
+        let doc = parse_with("\\id GEN\n\\c 1\n\\p\n\\v 1 \\add text\n\\p next", Version::V3_1, ParseOptions { diagnostics: true });
+        assert!(doc.diagnostics().iter().any(|d| d.code == DiagnosticCode::ImplicitClose
+            && d.message.contains("\\add")
+            && d.message.contains("\\p")));
+        // \add open at EOF → UnclosedAtEof (not ImplicitClose).
+        assert!(emits("\\id GEN\n\\c 1\n\\p\n\\v 1 \\add text", DiagnosticCode::UnclosedAtEof, Error));
+        // \f note open at a paragraph boundary → UnclosedNote.
+        assert!(emits("\\id GEN\n\\c 1\n\\p\n\\v 1 t\\f + note\n\\p next", DiagnosticCode::UnclosedNote, Error));
+    }
+
+    #[test]
+    fn z_namespace_markers_are_silent() {
+        use crate::diagnostic::Severity::Error;
+        // \z… custom markers never produce unknown/implicit-close/eof diagnostics.
+        for src in [
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 \\zcustom text\\zcustom*",
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 \\zcustom text\n\\p next",
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 \\zcustom text",
+        ] {
+            let doc = parse_with(src, Version::V3_1, ParseOptions { diagnostics: true });
+            assert!(!doc.diagnostics().iter().any(|d| matches!(
+                d.code,
+                DiagnosticCode::UnknownMarker | DiagnosticCode::ImplicitClose | DiagnosticCode::UnclosedAtEof
+            ) && d.severity == Error), "no diagnostics for {src:?}");
+        }
+    }
+
+    #[test]
+    fn root_level_verse_warns_once() {
+        // Two verses at chapter root (no \p) warn exactly once, not per verse.
+        let doc = parse_with("\\id GEN\n\\c 1\n\\v 1 text\n\\v 2 more", Version::V3_1, ParseOptions { diagnostics: true });
+        let warns = doc.diagnostics().iter().filter(|d| d.code == DiagnosticCode::VerseOutsideParagraph).count();
+        assert_eq!(warns, 1, "only the first root-level verse warns");
+    }
+
+    #[test]
+    fn verse_range_and_subverse_sids() {
+        // Bridges (3-4, 12-83) and sub-verse letters (3b) keep their label in the sid.
+        for (num, sid) in [("3-4", "GEN 1:3-4"), ("12-83", "GEN 1:12-83"), ("3b", "GEN 1:3b")] {
+            let usj = parse(&format!("\\id GEN\n\\c 1\n\\p\n\\v {num} text"), Version::V3_1).to_usj();
+            assert!(usj.contains(&format!("\"number\":\"{num}\"")), "{num}");
+            assert!(usj.contains(&format!("\"sid\":\"{sid}\"")), "{sid}");
+        }
+    }
+
+    #[test]
+    fn marker_classification_and_numbered_fallback() {
+        // Ported from rsusfm3's markers.rs classification tests, mapped to our
+        // (coarser) Category model. Verifies representative markers are KNOWN and
+        // land in the right family, that numbered/levelled variants fall back to
+        // their base, and that genuinely-unknown markers stay unknown.
+        use crate::marker::{Category, MarkerTable};
+        let t = MarkerTable::for_version(Version::V3_1);
+        let cat = |name: &str| t.lookup(name).and_then(|id| t.info(id)).map(|m| m.category);
+
+        let groups: &[(Category, &[&str])] = &[
+            (Category::Identification, &["id", "h", "toc", "usfm", "ide", "sts", "rem", "periph"]),
+            (Category::Paragraph, &["p", "m", "q", "b", "pb", "tr", "li", "mt", "ms", "s", "imt", "io", "cl", "cd", "esb", "esbe"]),
+            (Category::Character, &["add", "nd", "wj", "w", "bk", "fm", "addpn", "pn", "ca", "vp", "xt", "ref", "fr", "ft", "fdc", "xo", "th", "tc", "fig"]),
+            (Category::Note, &["f", "fe", "ef", "x", "ex"]),
+            (Category::Milestone, &["qt-s", "zaln-s", "ts-s", "k-s"]),
+            (Category::Chapter, &["c"]),
+            (Category::Verse, &["v"]),
+        ];
+        for (expected, names) in groups {
+            for name in *names {
+                assert_eq!(cat(name), Some(*expected), "\\{name} should be {expected:?}");
+            }
+        }
+        // Numbered / level / column-span variants resolve to their base's family.
+        assert_eq!(cat("q5"), Some(Category::Paragraph));
+        assert_eq!(cat("mt2"), Some(Category::Paragraph));
+        assert_eq!(cat("s4"), Some(Category::Paragraph));
+        assert_eq!(cat("th3"), Some(Category::Character)); // table cell
+        assert_eq!(cat("tcr1-2"), Some(Category::Character)); // column span
+        // Genuinely unknown markers are not in the table.
+        assert_eq!(cat("notamarker"), None);
+        assert_eq!(cat("xyz99"), None);
+    }
+
+    #[test]
+    fn vref_text_spans_paragraph_continuations() {
+        // A verse whose text continues across a \p (no new \v) is one verse, with a
+        // boundary space joining the parts.
+        let src = "\\id GEN\n\\c 1\n\\p\n\\v 1 first part\n\\p continued part\n\\v 2 next";
+        let dict = parse(src, Version::V3_1).vref_dict();
+        assert_eq!(dict[0], ("GEN 1:1".into(), "first part continued part".into()));
+        assert_eq!(dict[1].0, "GEN 1:2");
+    }
+
+    #[test]
+    fn diagnostic_code_names_stay_aligned() {
+        // The wire name is indexed by `self as usize` into a parallel array; guard
+        // the ends and a reordered middle entry so drift is caught immediately.
+        assert_eq!(DiagnosticCode::UnknownMarker.as_str(), "UnknownMarker");
+        assert_eq!(DiagnosticCode::InvalidTableColumnSequence.as_str(), "InvalidTableColumnSequence");
+        assert_eq!(DiagnosticCode::MissingMilestoneSelfClose.as_str(), "MissingMilestoneSelfClose");
+        assert_eq!(DiagnosticCode::ImplicitClose.as_str(), "ImplicitClose");
+        assert_eq!(DiagnosticCode::UnclosedAtEof.as_str(), "UnclosedAtEof");
+        assert_eq!(DiagnosticCode::DefaultAttributeNotDefined.as_str(), "DefaultAttributeNotDefined");
+    }
+
+    #[test]
+    fn table_column_sequence_is_validated() {
+        use crate::diagnostic::Severity::Error;
+        // \th1 then \th3 skips column 2.
+        assert!(emits("\\id GEN\n\\c 1\n\\p\n\\v 1 x\n\\tr \\th1 a \\th3 b", DiagnosticCode::InvalidTableColumnSequence, Error));
+        // A well-ordered row is clean.
+        assert!(!emits("\\id GEN\n\\c 1\n\\p\n\\v 1 x\n\\tr \\th1 a \\th2 b", DiagnosticCode::InvalidTableColumnSequence, Error));
+        // A column span (\tcr1-2) advances past column 2.
+        assert!(!emits("\\id GEN\n\\c 1\n\\p\n\\v 1 x\n\\tr \\tc1 a \\tcr2-3 b", DiagnosticCode::InvalidTableColumnSequence, Error));
+    }
+
+    #[test]
+    fn blank_line_content_and_default_attribute_rules() {
+        use crate::diagnostic::Severity::Error;
+        // \b carrying inline content (a figure) is an error...
+        assert!(emits("\\id GEN\n\\c 1\n\\b \\fig cap|src=\"x.jpg\"\\fig*", DiagnosticCode::NonEmptyBlankLine, Error));
+        // ...but a \b that merely precedes a verse is a structural boundary, not
+        // content (this keeps valid poetry-style blank lines clean).
+        assert!(!emits("\\id GEN\n\\c 1\n\\q1 a\n\\b\n\\v 2 text", DiagnosticCode::NonEmptyBlankLine, Error));
+        // A bare default attribute on a marker with no default defined (\pn).
+        assert!(emits("\\id GEN\n\\c 1\n\\p\n\\v 1 \\w \\+pn name|keyword\\+pn*\\w*", DiagnosticCode::DefaultAttributeNotDefined, Error));
+        // ...but a nested \+pn with no keyword is fine.
+        assert!(!emits("\\id GEN\n\\c 1\n\\p\n\\v 1 \\w \\+pn name\\+pn*\\w*", DiagnosticCode::DefaultAttributeNotDefined, Error));
+        // ...and a bare default on a marker that DOES define one (\w) is fine.
+        assert!(!emits("\\id GEN\n\\c 1\n\\p\n\\v 1 \\w word|grace\\w*", DiagnosticCode::DefaultAttributeNotDefined, Error));
+    }
+
+    #[test]
+    fn front_matter_books_need_no_chapter() {
+        // \id FRT (front matter) with paragraphs but no \c is valid — no chapter
+        // errors. A scripture book in the same shape would error.
+        let frt = parse_with("\\id FRT\n\\periph Title|id=\"title\"\n\\p text", Version::V3_1, ParseOptions { diagnostics: true });
+        assert!(!frt.diagnostics().iter().any(|d| matches!(
+            d.code,
+            DiagnosticCode::MissingChapterMarker | DiagnosticCode::BodyParagraphBeforeChapter
+        )));
+    }
+
+    /// CRLF line endings (\r\n) should not produce trailing spaces in USJ text.
+    /// A line like `\ide 65001 - Unicode (UTF8)\r\n` must become `"65001 - Unicode (UTF8)"`
+    /// not `"65001 - Unicode (UTF8) "`.
+    #[test]
+    fn crlf_files_no_trailing_space() {
+        let src = "\\id GEN\r\n\\ide 65001 - Unicode (UTF8)\r\n\\c 1\r\n\\p\r\n\\v 1 text\r\n";
+        let usj = parse(src, Version::V3_1).to_usj();
+        // The ide text must be trimmed of \r
+        assert!(usj.contains("\"65001 - Unicode (UTF8)\""), "trailing \\r became a space: {usj}");
+        assert!(!usj.contains("\"65001 - Unicode (UTF8) \""), "spurious trailing space in CRLF file");
+    }
+
+    /// Empty non-`\b` paragraphs (like `\q2` with no content) must emit `content:[]`,
+    /// not omit the key. `\b` alone omits `content` per spec.
+    #[test]
+    fn empty_para_content_vs_b() {
+        let src = "\\id GEN\n\\c 1\n\\q1 a\n\\q2\n\\b\n\\q1 b";
+        let usj = parse(src, Version::V3_1).to_usj();
+        // \q2 with no text → content:[]
+        assert!(usj.contains("\"marker\":\"q2\",\"content\":[]"), "empty \\q2 should have content:[]: {usj}");
+        // \b → no content key at all
+        assert!(!usj.contains("\"marker\":\"b\",\"content\":"), "\\b must not emit content: {usj}");
+    }
+
+    /// Malformed USFM: `\v11` (number fused to marker with no space) should parse
+    /// as verse 11, not verse 0 or empty string.
+    #[test]
+    fn verse_number_embedded_in_marker_name() {
+        let src = "\\id GEN\n\\c 1\n\\p \\v11 text eleven";
+        let doc = parse(src, Version::V3_1);
+        let usj = doc.to_usj();
+        assert!(usj.contains("\"number\":\"11\""), "\\v11 should parse as verse 11: {usj}");
+        assert!(usj.contains("\"sid\":\"GEN 1:11\""), "sid should be GEN 1:11: {usj}");
+        // vref should also work
+        let dict = doc.vref_dict();
+        assert_eq!(dict[0].0, "GEN 1:11", "vref key should be GEN 1:11");
+        assert!(dict[0].1.contains("text eleven"), "vref text: {:?}", dict[0]);
     }
 
     #[test]

@@ -28,17 +28,24 @@ names = ["id"]
 
 [groups.ident]
 category = "identification"
-names = ["usfm", "ide", "sts", "rem", "h", "h1", "h2", "h3",
-         "toc1", "toc2", "toc3", "toca1", "toca2", "toca3"]
+# \h1-3, \toc1-3, \toca1-3 resolve to h/toc/toca via the lookup fallback.
+names = ["usfm", "ide", "sts", "h", "toc", "toca"]
+
+# \rem (remark) is identification-like, but when it appears inside a body
+# paragraph it NESTS as a child remark rather than ending the paragraph, and is
+# itself closed by the next verse/block. The `usx` name lets the parser spot it.
+[groups.rem]
+category = "identification"
+usx = "rem"
+names = ["rem"]
 
 # --- introductions (excluded from verse text) ------------------------------
 [groups.intro_para]
 category = "paragraph"
 role = "excluded"
-names = ["imt", "imt1", "imt2", "imt3", "imt4", "imte", "imte1", "imte2",
-         "is", "is1", "is2", "ip", "ipi", "im", "imi", "ipq", "imq", "ipr",
-         "iq", "iq1", "iq2", "iq3", "ib", "ili", "ili1", "ili2",
-         "iot", "io", "io1", "io2", "io3", "io4", "iex", "ie"]
+# Numeric levels (\imt2, \io3, …) resolve to the base via the lookup fallback.
+names = ["imt", "imte", "is", "ip", "ipi", "im", "imi", "ipq", "imq", "ipr",
+         "iq", "ib", "ili", "iot", "io", "iex", "ie"]
 
 [groups.intro_char]
 category = "character"
@@ -49,10 +56,8 @@ names = ["ior", "iqt"]
 [groups.titles]
 category = "paragraph"
 role = "excluded"
-names = ["mt", "mt1", "mt2", "mt3", "mt4", "mte", "mte1", "mte2",
-         "ms", "ms1", "ms2", "ms3", "mr", "s", "s1", "s2", "s3", "s4", "s5",
-         "sr", "r", "sp", "sd", "sd1", "sd2", "sd3", "sd4", "d", "qa",
-         "cl", "cd"]
+# Numeric levels (\mt2, \s3, …) resolve to the base via the lookup fallback.
+names = ["mt", "mte", "ms", "mr", "s", "sr", "r", "sp", "sd", "d", "qa", "cl", "cd"]
 
 # --- chapter / verse --------------------------------------------------------
 [groups.chapter]
@@ -63,32 +68,75 @@ names = ["c"]
 category = "verse"
 names = ["v"]
 
+# Alternate/published chapter & verse numbers. They MAY be closed (`\ca 2\ca*`)
+# but need not be (`\cp M` runs to the next block), so closing is `none` — they
+# fold into the chapter/verse object during serialization either way.
 [groups.alt_numbering]
 category = "character"
 role = "excluded"
-closing = "required"
+closing = "none"
 names = ["ca", "va", "vp", "cp"]
 
 # --- verse-bearing paragraphs (their text IS verse content) -----------------
 [groups.para_text]
 category = "paragraph"
 role = "boundary"
+# Numeric levels (\q1, \pi2, \li3, …) resolve to the base via the lookup fallback.
 names = ["p", "m", "po", "pr", "cls", "pmo", "pm", "pmc", "pmr",
-         "pi", "pi1", "pi2", "pi3", "mi", "nb", "pc", "ph", "ph1", "ph2", "ph3",
-         "b", "pb", "q", "q1", "q2", "q3", "q4", "qr", "qc", "qm", "qm1", "qm2",
-         "qm3", "qd", "lh", "li", "li1", "li2", "li3", "li4", "lf", "lim",
-         "lim1", "lim2", "lit", "tr"]
+         "pi", "mi", "nb", "pc", "ph", "b", "pb", "q", "qr", "qc", "qm", "qd",
+         "lh", "li", "lf", "lim", "lit", "tr"]
 
 # --- character markers (drop tag, keep inner text) --------------------------
+# \addpn (added proper name) is deprecated as of USFM 3.0 in favour of a nested
+# \pn inside \add; it still parses as a character marker but carries an advisory.
+[groups.deprecated_char]
+category = "character"
+role = "content"
+deprecated_since = "3.0"
+deprecated_for = 'nested \pn …\pn* within \add …\add*'
+names = ["addpn"]
+
 [groups.char_text]
 category = "character"
 role = "content"
-names = ["add", "addpn", "bk", "dc", "k", "k1", "k2", "nd", "ndx", "ord",
+names = ["add", "bk", "dc", "k", "nd", "ndx", "ord",
          "pn", "png", "pro", "qac", "qs", "qt", "sig", "sls", "tl", "wj",
          "em", "bd", "bdit", "it", "no", "sc", "sup", "w", "wa", "wg", "wh",
-         "lik", "liv", "liv1", "liv2", "liv3", "liv4", "jmp", "rb",
+         "lik", "liv", "jmp", "rb",
          # closed note-internal markers (nest inside a note, unlike fr/ft/fq)
-         "fv", "fdc", "fm", "cat", "ref", "litl"]
+         "fv", "fm", "cat", "ref", "litl"]
+
+# Dual-mode link/cross-reference char (\xt). Per the spec it is a closed
+# character marker (`\xt …\xt*`) that NESTS — but when written without a close it
+# behaves as a note-text element (a sibling of \xo/\ft). The parser resolves which
+# by looking ahead for a matching `\xt*` before the enclosing note/block closes.
+[groups.link_char]
+category = "character"
+role = "content"
+closing = "optional"
+names = ["xt"]
+
+# Sidebars and peripheral matter are BLOCK CONTAINERS: they wrap the paragraphs
+# that follow (until \esbe / the next \periph / a higher boundary) rather than
+# ending at the next block like an ordinary paragraph. The `usx` element name is
+# how the parser and serializers recognise them.
+[groups.sidebar]
+category = "paragraph"
+role = "excluded"
+usx = "sidebar"
+names = ["esb"]
+
+[groups.sidebar_end]
+category = "paragraph"
+role = "excluded"
+usx = "sidebar-end"
+names = ["esbe"]
+
+[groups.periph]
+category = "identification"
+role = "excluded"
+usx = "periph"
+names = ["periph"]
 
 # Cross-reference-quote: present in text flow but excluded from verse text.
 [groups.char_excluded]
@@ -102,11 +150,9 @@ category = "character"
 role = "content"
 closing = "none"
 usx = "cell"
-names = ["th", "th1", "th2", "th3", "th4", "th5", "thr", "thr1", "thr2", "thr3",
-         "thc", "thc1", "thc2", "thc3",
-         "tc", "tc1", "tc2", "tc3", "tc4", "tc5", "tc6",
-         "tcr", "tcr1", "tcr2", "tcr3",
-         "tcc", "tcc1", "tcc2", "tcc3", "tcc4"]
+# Column numbers and spans (\tc3, \tcr1-2, …) resolve to the base via the
+# lookup fallback — no need to enumerate every column/range.
+names = ["th", "thr", "thc", "tc", "tcr", "tcc"]
 
 # --- notes & figures (whole subtree excluded from verse text) ---------------
 [groups.notes]
@@ -127,8 +173,8 @@ names = ["fig"]
 category = "character"
 role = "content"
 closing = "none"
-names = ["fr", "fk", "fq", "fqa", "fl", "fw", "fp", "ft",
-         "xo", "xk", "xq", "xt", "xta", "xop", "xot", "xnt", "xdc"]
+names = ["fr", "fk", "fq", "fqa", "fl", "fw", "fp", "ft", "fdc",
+         "xo", "xk", "xq", "xta", "xop", "xot", "xnt", "xdc"]
 
 # --- milestones (self-closing via `\*`) -------------------------------------
 [groups.milestones]

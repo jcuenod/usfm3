@@ -64,6 +64,7 @@ pub mod flags {
     pub const SELF_CLOSING: u8 = 1 << 1; // e.g. milestone `\qt-s\*`
     pub const HAS_ATTRS: u8 = 1 << 2; // an Attribute node follows
     pub const HAS_ERROR: u8 = 1 << 3; // a diagnostic references this node
+    pub const NESTED: u8 = 1 << 4; // opened with a `+` nesting prefix (`\+nd`)
 }
 
 /// One 16-byte tape record. Keep this `#[repr(C)]` and exactly 16 bytes.

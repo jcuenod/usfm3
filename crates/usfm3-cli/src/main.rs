@@ -9,13 +9,16 @@
 use std::io::{self, BufWriter, Write};
 use std::process::ExitCode;
 
-use usfm3::{parse, BookId, Document, Version};
+use usfm3::{parse, parse_with, BookId, Document, ParseOptions, Version};
 
 const USAGE: &str = "\
 usfm3 — USFM tooling
 
 USAGE:
     usfm3 vref <file.usfm>              Emit a verse-reference -> text JSON dictionary
+    usfm3 usj <file.usfm>               Emit USJ (JSON)
+    usfm3 usx <file.usfm>               Emit USX (XML)
+    usfm3 usfm <file.usfm>              Re-emit normalized USFM
     usfm3 cst <file.usfm> [--diagnostics]
                                        Emit the concrete syntax tree as JSON
     usfm3 diagnostics <file.usfm>      Emit errors + warnings as a JSON array
@@ -32,6 +35,7 @@ fn main() -> ExitCode {
         }
         Some("usj") => with_path(&args[1..], "usj", |p| render(p, |d| d.to_usj())),
         Some("usx") => with_path(&args[1..], "usx", |p| render(p, |d| d.to_usx())),
+        Some("usfm") => with_path(&args[1..], "usfm", |p| render(p, |d| d.to_usfm())),
         Some("diagnostics") => with_path(&args[1..], "diagnostics", run_diagnostics),
         Some("-h") | Some("--help") | None => {
             print!("{USAGE}");
@@ -56,13 +60,13 @@ fn with_path(args: &[String], cmd: &str, f: impl FnOnce(&str) -> ExitCode) -> Ex
 }
 
 /// Read + parse a file (reporting on failure), then hand a borrowed [`Document`]
-/// to `f`.
-fn read_and<R>(path: &str, f: impl FnOnce(&Document<'_>) -> R) -> Result<R, ExitCode> {
+/// to `f`. `diagnostics` opts into the (cold-path) diagnostic + validation pass.
+fn read_and<R>(path: &str, diagnostics: bool, f: impl FnOnce(&Document<'_>) -> R) -> Result<R, ExitCode> {
     let source = std::fs::read_to_string(path).map_err(|e| {
         eprintln!("error: cannot read {path}: {e}");
         ExitCode::FAILURE
     })?;
-    let doc = parse(&source, Version::V3_1);
+    let doc = parse_with(&source, Version::V3_1, ParseOptions { diagnostics });
     Ok(f(&doc))
 }
 
@@ -120,12 +124,12 @@ fn run_vref(path: &str) -> ExitCode {
 }
 
 fn run_cst(path: &str, with_diagnostics: bool) -> ExitCode {
-    let rendered = read_and(path, |doc| {
+    let rendered = read_and(path, with_diagnostics, |doc| {
         if with_diagnostics {
             let mut s = String::from("{\"cst\":");
-            let _ = doc.write_cst_json(&mut s);
+            s.push_str(&doc.to_cst_json());
             s.push_str(",\"diagnostics\":");
-            let _ = doc.write_diagnostics_json(&mut s);
+            s.push_str(&doc.to_diagnostics_json());
             s.push('}');
             s
         } else {
@@ -139,14 +143,14 @@ fn run_cst(path: &str, with_diagnostics: bool) -> ExitCode {
 }
 
 fn run_diagnostics(path: &str) -> ExitCode {
-    match read_and(path, |doc| doc.to_diagnostics_json()) {
+    match read_and(path, true, |doc| doc.to_diagnostics_json()) {
         Ok(s) => emit(&s),
         Err(code) => code,
     }
 }
 
 fn render(path: &str, f: impl FnOnce(&Document<'_>) -> String) -> ExitCode {
-    match read_and(path, f) {
+    match read_and(path, false, f) {
         Ok(s) => emit(&s),
         Err(code) => code,
     }
