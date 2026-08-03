@@ -1,4 +1,4 @@
-//! Diagnostics: errors, warnings, and lints produced during parsing.
+//! Diagnostics: errors, warnings, and info notices produced during parsing.
 //!
 //! The parser is *recovering* — it never bails. Anything it cannot interpret
 //! becomes a [`Diagnostic`] plus an error/text node on the tape, and parsing
@@ -16,7 +16,7 @@ pub enum Severity {
     /// implicitly at a paragraph boundary).
     Warning,
     /// Style/usage guidance that does not affect interpretation.
-    Lint,
+    Info,
 }
 
 impl Severity {
@@ -24,7 +24,7 @@ impl Severity {
         match self {
             Severity::Error => "error",
             Severity::Warning => "warning",
-            Severity::Lint => "lint",
+            Severity::Info => "info",
         }
     }
 }
@@ -144,7 +144,7 @@ impl Diagnostic {
     pub fn warning(code: DiagnosticCode, span: Span, message: impl Into<String>) -> Self {
         Self { severity: Severity::Warning, code, span, message: message.into() }
     }
-    pub fn lint(code: DiagnosticCode, span: Span, message: impl Into<String>) -> Self {
-        Self { severity: Severity::Lint, code, span, message: message.into() }
+    pub fn info(code: DiagnosticCode, span: Span, message: impl Into<String>) -> Self {
+        Self { severity: Severity::Info, code, span, message: message.into() }
     }
 }

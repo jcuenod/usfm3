@@ -1,0 +1,20 @@
+[package]
+name = "usfm3-python"
+description = "Error-tolerant, blazingly fast USFM 3.x parser — USJ, USX, USFM, CST, and vref for Python"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[lib]
+# The importable module is `usfm3`. cdylib only — an rlib would collide with the
+# core `usfm3` crate's rlib in the shared workspace target dir.
+name = "usfm3"
+crate-type = ["cdylib"]
+
+[dependencies]
+usfm3 = { workspace = true }
+pyo3 = { version = "0.23", features = ["extension-module"] }
+# Zero-dependency self-referential cell (see usfm3-wasm for rationale).
+self_cell = "1"

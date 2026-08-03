@@ -1,2 +1,6 @@
 /target
 /crates/usfm3/tests/fixtures
+
+# wasm-pack output (npm package, built by crates/usfm3-wasm/build.sh)
+/crates/usfm3-wasm/pkg
+/crates/usfm3-wasm/pkg-node

@@ -503,6 +503,35 @@ mod tests {
         assert!(dict[0].1.contains("text eleven"), "vref text: {:?}", dict[0]);
     }
 
+    /// Malformed no-space verse forms with a *sub-verse segment letter* (`\v3b`)
+    /// or a *range* (`\v1-11`) must still resolve to verse `\v` and keep their
+    /// full label. The space-separated forms (`\v 3b`, `\v 1-11`) are the
+    /// spec-correct cases and are covered by `verse_range_and_subverse_sids`.
+    #[test]
+    fn malformed_no_space_subverse_and_range() {
+        for (glued, label, sid) in [
+            ("\\v3b", "3b", "GEN 1:3b"),
+            ("\\v1-11", "1-11", "GEN 1:1-11"),
+            ("\\c2", "", "GEN 2"), // chapter glued; verse label N/A
+        ] {
+            let src = format!("\\id GEN\n\\c 1\n\\p\n{glued} the text");
+            let doc = parse(&src, Version::V3_1);
+            let usj = doc.to_usj();
+            if glued.starts_with("\\v") {
+                assert!(usj.contains(&format!("\"number\":\"{label}\"")), "{glued}: number in {usj}");
+                assert!(usj.contains(&format!("\"sid\":\"{sid}\"")), "{glued}: sid in {usj}");
+                let dict = doc.vref_dict();
+                assert_eq!(dict[0].0, sid, "{glued}: vref key");
+                assert!(dict[0].1.contains("the text"), "{glued}: vref text {:?}", dict[0]);
+            } else {
+                // \c2 → a second chapter node with sid "GEN 2".
+                assert!(usj.contains("\"sid\":\"GEN 2\""), "{glued}: chapter sid in {usj}");
+            }
+            // None of these should be reported as an unknown marker.
+            assert!(!emits(&src, DiagnosticCode::UnknownMarker, crate::diagnostic::Severity::Error), "{glued} should not be unknown");
+        }
+    }
+
     #[test]
     fn verse_ref_packs_and_formats() {
         let r = VerseRef::new(BookId::from_code("GEN").unwrap(), 1, 1);

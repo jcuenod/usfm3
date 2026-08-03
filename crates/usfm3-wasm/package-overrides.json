@@ -1,0 +1,17 @@
+{
+  "name": "usfm3",
+  "description": "Error-tolerant, blazingly fast USFM 3.x parser — USJ, USX, USFM, CST, and vref for the browser and Node",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jcuenod/rsusfm7.git"
+  },
+  "files": ["usfm3_wasm_bg.wasm", "usfm3_wasm.js", "usfm3_wasm.d.ts", "node.js"],
+  "keywords": ["usfm", "usj", "usx", "vref", "parser", "bible", "scripture"],
+  "exports": {
+    ".": {
+      "types": "./usfm3_wasm.d.ts",
+      "node": { "import": "./node.js" },
+      "default": "./usfm3_wasm.js"
+    }
+  }
+}

@@ -390,7 +390,7 @@ fn table_cell_columns(marker: &str) -> Option<(u32, u32)> {
 /// Validate a marker's `|…` attribute syntax. Errors: empty list, a value-less
 /// key among pairs, an unquoted value, a bare default on a marker that defines no
 /// default attribute. An *empty quoted* value (`lemma=""`) is well-formed per the
-/// spec — the parser keeps it; we only flag it as a lint.
+/// spec — the parser keeps it; we only flag it as info.
 fn validate_attributes(c: Cursor<'_>, marker: &str, diags: &mut Vec<Diagnostic>) {
     for ch in c.children() {
         if ch.kind() != NodeKind::Attribute {
@@ -457,7 +457,7 @@ fn validate_attributes(c: Cursor<'_>, marker: &str, diags: &mut Vec<Diagnostic>)
                             // The spec (ubsicap word-level attributes) doesn't
                             // forbid an empty quoted value, so this is advisory
                             // only — the parser keeps `lemma=""` as an attribute.
-                            diags.push(Diagnostic::lint(
+                            diags.push(Diagnostic::info(
                                 DiagnosticCode::InvalidAttributes,
                                 span,
                                 "attribute has an empty value (e.g. `lemma=\"\"`)",

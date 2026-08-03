@@ -1,12 +1,20 @@
 [workspace]
 resolver = "3"
-members = ["crates/usfm3", "crates/usfm3-cli"]
+members = [
+    "crates/usfm3",
+    "crates/usfm3-cli",
+    "crates/usfm3-python",
+    "crates/usfm3-wasm",
+]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/jcuenod/rsusfm7"
+
+[workspace.dependencies]
+usfm3 = { path = "crates/usfm3" }
 
 [profile.release]
 opt-level = 3

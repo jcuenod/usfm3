@@ -18,6 +18,8 @@ use crate::Document;
 use crate::marker::{Category, TextRole};
 use crate::tape::NodeKind;
 
+use super::render::json_str;
+
 // --- public types ----------------------------------------------------------
 
 /// A packed verse reference: `book:u8 | chapter:u12 | verse:u12`.
@@ -234,6 +236,29 @@ impl<'src> Document<'src> {
             }
         }
         order
+    }
+
+    /// The vref dictionary as a JSON object string: `{"GEN 1:1":"In the beginning…"}`.
+    ///
+    /// Keys are unique and in document order (same semantics as [`Document::vref_dict`]
+    /// — empty verses dropped, duplicates merged), so the result is a well-formed JSON
+    /// object. This is the single-string form that FFI bindings (wasm/Python) hand
+    /// across the boundary and parse natively, mirroring [`Document::to_usj`] /
+    /// [`Document::to_cst_json`].
+    pub fn to_vref_json(&self) -> String {
+        let dict = self.vref_dict();
+        let mut out = String::with_capacity(dict.len() * 24 + 2);
+        out.push('{');
+        for (i, (key, value)) in dict.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            let _ = json_str(key, &mut out);
+            out.push(':');
+            let _ = json_str(value, &mut out);
+        }
+        out.push('}');
+        out
     }
 
     /// Shared verse traversal: invokes `f` once per `\v`, with the reference, the

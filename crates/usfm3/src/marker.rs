@@ -140,10 +140,22 @@ impl MarkerTable {
         }
         let base = strip_level_suffix(name);
         if base.len() != name.len() {
-            self.index.get(base).copied().map(MarkerId)
-        } else {
-            None
+            if let Some(id) = self.index.get(base) {
+                return Some(MarkerId(*id));
+            }
         }
+        // Recovery for a verse/chapter number glued to its marker with no
+        // separating space, *including a sub-verse segment letter* — `\v3b`,
+        // `\c2`. `strip_level_suffix` only peels a trailing `\d+(-\d+)?`, so a
+        // segment letter (`v3b`) leaves the name unresolved above. Here the base
+        // is the single leading `v`/`c` when a digit follows immediately; the
+        // serializer's `verse_label` recovers the full label (`3b`) from the
+        // marker name. Miss-path only: valid markers returned at the exact match.
+        let bytes = name.as_bytes();
+        if bytes.len() >= 2 && matches!(bytes[0], b'v' | b'c') && bytes[1].is_ascii_digit() {
+            return self.index.get(&name[..1]).copied().map(MarkerId);
+        }
+        None
     }
 
     #[inline]
