@@ -346,7 +346,17 @@ impl<'a> LowerCtx<'a> {
         _parent_id: CstNodeId,
         is_block: bool,
         close_span: &mut Option<Span>,
-        attributes: &mut Vec<Attribute<'a>>,
+        // `None` when the node being built has nowhere to put attributes.
+        //
+        // `Node::Para`, `Node::Sidebar`, `Node::TableRow`, `Node::TableCell`
+        // and `Node::Unknown` have no attributes field, so whatever was
+        // collected for them used to be discarded on return — along with the
+        // source text it was parsed from.
+        //
+        // An `Option` rather than a convention means a caller with nowhere to
+        // put them cannot lose text by forgetting: it passes `None`, and the
+        // text is kept as content instead.
+        mut attributes: Option<&mut Vec<Attribute<'a>>>,
         marker_name: &str,
     ) -> Vec<SpannedNode<'a>> {
         let mut children: Vec<SpannedNode<'a>> = Vec::new();
@@ -420,6 +430,27 @@ impl<'a> LowerCtx<'a> {
                 }
                 CstKind::AttributesToken => {
                     let text = self.doc.source_text(child_id);
+
+                    // Nowhere to put them, so this was never an attribute
+                    // block: attributes attach to a marker closed with
+                    // `\marker*`, and there is none here.
+                    //
+                    // Kept as content, which is what the `None` arm below
+                    // already does for an attribute string that will not
+                    // parse. Same reasoning, same treatment — the caller can
+                    // decide what a stray `|` meant, and cannot do that if the
+                    // parser has already thrown it away.
+                    let Some(attributes) = attributes.as_deref_mut() else {
+                        if pending_space {
+                            pending_space = false;
+                            Self::append_text_to(&mut children, " ");
+                        }
+                        Self::append_text_to(&mut children, text);
+                        after_open = false;
+                        after_close = false;
+                        continue;
+                    };
+
                     let parsed = match parse_attributes(text) {
                         Some(attrs) => attrs,
                         None => {
@@ -733,15 +764,8 @@ impl<'a> LowerCtx<'a> {
 
         let is_block = true;
         let mut close_span = None;
-        let mut attributes = Vec::new();
-        let children = self.collect_content(
-            node,
-            id,
-            is_block,
-            &mut close_span,
-            &mut attributes,
-            marker.as_str(),
-        );
+        let children =
+            self.collect_content(node, id, is_block, &mut close_span, None, marker.as_str());
 
         let (content, children) = split_nodes(children);
         Some(SpannedNode::new(
@@ -783,7 +807,7 @@ impl<'a> LowerCtx<'a> {
             id,
             false,
             &mut close_span,
-            &mut attributes,
+            Some(&mut attributes),
             marker.as_str(),
         );
 
@@ -863,8 +887,14 @@ impl<'a> LowerCtx<'a> {
         let ref_marker = MarkerName::from("ref");
         let mut close_span = None;
         let mut attributes = Vec::new();
-        let children =
-            self.collect_content(node, id, false, &mut close_span, &mut attributes, "ref");
+        let children = self.collect_content(
+            node,
+            id,
+            false,
+            &mut close_span,
+            Some(&mut attributes),
+            "ref",
+        );
 
         self.check_close_diagnostics(id, node, &ref_marker, &close_span);
 
@@ -1084,7 +1114,7 @@ impl<'a> LowerCtx<'a> {
             id,
             false,
             &mut close_span,
-            &mut attributes,
+            Some(&mut attributes),
             marker.as_str(),
         );
 
@@ -1113,15 +1143,8 @@ impl<'a> LowerCtx<'a> {
         marker: &MarkerName,
     ) -> Option<SpannedNode<'a>> {
         let mut close_span = None;
-        let mut attributes = Vec::new();
-        let children = self.collect_content(
-            node,
-            id,
-            false,
-            &mut close_span,
-            &mut attributes,
-            marker.as_str(),
-        );
+        let children =
+            self.collect_content(node, id, false, &mut close_span, None, marker.as_str());
 
         if close_span.is_none() {
             self.push_diagnostic(|| {
@@ -1253,15 +1276,8 @@ impl<'a> LowerCtx<'a> {
         marker: &MarkerName,
     ) -> Option<SpannedNode<'a>> {
         let mut close_span = None;
-        let mut attributes = Vec::new();
-        let mut children = self.collect_content(
-            node,
-            id,
-            true,
-            &mut close_span,
-            &mut attributes,
-            marker.as_str(),
-        );
+        let mut children =
+            self.collect_content(node, id, true, &mut close_span, None, marker.as_str());
 
         // Per spec, trim trailing whitespace from the last cell's content
         // (whitespace before the next \tr is structural, not content)
@@ -1292,15 +1308,8 @@ impl<'a> LowerCtx<'a> {
         marker: &MarkerName,
     ) -> Option<SpannedNode<'a>> {
         let mut close_span = None;
-        let mut attributes = Vec::new();
-        let children = self.collect_content(
-            node,
-            id,
-            false,
-            &mut close_span,
-            &mut attributes,
-            marker.as_str(),
-        );
+        let children =
+            self.collect_content(node, id, false, &mut close_span, None, marker.as_str());
 
         let mut spans = SourceSpans::node(node.span.clone());
         if let Some(cs) = close_span {
@@ -1382,15 +1391,8 @@ impl<'a> LowerCtx<'a> {
         }
 
         let mut close_span = None;
-        let mut attributes = Vec::new();
-        let children = self.collect_content(
-            node,
-            id,
-            false,
-            &mut close_span,
-            &mut attributes,
-            marker.as_str(),
-        );
+        let children =
+            self.collect_content(node, id, false, &mut close_span, None, marker.as_str());
 
         self.check_close_diagnostics(id, node, marker, &close_span);
 
