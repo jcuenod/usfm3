@@ -1241,3 +1241,97 @@ fn ast_table_grouping() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// A `|` with no marker to attach to is content, not an attribute block
+// ---------------------------------------------------------------------------
+
+// https://ubsicap.github.io/usfm/attributes/index.html
+// Attributes attach to a character marker or a milestone — something closed
+// with `\marker*`. Where there is no such marker there is nothing for them to
+// attach to, so the text is kept as content, exactly as it already is for an
+// attribute string that will not parse.
+
+#[test]
+fn a_pipe_in_paragraph_text_is_not_an_attribute_block() {
+    let usfm = "\\id GEN\n\\c 1\n\\p\n\\v 1 before| after more words";
+
+    let vref = parse_to_vref(usfm);
+    assert_eq!(
+        vref.get("GEN 1:1").and_then(|v| v.as_str()),
+        Some("before| after more words")
+    );
+}
+
+/// The quieter half: `parse_attributes("|")` returns an empty list rather than
+/// `None`, so a trailing pipe was discarded even with nothing after it to lose.
+#[test]
+fn a_pipe_at_the_end_of_a_line_is_kept() {
+    let usfm = "\\id GEN\n\\c 1\n\\p\n\\v 1 a sentence|";
+
+    let vref = parse_to_vref(usfm);
+    assert_eq!(
+        vref.get("GEN 1:1").and_then(|v| v.as_str()),
+        Some("a sentence|")
+    );
+}
+
+#[test]
+fn a_pipe_in_a_table_cell_is_kept() {
+    let usfm = "\\id GEN\n\\c 1\n\\tr \\tc1 first| second \\tc2 third";
+
+    let usj = parse_to_usj(usfm);
+    let cells = collect_by_type(&usj, "table:cell");
+    let text: String = cells
+        .iter()
+        .flat_map(|c| c["content"].as_array().cloned().unwrap_or_default())
+        .filter_map(|v| v.as_str().map(str::to_owned))
+        .collect();
+
+    assert!(text.contains("first| second"), "{text:?}");
+    assert!(text.contains("third"), "{text:?}");
+}
+
+/// The regression guard: inside a character marker a pipe still introduces
+/// attributes, and they still parse.
+#[test]
+fn a_pipe_inside_a_character_marker_is_still_an_attribute_block() {
+    let usfm = "\\id GEN\n\\c 1\n\\p\n\\v 1 \\w beginning|lemma=\"H7225\"\\w* now";
+
+    let usj = parse_to_usj(usfm);
+    let chars = collect_by_type(&usj, "char");
+    let w = chars
+        .iter()
+        .find(|c| c["marker"] == "w")
+        .expect("the \\w node");
+
+    let attrs = w["attributes"].as_array().expect("attributes");
+    let lemma = attrs
+        .iter()
+        .find(|a| a["key"] == "lemma")
+        .expect("the lemma attribute");
+    assert_eq!(lemma["value"], "H7225");
+
+    let vref = parse_to_vref(usfm);
+    let text = vref
+        .get("GEN 1:1")
+        .and_then(|v| v.as_str())
+        .expect("verse text");
+    assert!(
+        !text.contains('|') && !text.contains("lemma"),
+        "attribute syntax leaked into the text: {text:?}"
+    );
+}
+
+/// Restored text keeps its place, rather than collecting at the end of the
+/// paragraph.
+#[test]
+fn text_after_a_pipe_keeps_its_position() {
+    let usfm = "\\id GEN\n\\c 1\n\\p\n\\v 1 one| two \\add three\\add* four";
+
+    let vref = parse_to_vref(usfm);
+    assert_eq!(
+        vref.get("GEN 1:1").and_then(|v| v.as_str()),
+        Some("one| two three four")
+    );
+}
