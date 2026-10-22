@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+    tags-ignore:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Format & Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-check-
+
+      - uses: ./.github/actions/rust-quality-gate
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561
+        with:
+          toolchain: stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-test-
+
+      - name: Fetch BridgeConn test fixtures
+        run: |
+          git clone --depth 1 https://github.com/Bridgeconn/usfm-grammar.git /tmp/usfm-grammar
+          mkdir -p crates/usfm3/tests/fixtures/usfm-grammar
+          cp -r /tmp/usfm-grammar/tests/* crates/usfm3/tests/fixtures/usfm-grammar/
+
+      - name: Run tests
+        run: cargo test --workspace
+
+  wasm:
+    name: WASM Build & JS Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-wasm-
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # Sandbox the wasm-pack installation
+      - name: Install wasm-pack
+        run: env -i PATH="$PATH" HOME="$HOME" curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | env -i PATH="$PATH" HOME="$HOME" sh
+
+      - name: Build npm package
+        run: crates/usfm3-wasm/build.sh
+
+      - name: Fetch BridgeConn test fixtures
+        run: |
+          git clone --depth 1 https://github.com/Bridgeconn/usfm-grammar.git /tmp/usfm-grammar
+          mkdir -p crates/usfm3/tests/fixtures/usfm-grammar
+          cp -r /tmp/usfm-grammar/tests/* crates/usfm3/tests/fixtures/usfm-grammar/
+
+      - name: JS tests
+        run: node --test 'crates/usfm3-wasm/test/*.test.mjs'
+
+      - name: Type check declarations
+        run: npx -y -p typescript@5 tsc --noEmit --strict crates/usfm3-wasm/pkg/index.d.ts crates/usfm3-wasm/pkg/tape.d.ts
+
+  python:
+    name: Python Wheel Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561
+        with:
+          toolchain: stable
+
+      - name: Build and install wheel
+        run: |
+          python -m pip install maturin
+          maturin build -m crates/usfm3-python/Cargo.toml --out dist
+          python -m pip install dist/*.whl
+
+      - name: Smoke test
+        run: |
+          python -I -c '
+          import usfm3
+          doc = usfm3.parse("\\id GEN\n\\c 1\n\\p\n\\v 1 In the beginning.\n", diagnostics=True)
+          assert doc.to_vref() == {"GEN 1:1": "In the beginning."}, doc.to_vref()
+          assert doc.diagnostics() == []
+          assert doc.to_usj()["type"] == "USJ"
+          assert usfm3.tape_schema()["format"] == 1
+          '

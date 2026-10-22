@@ -1,5 +1,5 @@
 /**
- * Tests for the packed-tape JS layer. Dependency-free: `node --test test/`.
+ * Tests for the packed-tape JS layer. Dependency-free: `node --test 'test/*.test.mjs'`.
  *
  * The load-bearing test is `traversal parity`: `js/tape.js` reimplements
  * `Cursor::first_child` / `next_sibling` / `marker_info` in JavaScript, so those rules

@@ -5,6 +5,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+readme = "README.md"
+keywords = ["usfm", "usj", "usx", "bible", "parser"]
+categories = ["parser-implementations", "text-processing"]
 
 [dependencies]
 # SIMD-accelerated, stable-Rust scanning for the structural (stage 1) pass.

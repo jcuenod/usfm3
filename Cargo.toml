@@ -11,7 +11,7 @@ members = [
 version = "0.3.0"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/jcuenod/rsusfm7"
+repository = "https://github.com/jcuenod/usfm3"
 
 [workspace.dependencies]
 usfm3 = { path = "crates/usfm3" }
