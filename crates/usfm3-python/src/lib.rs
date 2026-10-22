@@ -11,7 +11,7 @@
 //! get plain dicts/lists. `to_usx`/`to_usfm` are returned as strings.
 
 use pyo3::prelude::*;
-use pyo3::types::PyModule;
+use pyo3::types::{PyBytes, PyModule};
 
 use ::usfm3 as usfm3_lib;
 
@@ -73,9 +73,35 @@ impl ParsedDocument {
     }
 
     /// Diagnostics as a flat list. Empty unless `diagnostics=True` was passed.
-    #[getter]
-    fn diagnostics(&self, py: Python<'_>) -> PyResult<PyObject> {
-        json_loads(py, &self.doc().to_diagnostics_json())
+    ///
+    /// `start`/`end`/`column` are in `offsets` space; `line` is space-independent.
+    /// Defaults to `"chars"`, so they index a Python `str` directly. This is a method
+    /// rather than a property because it now carries that keyword.
+    #[pyo3(signature = (*, offsets="chars"))]
+    fn diagnostics(&self, py: Python<'_>, offsets: &str) -> PyResult<PyObject> {
+        json_loads(py, &self.doc().to_diagnostics_json_with(offsets_from(offsets)))
+    }
+
+    /// The tape as packed bytes: an 8-word header, then 4 words per node, little-endian
+    /// `uint32`.
+    ///
+    /// The low-level view, for callers who want to process the whole tape numerically
+    /// (e.g. `numpy.frombuffer(doc.tape(), dtype="<u4")`) rather than walk a dict. Pair
+    /// it with `tape_schema()` to resolve the `kind` and `marker` ids.
+    ///
+    /// For ordinary traversal prefer `cst()`: unlike the JS binding, a Python cursor
+    /// would be an in-process PyO3 object with no serialization to avoid, so packing
+    /// buys nothing on that path. (Such a cursor is a planned addition.)
+    #[pyo3(signature = (*, offsets="chars"))]
+    fn tape<'py>(&self, py: Python<'py>, offsets: &str) -> Bound<'py, PyBytes> {
+        let words = self.doc().to_packed_tape(offsets_from(offsets));
+        // `Vec<u32>` -> little-endian bytes. Explicit rather than a transmute so the
+        // wire format stays byte-identical on a big-endian host.
+        let mut bytes = Vec::with_capacity(words.len() * 4);
+        for w in words {
+            bytes.extend_from_slice(&w.to_le_bytes());
+        }
+        PyBytes::new(py, &bytes)
     }
 }
 
@@ -95,10 +121,21 @@ fn parse_cst(py: Python<'_>, usfm: String, diagnostics: bool, version: &str) -> 
     doc.cst(py)
 }
 
+/// The marker/kind schema needed to interpret a packed tape from `ParsedDocument.tape`.
+///
+/// A module-level function: it needs no document, and it is small and version-stable,
+/// so callers can cache it.
+#[pyfunction]
+#[pyo3(signature = (*, version="3.1"))]
+fn tape_schema(py: Python<'_>, version: &str) -> PyResult<PyObject> {
+    json_loads(py, &usfm3_lib::schema_json(version_from(version)))
+}
+
 #[pymodule]
 fn usfm3(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse, m)?)?;
     m.add_function(wrap_pyfunction!(parse_cst, m)?)?;
+    m.add_function(wrap_pyfunction!(tape_schema, m)?)?;
     m.add_class::<ParsedDocument>()?;
     Ok(())
 }
@@ -108,6 +145,12 @@ fn version_from(s: &str) -> usfm3_lib::Version {
         "3.2" => usfm3_lib::Version::V3_2,
         _ => usfm3_lib::Version::V3_1,
     }
+}
+
+/// Python `str` is indexed by code point, so `"chars"` is this binding's default.
+/// Unrecognized names fall back to it rather than raising.
+fn offsets_from(s: &str) -> usfm3_lib::Offsets {
+    usfm3_lib::Offsets::from_name(Some(s), usfm3_lib::Offsets::Chars)
 }
 
 /// Decode a JSON string emitted by the core serializer into a Python object using

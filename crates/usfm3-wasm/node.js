@@ -10,4 +10,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const wasmBytes = readFileSync(join(__dirname, "usfm3_wasm_bg.wasm"));
 initSync({ module: wasmBytes });
 
+// Keep this namespace identical to index.js (the browser entry), so a JS-only export
+// is never reachable in one environment but missing in the other.
 export { parse, parseCst, ParsedDocument } from "./usfm3_wasm.js";
+export { tapeSchema, tapeView, parseTape } from "./api.js";
+export { Tape, TapeCursor, tape } from "./tape.js";

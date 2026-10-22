@@ -162,6 +162,34 @@ impl MarkerTable {
     pub fn info(&self, id: MarkerId) -> Option<&MarkerInfo> {
         self.entries.get(id.0 as usize)
     }
+
+    /// Every entry, indexed by [`MarkerId::0`].
+    ///
+    /// Exists so a host can be handed the whole table once and then resolve marker
+    /// ids itself — a packed tape carries `MarkerId`s, which are meaningless without
+    /// it. `'static` because the tables are generated at build time.
+    #[inline]
+    pub fn entries(&self) -> &'static [MarkerInfo] {
+        self.entries
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Entries paired with their ids, in id order.
+    pub fn iter(&self) -> impl Iterator<Item = (MarkerId, &'static MarkerInfo)> {
+        self.entries
+            .iter()
+            .enumerate()
+            .map(|(i, info)| (MarkerId(i as u16), info))
+    }
 }
 
 /// Strip a trailing numeric level / column-range suffix: `q1`→`q`, `tcr1-2`→`tcr`,

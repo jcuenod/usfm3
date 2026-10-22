@@ -10,8 +10,27 @@
 //! (`cst`/`toUsj`/`toVref`/`diagnostics`) are parsed at the boundary with the
 //! engine's native `JSON.parse`, so JS callers get plain objects. `toUsx` and
 //! `toUsfm` are returned as strings verbatim.
+//!
+//! # `tape()` and offset spaces
+//!
+//! `cst()` costs a full JSON materialization plus a `JSON.parse` into an object graph
+//! — on a book-sized document that is megabytes of text and tens of thousands of
+//! objects, per call. For an editor reparsing on every keystroke that dominates, so
+//! [`ParsedDocument::tape`] hands over the tape as a packed `Uint32Array` instead and
+//! `js/tape.js` walks it with shifts. `cst()` is unchanged and still available.
+//!
+//! Offsets crossing this boundary are **UTF-16 code units** by default, because that
+//! is what indexes a JS string. Byte offsets would make `source.slice(start, end)`
+//! silently wrong on any non-ASCII document, which is most real translation text
+//! (103 of the 242 fixtures in the conformance corpus). Pass `{ offsets: "utf8" }` for
+//! byte offsets. Both `tape()` and `diagnostics()` honour the option and share the
+//! same default, so their numbers always agree.
+//!
+//! Deliberately absent: per-node accessors (`kindAt(i)`, `textAt(i)`). A boundary
+//! crossing per node is *slower* than the JSON this replaces, and every string return
+//! allocates. Decode the buffer in JS instead.
 
-use js_sys::JSON;
+use js_sys::{JSON, Uint32Array};
 use wasm_bindgen::prelude::*;
 
 use ::usfm3 as usfm3_lib;
@@ -28,181 +47,6 @@ self_cell::self_cell!(
 
 /// The borrowing half of the cell: the parsed [`usfm3_lib::Document`].
 type ParsedView<'src> = usfm3_lib::Document<'src>;
-
-#[wasm_bindgen(typescript_custom_section)]
-const TYPESCRIPT_API: &str = r#"
-/** USFM specification version. Selects the marker table and lint rules. */
-export type Version = "3.1" | "3.2";
-
-export interface ParseOptions {
-  /** Collect diagnostics (lexical/structural + a semantic validation pass).
-   *  Off by default so the hot path pays nothing. */
-  diagnostics?: boolean;
-  /** USFM version. Defaults to "3.1". */
-  version?: Version;
-}
-
-// ── Primitives ───────────────────────────────────────────────────────────────
-
-export interface Span {
-  start: number;
-  end: number;
-  /** Present on synthetic close tokens (implicit/recovered closes). */
-  synthetic?: boolean;
-}
-
-// ── Diagnostics ──────────────────────────────────────────────────────────────
-
-export type Severity = "error" | "warning" | "info";
-
-export type DiagnosticCode =
-  | "UnknownMarker"
-  | "UnclosedMarker"
-  | "StrayCloseMarker"
-  | "StrayBackslash"
-  | "MissingIdMarker"
-  | "InvalidBookCode"
-  | "DuplicateId"
-  | "TextBeforeId"
-  | "MissingChapterMarker"
-  | "InvalidChapterSequence"
-  | "DuplicateChapter"
-  | "InvalidVerseSequence"
-  | "VerseOutsideParagraph"
-  | "NoteSubmarkerOutsideNote"
-  | "NonEmptyBlankLine"
-  | "LeadingZeros"
-  | "MilestoneMismatch"
-  | "InvalidAttributes"
-  | "MissingChapterNumber"
-  | "MissingVerseNumber"
-  | "CharCrossesVerseBoundary"
-  | "EmptyFigure"
-  | "UnquotedAttributeValue"
-  | "MissingRequiredAttribute"
-  | "BodyParagraphBeforeChapter"
-  | "EmptyWordMarker"
-  | "MissingMilestoneSelfClose"
-  | "InvalidTableColumnSequence"
-  | "DeprecatedMarker"
-  | "ImplicitClose"
-  | "UnclosedNote"
-  | "UnclosedAtEof"
-  | "DefaultAttributeNotDefined"
-  | "MisnestedMarker"
-  | "MissingNestingPrefix"
-  | "HeaderAfterBody";
-
-/** A diagnostic. Spans are UTF-8 byte offsets into the source; `line`/`column`
- *  are 1-based for editors working in line/column space. */
-export interface Diagnostic {
-  severity: Severity;
-  code: DiagnosticCode;
-  message: string;
-  start: number;
-  end: number;
-  line: number;
-  column: number;
-}
-
-// ── CST (concrete syntax tree, for editor decoration) ──────────────────────────
-
-export interface CstClose {
-  start: number;
-  end: number;
-  synthetic?: boolean;
-}
-
-export interface CstNode {
-  type: string;
-  marker?: string;
-  category?: string;
-  role?: string;
-  closing?: string;
-  number?: number;
-  /** UTF-8 byte offsets into the source. */
-  start: number;
-  end: number;
-  synthetic?: boolean;
-  close?: CstClose;
-  children?: CstNode[];
-}
-
-// ── USJ ────────────────────────────────────────────────────────────────────────
-
-export interface UsjAttribute {
-  key: string;
-  value: string;
-}
-
-export interface UsjBook { type: "book"; marker: string; code: string; content?: UsjContentNode[]; }
-export interface UsjChapter { type: "chapter"; marker: string; number: string; sid?: string; altnumber?: string; pubnumber?: string; }
-export interface UsjVerse { type: "verse"; marker: string; number: string; sid?: string; altnumber?: string; pubnumber?: string; }
-export interface UsjPara { type: "para"; marker: string; content?: UsjContentNode[]; }
-export interface UsjChar { type: "char"; marker: string; content?: UsjContentNode[]; attributes?: UsjAttribute[]; }
-export interface UsjNote { type: "note"; marker: string; caller: string; category?: string; content?: UsjContentNode[]; }
-export interface UsjMilestone { type: "ms"; marker: string; attributes?: UsjAttribute[]; }
-export interface UsjFigure { type: "figure"; marker: string; content?: UsjContentNode[]; attributes?: UsjAttribute[]; }
-export interface UsjSidebar { type: "sidebar"; marker: string; category?: string; content?: UsjContentNode[]; }
-export interface UsjPeriph { type: "periph"; alt?: string; id?: string; content?: UsjContentNode[]; }
-export interface UsjTable { type: "table"; content?: UsjContentNode[]; }
-export interface UsjTableRow { type: "table:row"; marker: string; content?: UsjContentNode[]; }
-export interface UsjTableCell { type: "table:cell"; marker: string; align: string; content?: UsjContentNode[]; }
-export interface UsjRef { type: "ref"; loc?: string; content?: UsjContentNode[]; }
-export interface UsjUnknown { type: "unknown"; marker: string; content?: UsjContentNode[]; }
-export interface UsjOptBreak { type: "optbreak"; }
-
-export type UsjContentNode =
-  | string
-  | UsjBook
-  | UsjChapter
-  | UsjVerse
-  | UsjPara
-  | UsjChar
-  | UsjNote
-  | UsjMilestone
-  | UsjFigure
-  | UsjSidebar
-  | UsjPeriph
-  | UsjTable
-  | UsjTableRow
-  | UsjTableCell
-  | UsjRef
-  | UsjUnknown
-  | UsjOptBreak;
-
-export interface UsjDocument {
-  type: "USJ";
-  version: string;
-  content: UsjContentNode[];
-}
-
-// ── ParsedDocument handle ──────────────────────────────────────────────────────
-
-export class ParsedDocument {
-  /** Free the WebAssembly-side handle. Call when done. */
-  free(): void;
-  /** Concrete syntax tree (for editor decoration / folding). */
-  cst(): CstNode;
-  /** Diagnostics as a flat array. Empty unless `diagnostics: true` was passed. */
-  diagnostics(): Diagnostic[];
-  /** USJ document object. */
-  toUsj(): UsjDocument;
-  /** USX serialization (XML string). */
-  toUsx(): string;
-  /** Normalized USFM (string). */
-  toUsfm(): string;
-  /** Verse-reference → cleaned-text dictionary, in document order. */
-  toVref(): Record<string, string>;
-}
-
-/** Parse USFM into a lazy handle. Never throws on malformed input — the parser
- *  recovers and (when `diagnostics` is on) reports. */
-export function parse(usfm: string, options?: ParseOptions): ParsedDocument;
-
-/** One-shot convenience: parse and return the concrete syntax tree. */
-export function parseCst(usfm: string, options?: ParseOptions): CstNode;
-"#;
 
 #[wasm_bindgen(skip_typescript)]
 pub struct ParsedDocument {
@@ -229,9 +73,30 @@ impl ParsedDocument {
         parse_json(&self.doc().to_cst_json())
     }
 
+    /// Diagnostics as a flat array, with offsets in the requested space.
+    ///
+    /// UTF-16 by default. The previous byte offsets were already wrong for the editors
+    /// the `line`/`column` fields exist to serve; `{ offsets: "utf8" }` restores them.
     #[wasm_bindgen(skip_typescript)]
-    pub fn diagnostics(&self) -> Result<JsValue, JsError> {
-        parse_json(&self.doc().to_diagnostics_json())
+    pub fn diagnostics(&self, options: JsValue) -> Result<JsValue, JsError> {
+        let offsets = read_offsets(&options, JS_OFFSETS);
+        parse_json(&self.doc().to_diagnostics_json_with(offsets))
+    }
+
+    /// The tape as a packed `Uint32Array`: an 8-word header, then 4 words per node.
+    ///
+    /// The returned array is a **copy owned by the JS heap**, not a view into wasm
+    /// memory. That is what makes it safe: a view would be detached by any later
+    /// allocation that grows `memory`, and would dangle after `free()`. It also makes
+    /// the buffer `postMessage`-transferable, so a worker can parse and the main
+    /// thread can walk. There is no copy to save anyway — the offset translation means
+    /// the words have to be built rather than memcpy'd.
+    ///
+    /// Pair it with `tapeSchema()` and the source string; see `js/tape.js`.
+    #[wasm_bindgen(skip_typescript)]
+    pub fn tape(&self, options: JsValue) -> Uint32Array {
+        let offsets = read_offsets(&options, JS_OFFSETS);
+        Uint32Array::from(&self.doc().to_packed_tape(offsets)[..])
     }
 
     #[wasm_bindgen(js_name = "toUsj", skip_typescript)]
@@ -266,6 +131,28 @@ pub fn parse_cst(usfm: String, options: JsValue) -> Result<JsValue, JsError> {
     let (diagnostics, version) = read_options(&options);
     let doc = ParsedDocument::build(usfm, version, diagnostics);
     doc.cst()
+}
+
+/// The marker/kind schema needed to interpret a packed tape from [`ParsedDocument::tape`].
+///
+/// A free function rather than a method on purpose: it needs no handle, so a worker can
+/// hydrate a view with no `ParsedDocument` alive. Small and version-stable — the JS
+/// layer memoizes it per version.
+#[wasm_bindgen(js_name = "tapeSchema", skip_typescript)]
+pub fn tape_schema(version: Option<String>) -> Result<JsValue, JsError> {
+    parse_json(&usfm3_lib::schema_json(version_from(version.as_deref())))
+}
+
+/// Offsets handed to JS index JS strings, which are UTF-16 code units.
+const JS_OFFSETS: usfm3_lib::Offsets = usfm3_lib::Offsets::Utf16;
+
+/// Read `{ offsets? }` off a JS options object (or `undefined`/`null`), falling back to
+/// `default`. Unrecognized values fall back too, so JS never has to pre-validate.
+fn read_offsets(options: &JsValue, default: usfm3_lib::Offsets) -> usfm3_lib::Offsets {
+    let name = js_sys::Reflect::get(options, &JsValue::from_str("offsets"))
+        .ok()
+        .and_then(|v| v.as_string());
+    usfm3_lib::Offsets::from_name(name.as_deref(), default)
 }
 
 /// Read `{ diagnostics?, version? }` off a JS options object (or `undefined`).

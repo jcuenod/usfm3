@@ -210,3 +210,134 @@ fn bridgeconn_usfm_roundtrip() {
     }
     assert!(broken.is_empty(), "{} round-trip mismatches", broken.len());
 }
+
+/// Every diagnostic's `line`/`column`, as produced by the shared forward-only
+/// `OffsetMap`, must equal what per-call `Span::line_col` would have produced.
+///
+/// This is the compatibility proof for making `to_diagnostics_json` linear: the
+/// scanner is amortized across the whole array instead of rescanning the prefix per
+/// diagnostic, so the risk is not that it is slow but that it *drifts* — and it walks
+/// every fixture in the corpus here, non-ASCII ones included.
+#[test]
+fn diagnostic_line_col_matches_span_line_col() {
+    use usfm3::Offsets;
+    use usfm3::low_level::OffsetMap;
+
+    let mut checked = 0usize;
+    for case in discover() {
+        let usfm = std::fs::read_to_string(&case.usfm).unwrap();
+        let doc = usfm3::parse_with(
+            &usfm,
+            usfm3::Version::V3_1,
+            usfm3::ParseOptions { diagnostics: true },
+        );
+        // One map for the whole array, exactly as the serializer uses it.
+        let mut map = OffsetMap::new(doc.source(), Offsets::Utf8);
+        for d in doc.diagnostics() {
+            let point = map.point_at(d.span.start);
+            let lc = d.span.line_col(doc.source());
+            assert_eq!(
+                (point.offset, point.line, point.col),
+                (d.span.start, lc.line, lc.col),
+                "{}: diagnostic {:?} at byte {}",
+                case.name,
+                d.code,
+                d.span.start
+            );
+            assert_eq!(
+                map.span_len(d.span.start, d.span.end()),
+                d.span.len,
+                "{}: utf8 span_len must be the byte length",
+                case.name
+            );
+            checked += 1;
+        }
+    }
+    eprintln!("\nline/col parity: {checked} diagnostics across the corpus");
+    assert!(checked > 0, "corpus produced no diagnostics to check");
+}
+
+mod common;
+
+/// Rebuild the CST JSON from a packed tape and compare it against `to_cst_json()` for
+/// every fixture in the corpus.
+///
+/// This is the structural proof for the packed wire format. It exercises all four
+/// `link` overloads, the `Root.link`-is-not-a-close quirk, the marker-info
+/// availability rule, close-folding, and the child/sibling traversal contract —
+/// against 266 real documents rather than a handful of hand-written cases. Both sides
+/// use `utf8`, so non-ASCII fixtures are included rather than skipped.
+#[test]
+fn packed_tape_matches_cst_json_across_the_corpus() {
+    use common::Packed;
+    use usfm3::Offsets;
+
+    let schema: Value = serde_json::from_str(&usfm3::schema_json(usfm3::Version::V3_1)).unwrap();
+    let mut checked = 0usize;
+    let mut mismatches: Vec<String> = Vec::new();
+
+    for case in discover() {
+        let usfm = std::fs::read_to_string(&case.usfm).unwrap();
+        let doc = usfm3::parse(&usfm, usfm3::Version::V3_1);
+        let packed = Packed::new(doc.to_packed_tape(Offsets::Utf8));
+        let rebuilt = packed.to_cst_json(doc.source(), &schema);
+        let expected: Value = serde_json::from_str(&doc.to_cst_json()).unwrap();
+        if rebuilt == expected {
+            checked += 1;
+        } else {
+            mismatches.push(case.name.clone());
+        }
+    }
+
+    eprintln!("\npacked CST parity: {checked}/{} fixtures", checked + mismatches.len());
+    for name in mismatches.iter().take(10) {
+        eprintln!("  PACKED CST DIFF {name}");
+    }
+    assert!(mismatches.is_empty(), "{} packed/JSON CST mismatches", mismatches.len());
+}
+
+/// The packed offsets must slice the host's own encoding exactly, for every fixture and
+/// both host spaces.
+///
+/// Non-ASCII is the norm rather than the exception here: 103 of the 242 fixtures this
+/// walks contain non-ASCII bytes (119 of the 266 `origin.usfm` files overall). Real
+/// translation text is never plain ASCII, so an offset bug is not an edge case — it is
+/// the default outcome. Running the whole corpus in both host spaces makes that
+/// unmissable.
+#[test]
+fn packed_offsets_are_slice_exact_across_the_corpus() {
+    use common::Packed;
+    use usfm3::Offsets;
+
+    let mut non_ascii = 0usize;
+    for case in discover() {
+        let usfm = std::fs::read_to_string(&case.usfm).unwrap();
+        if !usfm.is_ascii() {
+            non_ascii += 1;
+        }
+        let doc = usfm3::parse(&usfm, usfm3::Version::V3_1);
+        let units: Vec<u16> = usfm.encode_utf16().collect();
+        let scalars: Vec<char> = usfm.chars().collect();
+
+        let utf16 = Packed::new(doc.to_packed_tape(Offsets::Utf16));
+        let chars = Packed::new(doc.to_packed_tape(Offsets::Chars));
+        assert_eq!(utf16.lengths().1, units.len() as u32, "{}: utf16 length", case.name);
+        assert_eq!(chars.lengths().2, scalars.len() as u32, "{}: char length", case.name);
+
+        for (i, node) in doc.tape().nodes.iter().enumerate() {
+            let expected = node.span().text(doc.source());
+
+            let p = utf16.node(i);
+            let got =
+                String::from_utf16(&units[p.start as usize..(p.start + p.len) as usize]).unwrap();
+            assert_eq!(got, expected, "{}: utf16 node {i}", case.name);
+
+            let p = chars.node(i);
+            let got: String =
+                scalars[p.start as usize..(p.start + p.len) as usize].iter().collect();
+            assert_eq!(got, expected, "{}: chars node {i}", case.name);
+        }
+    }
+    eprintln!("\nslice-exactness: {non_ascii} non-ASCII fixtures covered");
+    assert!(non_ascii > 0, "corpus should contain non-ASCII fixtures");
+}

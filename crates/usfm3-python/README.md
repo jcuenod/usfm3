@@ -55,13 +55,23 @@ One-shot: parse and return the concrete syntax tree.
 - `to_vref() -> dict[str, str]` — verse-reference → cleaned text, in document
   order. Empty verses are dropped and duplicate references merged, so it is a
   faithful dictionary.
-- `diagnostics` *(property)* `-> list[dict]` — flat list of diagnostics. Empty
-  unless `diagnostics=True` was passed.
+- `diagnostics(*, offsets="chars") -> list[dict]` — flat list of diagnostics. Empty
+  unless `diagnostics=True` was passed. **In 0.3.0 this became a method** (to carry
+  `offsets`) and its offsets became code points; `offsets="utf8"` restores the old
+  byte values. See CHANGELOG.md.
+- `tape(*, offsets="chars") -> bytes` — the flat tape packed as little-endian
+  `uint32`s: an 8-word header, then 4 words per node. The numeric/vectorized view
+  (`numpy.frombuffer(doc.tape(), dtype="<u4")`); for ordinary traversal use `cst()`.
+
+Module-level: `parse`, `parse_cst`, and `tape_schema(*, version="3.1")` — the kind and
+marker tables needed to resolve the ids in a packed tape. The array index *is* the id.
 
 ## Notes
 
-- Diagnostics carry `severity` (`"error" | "warning" | "lint"`), a stable `code`,
-  a human `message`, byte `start`/`end`, and 1-based `line`/`column`.
+- Diagnostics carry `severity` (`"error" | "warning" | "info"`), a stable `code`,
+  a human `message`, `start`/`end`, and 1-based `line`/`column`.
+- **Offsets are code points** for `diagnostics()` and `tape()`, so
+  `src[d["start"]:d["end"]]` is correct. `cst()` is unchanged and reports bytes.
 - vref text is version-correct: notes are excluded, character-marker tags are
   dropped (inner text kept), whitespace is collapsed.
 

@@ -36,6 +36,10 @@ use tape::Tape;
 // --- public API surface ----------------------------------------------------
 
 pub use diagnostic::{Diagnostic, DiagnosticCode, Severity};
+pub use serialize::packed::{
+    PACKED_FORMAT, PACKED_HEADER_WORDS, PACKED_MAGIC, PACKED_NODE_WORDS,
+};
+pub use serialize::schema::schema_json;
 pub use serialize::vref::{BOOK_CODES, BookId, VerseRef, VrefRow, VrefText};
 
 /// Low-level access to the parse representation — the flat [`Tape`], the
@@ -46,9 +50,11 @@ pub use serialize::vref::{BOOK_CODES, BookId, VerseRef, VrefRow, VrefText};
 pub mod low_level {
     pub use crate::cst::Cursor;
     pub use crate::marker::{Category, Closing, MarkerId, MarkerInfo, MarkerTable, TextRole};
-    pub use crate::span::Span;
+    pub use crate::span::{OffsetMap, Point, Span};
     pub use crate::tape::{Node, NodeKind, Tape, flags};
 }
+
+pub use span::Offsets;
 
 /// USFM specification version. Selects the [`MarkerTable`] and lint rules.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -60,6 +66,26 @@ pub enum Version {
 impl Default for Version {
     fn default() -> Self {
         Version::V3_1
+    }
+}
+
+impl Version {
+    /// Canonical dotted name, as accepted by the FFI `version` option.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Version::V3_1 => "3.1",
+            Version::V3_2 => "3.2",
+        }
+    }
+
+    /// Small ordinal, for the packed tape header. Lets a host reject a tape built
+    /// against a different version's marker table, since [`low_level::MarkerId`] is
+    /// an index into one table and not stable across versions.
+    pub fn rank(self) -> u32 {
+        match self {
+            Version::V3_1 => 1,
+            Version::V3_2 => 2,
+        }
     }
 }
 

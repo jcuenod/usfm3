@@ -42,6 +42,23 @@ pub enum NodeKind {
 }
 
 impl NodeKind {
+    /// Every kind, in discriminant order, so `ALL[i] as u8 == i`.
+    ///
+    /// Lets the FFI schema derive its `kinds` array (where the index *is* the packed
+    /// `kind` code) instead of transcribing the list a second time. Guarded by
+    /// `node_kind_names_stay_aligned`.
+    pub const ALL: [NodeKind; 9] = [
+        NodeKind::Root,
+        NodeKind::MarkerOpen,
+        NodeKind::MarkerClose,
+        NodeKind::Chapter,
+        NodeKind::Verse,
+        NodeKind::Text,
+        NodeKind::Attribute,
+        NodeKind::BlockEnd,
+        NodeKind::Error,
+    ];
+
     /// Stable machine-readable name (used in CST JSON / FFI).
     pub fn as_str(self) -> &'static str {
         match self {

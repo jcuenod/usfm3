@@ -1,17 +1,46 @@
 {
   "name": "usfm3",
-  "description": "Error-tolerant, blazingly fast USFM 3.x parser — USJ, USX, USFM, CST, and vref for the browser and Node",
+  "description": "Error-tolerant, blazingly fast USFM 3.x parser \u2014 USJ, USX, USFM, CST, and vref for the browser and Node",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jcuenod/rsusfm7.git"
   },
-  "files": ["usfm3_wasm_bg.wasm", "usfm3_wasm.js", "usfm3_wasm.d.ts", "node.js"],
-  "keywords": ["usfm", "usj", "usx", "vref", "parser", "bible", "scripture"],
+  "files": [
+    "usfm3_wasm_bg.wasm",
+    "usfm3_wasm.js",
+    "usfm3_wasm.d.ts",
+    "node.js",
+    "index.js",
+    "index.d.ts",
+    "api.js",
+    "tape.js",
+    "tape.d.ts",
+    "CHANGELOG.md"
+  ],
+  "keywords": [
+    "usfm",
+    "usj",
+    "usx",
+    "vref",
+    "parser",
+    "bible",
+    "scripture"
+  ],
+  "main": "./node.js",
+  "module": "./index.js",
+  "types": "./index.d.ts",
   "exports": {
     ".": {
-      "types": "./usfm3_wasm.d.ts",
-      "node": { "import": "./node.js" },
-      "default": "./usfm3_wasm.js"
-    }
+      "types": "./index.d.ts",
+      "node": {
+        "import": "./node.js"
+      },
+      "default": "./index.js"
+    },
+    "./tape.js": {
+      "types": "./tape.d.ts",
+      "default": "./tape.js"
+    },
+    "./package.json": "./package.json"
   }
 }

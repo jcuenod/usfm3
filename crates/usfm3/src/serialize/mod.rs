@@ -9,6 +9,8 @@
 mod render;
 
 mod cst;
+pub mod packed;
+pub mod schema;
 mod usfm;
 mod usj;
 mod usx;

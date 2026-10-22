@@ -845,3 +845,187 @@ fn empty_paragraph_emits_content_array_but_empty_b_omits_it() {
         .expect("an empty \\p with content:[] should exist");
     assert!(empty_p["content"].as_array().unwrap().is_empty());
 }
+
+// --- packed tape ------------------------------------------------------------
+
+mod common;
+
+use common::Packed;
+use usfm3::Offsets;
+
+fn schema_for(version: Version) -> Value {
+    serde_json::from_str(&usfm3::schema_json(version)).expect("schema should be valid JSON")
+}
+
+const MIXED_SRC: &str = "\\id GEN\n\\c 1\n\\p\n\\v 1 \\nd יהוה\\nd* said \\f + \\ft note\\f* \u{1F600}\n";
+
+#[test]
+fn packed_tape_decodes_to_the_tape() {
+    let doc = parse(MIXED_SRC);
+    let packed = Packed::new(doc.to_packed_tape(Offsets::Utf8));
+    let nodes = &doc.tape().nodes;
+
+    assert_eq!(packed.count(), nodes.len(), "header node count is the TAPE count");
+    assert_eq!(packed.offset_space(), Offsets::Utf8.code());
+    assert_eq!(packed.version_rank(), Version::V3_1.rank());
+    assert_eq!(
+        packed.lengths(),
+        (
+            MIXED_SRC.len() as u32,
+            MIXED_SRC.encode_utf16().count() as u32,
+            MIXED_SRC.chars().count() as u32
+        ),
+        "all three source lengths, so any host validates in O(1)"
+    );
+
+    let mut saw_number_link = false;
+    let mut saw_self_link = false;
+    for (i, node) in nodes.iter().enumerate() {
+        let p = packed.node(i);
+        assert_eq!(p.kind_code, node.kind as u32, "node {i} kind");
+        assert_eq!(p.flags, node.flags, "node {i} flags");
+        assert_eq!(p.marker, node.marker.0, "node {i} marker id");
+        assert_eq!(p.link, node.link, "node {i} link must be verbatim");
+
+        match node.kind {
+            NodeKind::Chapter | NodeKind::Verse => {
+                // `link` is the number here; translating it as an offset would corrupt it.
+                assert_eq!(p.link, node.link);
+                saw_number_link = true;
+            }
+            NodeKind::Text | NodeKind::Attribute | NodeKind::Error => {
+                assert_eq!(p.link, i as u32, "leaf link is its own index");
+                saw_self_link = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(saw_number_link && saw_self_link, "fixture should cover both link overloads");
+
+    // Root's link is the last node index, NOT a close node — the traversal rules have
+    // to tolerate that, so pin it.
+    assert_eq!(packed.node(0).link, nodes.len() as u32 - 1);
+}
+
+#[test]
+fn packed_node_starts_are_monotonically_non_decreasing() {
+    // A *performance* invariant, not a correctness one: `OffsetMap` is forward-only, so
+    // one backwards node silently degrades packing toward O(N x len) with nothing
+    // failing. Nothing else would catch that, so assert it here.
+    for src in [MIXED_SRC, "\\id GEN", "\\c 1\n\\p text \\add x\\add* more\n\\q1 poetry\n"] {
+        let doc = parse(src);
+        let mut prev = 0u32;
+        for (i, node) in doc.tape().nodes.iter().enumerate() {
+            assert!(node.start >= prev, "node {i} start went backwards in {src:?}");
+            prev = node.start;
+        }
+    }
+}
+
+#[test]
+fn packed_utf8_offsets_are_identical_to_spans() {
+    let doc = parse(MIXED_SRC);
+    let packed = Packed::new(doc.to_packed_tape(Offsets::Utf8));
+    for (i, node) in doc.tape().nodes.iter().enumerate() {
+        let p = packed.node(i);
+        assert_eq!((p.start, p.len), (node.start, node.len), "node {i}");
+    }
+}
+
+#[test]
+fn packed_utf16_and_chars_offsets_are_slice_exact() {
+    // The real test of the remap: slicing the host's own encoding with the packed
+    // offsets must yield exactly the bytes the span covers. `MIXED_SRC` includes
+    // 2-byte, 3-byte and 4-byte scalars; the 4-byte one is two UTF-16 units, which is
+    // what a naive char-count remap gets wrong.
+    let doc = parse(MIXED_SRC);
+    let units: Vec<u16> = MIXED_SRC.encode_utf16().collect();
+    let scalars: Vec<char> = MIXED_SRC.chars().collect();
+
+    let utf16 = Packed::new(doc.to_packed_tape(Offsets::Utf16));
+    let chars = Packed::new(doc.to_packed_tape(Offsets::Chars));
+
+    for (i, node) in doc.tape().nodes.iter().enumerate() {
+        let expected = node.span().text(doc.source());
+
+        let p = utf16.node(i);
+        let got = String::from_utf16(&units[p.start as usize..(p.start + p.len) as usize]).unwrap();
+        assert_eq!(got, expected, "utf16 slice for node {i}");
+
+        let p = chars.node(i);
+        let got: String = scalars[p.start as usize..(p.start + p.len) as usize].iter().collect();
+        assert_eq!(got, expected, "chars slice for node {i}");
+    }
+}
+
+#[test]
+fn packed_tape_matches_cst_json_for_a_mixed_document() {
+    let doc = parse(MIXED_SRC);
+    let packed = Packed::new(doc.to_packed_tape(Offsets::Utf8));
+    let rebuilt = packed.to_cst_json(doc.source(), &schema_for(Version::V3_1));
+    assert_eq!(rebuilt, parse_cst_json(MIXED_SRC));
+}
+
+#[test]
+fn diagnostics_offsets_agree_with_the_packed_tape() {
+    // The whole point of moving diagnostics into the host's space: a caller can use a
+    // diagnostic's offsets and a tape node's offsets against the *same* string.
+    let src = "\\id GEN\n\\c 1\n\\p\n\\v 1 יהוה \\add unclosed\n";
+    let doc = parse_with_diagnostics(src);
+    assert!(!doc.diagnostics().is_empty(), "fixture should produce diagnostics");
+
+    for (space, index) in [(Offsets::Utf16, 1usize), (Offsets::Chars, 2usize)] {
+        let diags: Value =
+            serde_json::from_str(&doc.to_diagnostics_json_with(space)).unwrap();
+        let packed = Packed::new(doc.to_packed_tape(space));
+        let source_len = [packed.lengths().0, packed.lengths().1, packed.lengths().2][index];
+
+        for d in diags.as_array().unwrap() {
+            let start = d["start"].as_u64().unwrap() as u32;
+            let end = d["end"].as_u64().unwrap() as u32;
+            assert!(start <= end && end <= source_len, "{space:?}: {d} out of range");
+            assert!(d["column"].as_u64().unwrap() >= 1, "columns are 1-based");
+        }
+    }
+}
+
+#[test]
+fn schema_json_indices_match_marker_ids() {
+    use usfm3::low_level::MarkerTable;
+
+    for version in [Version::V3_1, Version::V3_2] {
+        let schema = schema_for(version);
+        let table = MarkerTable::for_version(version);
+
+        assert_eq!(schema["version"], version.as_str());
+        assert_eq!(schema["format"], usfm3::PACKED_FORMAT);
+        assert_eq!(schema["magic"], usfm3::PACKED_MAGIC);
+        assert_eq!(schema["headerWords"], usfm3::PACKED_HEADER_WORDS as u64);
+        assert_eq!(schema["nodeWords"], usfm3::PACKED_NODE_WORDS as u64);
+        assert_eq!(schema["unknownMarker"], 65535);
+
+        let kinds = schema["kinds"].as_array().unwrap();
+        assert_eq!(kinds.len(), NodeKind::ALL.len());
+        for (i, kind) in NodeKind::ALL.iter().enumerate() {
+            assert_eq!(kinds[i], kind.as_str(), "kind code {i}");
+            assert_eq!(*kind as u8 as usize, i, "discriminant must equal its index");
+        }
+
+        let markers = schema["markers"].as_array().unwrap();
+        assert_eq!(markers.len(), table.len(), "{version:?} marker count");
+        for (id, info) in table.iter() {
+            let entry = &markers[id.0 as usize];
+            assert_eq!(entry["name"], info.name, "{version:?} marker {}", id.0);
+            assert_eq!(entry["category"], info.category.as_str());
+            assert_eq!(entry["role"], info.text_role.as_str());
+            assert_eq!(entry["closing"], info.closing.as_str());
+            assert_eq!(entry["usx"], info.usx_element);
+            match info.deprecated {
+                Some(d) => assert_eq!(entry["deprecated"], d),
+                None => assert!(entry["deprecated"].is_null()),
+            }
+            // The index IS the id, so a host resolving by name lands on the same slot.
+            assert_eq!(table.lookup(info.name), Some(id), "lookup round-trip");
+        }
+    }
+}

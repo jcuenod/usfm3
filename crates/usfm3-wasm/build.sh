@@ -12,9 +12,10 @@ OUT="${1:-pkg}"
 
 wasm-pack build --release --target web --out-dir "$OUT" --out-name usfm3_wasm
 
-# Node wrapper + merge our package metadata (name, exports, files, …) into the
-# generated package.json.
-cp node.js "$OUT/node.js"
+# Hand-written JS/TS layer (the packed-tape view, the ergonomic entries, and the
+# authoritative types) + the Node wrapper, then merge our package metadata (name,
+# exports, files, …) into the generated package.json.
+cp node.js js/index.js js/api.js js/tape.js js/index.d.ts js/tape.d.ts CHANGELOG.md "$OUT/"
 node -e '
   const fs = require("fs");
   const out = process.argv[1];

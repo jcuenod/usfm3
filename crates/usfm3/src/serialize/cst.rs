@@ -8,6 +8,7 @@ use super::render::json_str;
 use crate::Document;
 use crate::cst::Cursor;
 use crate::diagnostic::Diagnostic;
+use crate::span::{OffsetMap, Offsets};
 
 impl Document<'_> {
     /// CST as JSON, for editor decoration (token spans, marker categories, tree
@@ -18,10 +19,22 @@ impl Document<'_> {
         s
     }
 
-    /// Diagnostics (errors + warnings) as a JSON array.
+    /// Diagnostics (errors + warnings) as a JSON array, with UTF-8 byte offsets.
+    ///
+    /// This is the Rust/CLI-facing form: offsets match [`crate::low_level::Span`] and
+    /// the rest of the crate. FFI bindings call [`Self::to_diagnostics_json_with`] with
+    /// their host's native space instead.
     pub fn to_diagnostics_json(&self) -> String {
+        self.to_diagnostics_json_with(Offsets::Utf8)
+    }
+
+    /// Diagnostics as a JSON array with `start`/`end`/`column` in the given space.
+    ///
+    /// `line` is space-independent. See [`Offsets`] for why a host wants this rather
+    /// than converting byte offsets itself.
+    pub fn to_diagnostics_json_with(&self, offsets: Offsets) -> String {
         let mut s = String::new();
-        let _ = write_diagnostics_json(self.diagnostics(), self.source(), &mut s);
+        let _ = write_diagnostics_json(self.diagnostics(), self.source(), offsets, &mut s);
         s
     }
 }
@@ -83,19 +96,32 @@ fn write_cst_node<W: Write>(c: Cursor<'_>, out: &mut W) -> fmt::Result {
 }
 
 /// Serialize diagnostics as a JSON array. Each entry carries `severity`, a stable
-/// `code`, the human `message`, the byte `start`/`end`, and 1-based `line`/`column`
-/// (resolved from the source) for editors that work in line/column space.
+/// `code`, the human `message`, `start`/`end`, and 1-based `line`/`column` for editors
+/// that work in line/column space. Offsets and `column` are in `offsets` space; `line`
+/// is space-independent.
+///
+/// One [`OffsetMap`] serves the whole array. That is the difference between O(len + N)
+/// and the O(N x len) this used to be: [`crate::low_level::Span::line_col`] rescans the
+/// prefix from byte 0 on every call, so 500 diagnostics on a book-sized document cost
+/// ~21 ms of pure re-scanning. The scanner is forward-only and relies on the
+/// `(span.start, span.end)` sort in `parse_with` for that amortization — but it
+/// restarts on a backwards query, so the output is correct even if that sort changes.
 fn write_diagnostics_json<W: Write>(
     diagnostics: &[Diagnostic],
     source: &str,
+    offsets: Offsets,
     out: &mut W,
 ) -> fmt::Result {
+    let mut map = OffsetMap::new(source, offsets);
     out.write_char('[')?;
     for (i, d) in diagnostics.iter().enumerate() {
         if i > 0 {
             out.write_char(',')?;
         }
-        let lc = d.span.line_col(source);
+        // `point_at` drives the scanner (starts are monotonic); the end is measured
+        // locally so a nested span cannot force a backwards restart.
+        let at = map.point_at(d.span.start);
+        let end = at.offset + map.span_len(d.span.start, d.span.end());
         write!(out, "{{\"severity\":\"{}\",\"code\":", d.severity.as_str())?;
         json_str(d.code.as_str(), out)?;
         out.write_str(",\"message\":")?;
@@ -103,10 +129,7 @@ fn write_diagnostics_json<W: Write>(
         write!(
             out,
             ",\"start\":{},\"end\":{},\"line\":{},\"column\":{}}}",
-            d.span.start,
-            d.span.end(),
-            lc.line,
-            lc.col
+            at.offset, end, at.line, at.col
         )?;
     }
     out.write_char(']')
