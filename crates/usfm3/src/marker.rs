@@ -192,6 +192,22 @@ impl MarkerTable {
     }
 }
 
+/// The attribute a marker's bare `|value` sets, per USFM 3.x: `\w gracious|grace\w*`
+/// is `lemma="grace"`. `None`: a bare value has no meaning on that marker, as in
+/// `\+pn name|keyword` (DefaultAttributeNotDefined).
+pub(crate) fn default_attribute(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "w" | "wa" | "wg" | "wh" => "lemma",
+        "rb" => "gloss",
+        "xt" => "href",
+        "ref" => "loc",
+        "jmp" => "link-href",
+        "periph" => "id",
+        m if m.starts_with("qt") => "who",
+        _ => return None,
+    })
+}
+
 /// Strip a trailing numeric level / column-range suffix: `q1`→`q`, `tcr1-2`→`tcr`,
 /// `tc3-4`→`tc`. Leaves names without such a suffix (and milestones like `qt-s`,
 /// which end in a letter) unchanged.

@@ -7,6 +7,7 @@ use std::borrow::Cow;
 use std::fmt::{self, Write};
 
 use crate::cst::Cursor;
+use crate::marker::default_attribute;
 use crate::tape::NodeKind;
 
 // --- JSON ------------------------------------------------------------------
@@ -138,7 +139,10 @@ pub(crate) fn collect_attributes<'a>(c: Cursor<'a>, marker: &str) -> Vec<(&'a st
             continue;
         }
         if !body.contains('=') {
-            pairs.push((default_attribute(marker), Cow::Borrowed(body)));
+            // The parser keeps a meaningless bare value as text; one that still
+            // arrives here (inside an escaped-quote region) keeps 0.2.1's name.
+            let key = default_attribute(marker).unwrap_or("default");
+            pairs.push((key, Cow::Borrowed(body)));
             continue;
         }
         let mut rest = body;
@@ -180,22 +184,6 @@ pub(crate) fn collect_attributes<'a>(c: Cursor<'a>, marker: &str) -> Vec<(&'a st
         }
     }
     pairs
-}
-
-/// The default (unnamed) attribute name for a marker, per USFM 3.x. A marker
-/// with no default (`\em|value\em*`) is malformed; the value is kept as
-/// `default`, and validation reports DefaultAttributeNotDefined.
-pub(crate) fn default_attribute(marker: &str) -> &'static str {
-    match marker {
-        "w" | "wa" | "wg" | "wh" => "lemma",
-        "rb" => "gloss",
-        "xt" => "href", // \xt text|GEN 1:1\xt* → href="GEN 1:1"
-        "ref" => "loc", // \ref text|GEN 1:1\ref* → {type:ref, loc:"GEN 1:1"}
-        "jmp" => "link-href",
-        "periph" => "id",
-        m if m.starts_with("qt") => "who", // \qt-s |Speaker\*
-        _ => "default",
-    }
 }
 
 /// Map a USFM attribute name to its USJ key. Figures store `src` as `file`.

@@ -121,6 +121,11 @@ These apply to every package.
   they can't merge into it. 0.2.1 wrote `BOOK :N` in vref and `BOOK 0:N` in sids.
 - Malformed attributes are parsed leniently instead of kept as text:
   `|lemma strong="l"` yields `strong="l"`, dropping the dangling word.
+- A `|` that doesn't read as an attribute list is text: in a table cell or footnote
+  text (no close of its own), or a bare value on a marker with no default attribute
+  (`\add one| two\add*`). 0.2.1 silently dropped the text after it. Where an
+  attribute list was attempted, DefaultAttributeNotDefined or InvalidAttributes
+  reports it.
 
 **USX**
 - No `<?xml?>` declaration; one top-level element per line with a two-space indent.

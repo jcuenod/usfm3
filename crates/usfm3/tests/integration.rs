@@ -1365,10 +1365,19 @@ fn malformed_attributes_parse_leniently_into_valid_names() {
     assert_eq!(words[0]["strong"], "l");
     assert!(words[0].get("lemma strong").is_none());
 
-    // A bare value on a marker with no default attribute keeps the value under
-    // `default` (0.2.1's name), not some other marker's default.
-    let usj = parse_usj("\\id GEN\n\\c 1\n\\p\n\\v 1 \\em text|value\\em*\n");
-    assert_eq!(collect_by_type(&usj, "char")[0]["default"], "value");
+    // A bare value on a marker with no default attribute is not an attribute:
+    // the `|` and the value stay as text, and the attempt is reported.
+    let src = "\\id GEN\n\\c 1\n\\p\n\\v 1 \\em text|value\\em*\n";
+    let usj = parse_usj(src);
+    let em = &collect_by_type(&usj, "char")[0];
+    assert_eq!(em["content"][0], "text|value");
+    assert!(em.get("default").is_none());
+    assert!(
+        parse_with_diagnostics(src)
+            .diagnostics()
+            .iter()
+            .any(|d| d.code == DiagnosticCode::DefaultAttributeNotDefined)
+    );
 }
 
 #[test]
@@ -1478,4 +1487,78 @@ fn unknown_markers_become_paragraphs_or_chars() {
             ))
     );
     assert_eq!(vref_text(&parse_vref(src), "GEN 1:1"), Some("A b."));
+}
+
+// --- a `|` is attribute syntax only where it reads as one -------------------
+// Ported from jcuenod/usfm3#9 (samueldotj): an Assamese translation separates
+// sentences with `|`, and text after a stray pipe used to vanish silently.
+
+#[test]
+fn a_pipe_in_paragraph_text_is_not_an_attribute_block() {
+    let rows = parse_vref("\\id GEN\n\\c 1\n\\p\n\\v 1 before| after more words");
+    assert_eq!(
+        vref_text(&rows, "GEN 1:1"),
+        Some("before| after more words")
+    );
+    let rows = parse_vref("\\id GEN\n\\c 1\n\\p\n\\v 1 a sentence|");
+    assert_eq!(vref_text(&rows, "GEN 1:1"), Some("a sentence|"));
+    let rows = parse_vref("\\id GEN\n\\c 1\n\\p\n\\v 1 one| two \\add three\\add* four");
+    assert_eq!(vref_text(&rows, "GEN 1:1"), Some("one| two three four"));
+}
+
+#[test]
+fn a_pipe_in_a_table_cell_or_note_text_is_kept() {
+    // Neither has a close of its own for an attribute list to run up to.
+    let usj = parse_usj("\\id GEN\n\\c 1\n\\tr \\tc1 first| second \\tc2 third");
+    let cells = collect_by_type(&usj, "table:cell");
+    assert_eq!(cells[0]["content"][0], "first| second ");
+    assert_eq!(cells[1]["content"][0], "third");
+
+    let usj = parse_usj("\\id GEN\n\\c 1\n\\p\n\\v 1 a\\f + \\ft note| more\\f* b.");
+    let ft = &collect_by_type(&usj, "char")[0];
+    assert_eq!(ft["content"][0], "note| more");
+}
+
+#[test]
+fn a_pipe_before_a_close_is_text_unless_it_reads_as_attributes() {
+    // `\add` has no default attribute, so a bare value is text — and reported.
+    let src = "\\id GEN\n\\c 1\n\\p\n\\v 1 \\add one| two\\add* three.";
+    assert_eq!(
+        vref_text(&parse_vref(src), "GEN 1:1"),
+        Some("one| two three.")
+    );
+    assert!(
+        parse_with_diagnostics(src)
+            .diagnostics()
+            .iter()
+            .any(|d| d.code == DiagnosticCode::DefaultAttributeNotDefined)
+    );
+
+    // An empty list is text too, reported as invalid attributes.
+    let src = "\\id GEN\n\\c 1\n\\p\n\\v 1 \\nd Lord|\\nd* said.";
+    assert_eq!(vref_text(&parse_vref(src), "GEN 1:1"), Some("Lord| said."));
+    assert!(
+        parse_with_diagnostics(src)
+            .diagnostics()
+            .iter()
+            .any(|d| d.code == DiagnosticCode::InvalidAttributes)
+    );
+
+    // Named attributes are attributes on any character marker (custom `x-…`).
+    let usj = parse_usj("\\id GEN\n\\c 1\n\\p\n\\v 1 \\add one|x-note=\"n\"\\add* two.");
+    let add = &collect_by_type(&usj, "char")[0];
+    assert_eq!(add["x-note"], "n");
+    assert_eq!(add["content"][0], "one");
+}
+
+#[test]
+fn a_pipe_inside_a_character_marker_is_still_an_attribute_block() {
+    let src = "\\id GEN\n\\c 1\n\\p\n\\v 1 \\w beginning|lemma=\"H7225\"\\w* \\+w now|H6258\\+w*";
+    let usj = parse_usj(src);
+    let words = collect_by_type(&usj, "char");
+    assert_eq!(words[0]["lemma"], "H7225");
+    // `\w` has a default attribute, so a bare value is one (nested close too).
+    assert_eq!(words[1]["lemma"], "H6258");
+    let text = vref_text(&parse_vref(src), "GEN 1:1").unwrap().to_string();
+    assert!(!text.contains('|') && !text.contains("H7"), "{text:?}");
 }

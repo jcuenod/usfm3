@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use crate::cst::Cursor;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
-use crate::marker::{Category, TextRole};
+use crate::marker::{Category, TextRole, default_attribute};
 use crate::serialize::vref::BookId;
 use crate::span::Span;
 use crate::tape::NodeKind;
@@ -333,16 +333,6 @@ fn word_marker_is_empty(w: Cursor<'_>) -> bool {
     })
 }
 
-/// Whether a marker defines a *default* (unnamed) attribute — the value allowed
-/// after a bare `|` (e.g. `\w word|lemma\w*`). A bare default on a marker NOT in
-/// this set is invalid (`DefaultAttributeNotDefined`), e.g. `\+pn name|keyword`.
-fn defines_default_attribute(marker: &str) -> bool {
-    matches!(
-        marker,
-        "w" | "wa" | "wg" | "wh" | "rb" | "xt" | "ref" | "jmp"
-    ) || marker.starts_with("qt")
-}
-
 /// Attributes a marker must carry (named, or supplied as the `|default`).
 fn required_attributes(marker: &str) -> &'static [&'static str] {
     match marker {
@@ -440,7 +430,7 @@ fn validate_attributes(c: Cursor<'_>, marker: &str, diags: &mut Vec<Diagnostic>)
         // only if the marker actually defines one (e.g. `\w word|lemma`, not
         // `\+pn name|keyword`).
         if !body.contains('=') {
-            if !defines_default_attribute(marker) {
+            if default_attribute(marker).is_none() {
                 diags.push(Diagnostic::error(
                     DiagnosticCode::DefaultAttributeNotDefined,
                     span,

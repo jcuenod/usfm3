@@ -11,7 +11,7 @@
 //! chapter/verse, the trailing number token); everything else is `Text`.
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
-use crate::marker::{Category, Closing, MarkerId, MarkerTable, TextRole};
+use crate::marker::{Category, Closing, MarkerId, MarkerTable, TextRole, default_attribute};
 use crate::span::Span;
 use crate::tape::{Node, NodeKind, Tape, flags};
 
@@ -132,15 +132,12 @@ impl<'a> Builder<'a> {
     // --- emission helpers --------------------------------------------------
 
     /// Emit text in `[from, to)`, splitting off a trailing `|attributes` segment
-    /// when we are inside a marker that carries attributes (character or milestone).
+    /// when it is one (see [`Self::attribute_start`]).
     fn emit_text(&mut self, from: usize, to: usize) {
         if from >= to {
             return;
         }
-        if self.top_takes_attributes()
-            && let Some(rel) = memchr::memchr(b'|', &self.bytes[from..to])
-        {
-            let bar = from + rel;
+        if let Some(bar) = self.attribute_start(from, to) {
             self.push_leaf(
                 NodeKind::Text,
                 Span::new(from as u32, (bar - from) as u32),
@@ -161,6 +158,58 @@ impl<'a> Builder<'a> {
             Span::new(from as u32, (to - from) as u32),
             MarkerId::UNKNOWN,
         );
+    }
+
+    /// Where the text `[from, to)` turns into a `|…` attribute list, if it does.
+    ///
+    /// The spec lets any character marker or milestone carry attributes, but it
+    /// never reserves `|` in text, and translations do use it (one corpus file
+    /// separates sentences with it). So a `|` starts attributes only when it reads
+    /// as them: the list runs straight to the marker's own close (`…|lemma="x"\w*`,
+    /// `…|who="x"\*`), and it holds `key="value"` pairs, a bare value for a marker
+    /// with a default attribute, or `\fig`'s deprecated positional fields. A table
+    /// cell or footnote text, which has no close of its own, or
+    /// `\add one| two\add*`, keeps its `|` as text.
+    fn attribute_start(&mut self, from: usize, to: usize) -> Option<usize> {
+        let bar = from + memchr::memchr(b'|', &self.bytes[from..to])?;
+        let top = *self.stack.last()?;
+        let info = self.table.info(self.nodes[top as usize].marker)?;
+        let at_close = match info.category {
+            Category::Milestone => self.bytes[to..].starts_with(b"\\*"),
+            Category::Character => self.closes_at(top, to),
+            // `\periph Title|id="title"`: its attributes end the line, not a close.
+            _ => info.usx_element == "periph",
+        };
+        if !at_close {
+            return None;
+        }
+        let name = info.name;
+        if memchr::memchr(b'=', &self.bytes[bar + 1..to]).is_some() || name == "fig" {
+            return Some(bar);
+        }
+        let body = self.src[bar + 1..to].trim();
+        if !body.is_empty() && default_attribute(name).is_some() {
+            return Some(bar);
+        }
+        // Where an attribute list belongs but this one means nothing: keep it as
+        // text, and report the attempt.
+        let span = Span::new(bar as u32, (to - bar) as u32);
+        self.report(|| {
+            if body.is_empty() {
+                Diagnostic::error(
+                    DiagnosticCode::InvalidAttributes,
+                    span,
+                    "empty attribute list after `|`; kept as text",
+                )
+            } else {
+                Diagnostic::error(
+                    DiagnosticCode::DefaultAttributeNotDefined,
+                    span,
+                    format!("\\{name} has no default attribute; the `|` is kept as text"),
+                )
+            }
+        });
+        None
     }
 
     fn push_leaf(&mut self, kind: NodeKind, span: Span, marker: MarkerId) -> u32 {
@@ -265,12 +314,23 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// The tag of the open marker at `idx`, as written (`\+zfoo` → `zfoo`).
+    /// The tag of the open marker at `idx`, as written (`\+zfoo` → `zfoo`). The
+    /// open token's span ends with its tag.
     fn open_name(&self, idx: u32) -> &str {
         let span = self.nodes[idx as usize].span();
-        let s = &self.src[span.range()];
-        let s = s.strip_prefix('\\').unwrap_or(s);
-        s.strip_prefix('+').unwrap_or(s).trim_end()
+        let s = &self.src[span.start as usize + 1..span.end() as usize];
+        s.strip_prefix('+').unwrap_or(s)
+    }
+
+    /// Whether the close of the open marker at `idx` (`\w*`, `\+w*`) starts at `at`.
+    fn closes_at(&self, idx: u32, at: usize) -> bool {
+        let Some(close) = self.bytes[at..].strip_prefix(b"\\") else {
+            return false;
+        };
+        let close = close.strip_prefix(b"+").unwrap_or(close);
+        close
+            .strip_prefix(self.open_name(idx).as_bytes())
+            .is_some_and(|rest| rest.first() == Some(&b'*'))
     }
 
     /// Whether a note or character marker is open, so a new block can't start
