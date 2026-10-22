@@ -8,6 +8,11 @@ A single `parse()` produces a flat tape; every output (USJ, USX, USFM, CST, vref
 diagnostics) is a cheap view over it. There is no separate token/AST/source-map
 stage — the handle below is all you need.
 
+> **Coming from 0.2?** 0.3 is a rewrite: `tokenize`, `parseAst`, `ast()`,
+> `sourceMap()` and `toUsj({ spans })` are gone, diagnostics are flat (`start`/`end`
+> instead of `span`), and the CST has a new shape. See
+> [CHANGELOG.md](CHANGELOG.md#migrating-from-02).
+
 ## Installation
 
 ```sh
@@ -110,9 +115,8 @@ buffer). `nodes()` yields independent cursors when you need to spread or retain 
 - Diagnostics carry `severity` (`"error" | "warning" | "info"`), a stable `code`, a
   human `message`, `start`/`end`, and 1-based `line`/`column`.
 - **Offsets are UTF-16 code units** for `diagnostics()` and `tape()`, so they index a
-  JS string directly. This changed in 0.3.0 — they used to be UTF-8 bytes, and a
-  consumer that converts from bytes must stop doing so or pass `{ offsets: "utf8" }`.
-  See CHANGELOG.md. `cst()` is unchanged and still reports byte offsets.
+  JS string directly. Pass `{ offsets: "utf8" }` for bytes or `"chars"` for code
+  points. `cst()` reports UTF-8 byte offsets.
 - `TapeCursor.text` / `.markerName` / `.toJSON()` throw on a tape built with
   non-host offsets over a non-ASCII source, rather than returning wrong characters.
   `Tape#sliceable` reports that up front; `start`/`end`/`kind`/`marker` are always safe.

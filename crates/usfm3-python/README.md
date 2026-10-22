@@ -7,6 +7,10 @@ A single `parse()` produces a flat tape; every output (USJ, USX, USFM, CST, vref
 diagnostics) is a cheap view over it. There is no separate token/AST/source-map
 stage — the handle below is all you need.
 
+> **Coming from 0.2?** 0.3 is a rewrite: `tokenize`, `parse_ast`, `ast()` and
+> `source_map()` are gone, `diagnostics` is now a method with a flat result, and the CST
+> has a new shape. See [CHANGELOG.md](CHANGELOG.md#migrating-from-02).
+
 ## Installation
 
 ```bash
@@ -27,7 +31,7 @@ usx = doc.to_usx()       # str (XML)
 usfm = doc.to_usfm()     # str (normalized USFM)
 vref = doc.to_vref()     # { "GEN 1:1": "In the beginning…", ... }
 cst = doc.cst()          # dict (concrete syntax tree, for editors)
-diags = doc.diagnostics  # list (empty unless diagnostics=True)
+diags = doc.diagnostics()  # list (empty unless diagnostics=True)
 
 # One-shot convenience:
 cst = usfm3.parse_cst(text)
@@ -56,9 +60,8 @@ One-shot: parse and return the concrete syntax tree.
   order. Empty verses are dropped and duplicate references merged, so it is a
   faithful dictionary.
 - `diagnostics(*, offsets="chars") -> list[dict]` — flat list of diagnostics. Empty
-  unless `diagnostics=True` was passed. **In 0.3.0 this became a method** (to carry
-  `offsets`) and its offsets became code points; `offsets="utf8"` restores the old
-  byte values. See CHANGELOG.md.
+  unless `diagnostics=True` was passed. `offsets` is `"chars"` (code points, the
+  default), `"utf16"` or `"utf8"` (bytes).
 - `tape(*, offsets="chars") -> bytes` — the flat tape packed as little-endian
   `uint32`s: an 8-word header, then 4 words per node. The numeric/vectorized view
   (`numpy.frombuffer(doc.tape(), dtype="<u4")`); for ordinary traversal use `cst()`.
@@ -71,7 +74,7 @@ marker tables needed to resolve the ids in a packed tape. The array index *is* t
 - Diagnostics carry `severity` (`"error" | "warning" | "info"`), a stable `code`,
   a human `message`, `start`/`end`, and 1-based `line`/`column`.
 - **Offsets are code points** for `diagnostics()` and `tape()`, so
-  `src[d["start"]:d["end"]]` is correct. `cst()` is unchanged and reports bytes.
+  `src[d["start"]:d["end"]]` is correct. `cst()` reports UTF-8 byte offsets.
 - vref text is version-correct: notes are excluded, character-marker tags are
   dropped (inner text kept), whitespace is collapsed.
 

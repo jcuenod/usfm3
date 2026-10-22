@@ -17,7 +17,7 @@
 //! — on a book-sized document that is megabytes of text and tens of thousands of
 //! objects, per call. For an editor reparsing on every keystroke that dominates, so
 //! [`ParsedDocument::tape`] hands over the tape as a packed `Uint32Array` instead and
-//! `js/tape.js` walks it with shifts. `cst()` is unchanged and still available.
+//! `js/tape.js` walks it with shifts. `cst()` remains available.
 //!
 //! Offsets crossing this boundary are **UTF-16 code units** by default, because that
 //! is what indexes a JS string. Byte offsets would make `source.slice(start, end)`

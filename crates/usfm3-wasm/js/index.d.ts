@@ -96,7 +96,7 @@ export interface CstNode {
   closing?: string;
   number?: number;
   /** UTF-8 **byte** offsets into the source. Unlike {@link Diagnostic} and
-   *  {@link TapeCursor}, `cst()` is unchanged and always reports bytes. */
+   *  {@link TapeCursor}, `cst()` always reports bytes. */
   start: number;
   end: number;
   synthetic?: boolean;
