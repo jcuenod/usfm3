@@ -154,6 +154,20 @@ impl<'src> Document<'src> {
         self.diagnostics.append(&mut extra);
     }
 
+    /// The chapter that verses before the first `\c` belong to. With no `\c` at all
+    /// it is 1: a one-chapter book written without `\c 1` (the reference USX makes
+    /// the same assumption). Otherwise 0, so stray verses ahead of a real `\c 1`
+    /// can't merge into it. Either way the missing chapter is reported as a
+    /// diagnostic.
+    pub(crate) fn implicit_chapter(&self) -> u16 {
+        let has_chapter = self
+            .tape
+            .nodes
+            .iter()
+            .any(|n| n.kind == tape::NodeKind::Chapter);
+        if has_chapter { 0 } else { 1 }
+    }
+
     /// A cursor at the document root for CST traversal / typed-AST construction.
     pub fn cursor(&self) -> Cursor<'_> {
         Cursor::new(&self.tape, self.source, self.table, 0)

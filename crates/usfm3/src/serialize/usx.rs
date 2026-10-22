@@ -21,7 +21,7 @@ impl Document<'_> {
     /// Serialize to USX (XML).
     pub fn to_usx(&self) -> String {
         let mut s = String::new();
-        let _ = write_usx(self.cursor(), &mut s);
+        let _ = write_usx(self.cursor(), self.implicit_chapter(), &mut s);
         s
     }
 }
@@ -50,9 +50,12 @@ impl UsxState {
     }
 }
 
-fn write_usx<W: Write>(root: Cursor<'_>, out: &mut W) -> fmt::Result {
+fn write_usx<W: Write>(root: Cursor<'_>, implicit_chapter: u16, out: &mut W) -> fmt::Result {
     out.write_str("<usx version=\"3.0\">")?;
-    let mut st = UsxState::default();
+    let mut st = UsxState {
+        chapter_num: implicit_chapter.to_string(),
+        ..UsxState::default()
+    };
     let children: Vec<_> = root.children().collect();
     usx_blocks(&children, 1, out, &mut st)?;
     st.close_verse(out)?;

@@ -289,7 +289,8 @@ impl<'src> Document<'src> {
         let nodes = &self.tape().nodes;
         let mut book = BookId::UNKNOWN;
         let mut book_code: &'src str = "???";
-        let mut chapter: u16 = 0;
+        // `None` until the first `\c`; a verse before it resolves the implicit one.
+        let mut chapter: Option<u16> = None;
         let mut expect_book = false;
         let mut pending: Option<Pending<'src>> = None;
 
@@ -338,10 +339,11 @@ impl<'src> Document<'src> {
                 }
                 NodeKind::Chapter => {
                     flush(&mut pending, node.start as usize, &mut f);
-                    chapter = node.link as u16; // number packed in `link`
+                    chapter = Some(node.link as u16); // number packed in `link`
                 }
                 NodeKind::Verse => {
                     flush(&mut pending, node.start as usize, &mut f);
+                    let chapter = *chapter.get_or_insert_with(|| self.implicit_chapter());
                     let reference = VerseRef::new(book, chapter, node.link as u16);
                     let span_text = node.span().text(self.source());
                     let label = span_text.split_whitespace().nth(1).unwrap_or_else(|| {

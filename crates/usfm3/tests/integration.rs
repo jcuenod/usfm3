@@ -1392,3 +1392,39 @@ fn non_ascii_spaces_are_text_and_tilde_is_a_no_break_space() {
         "«\u{a0}Bonjour\u{a0}» 東京\u{3000}駅 10\u{a0}000 longword."
     );
 }
+
+#[test]
+fn verses_before_any_chapter_get_a_consistent_implicit_chapter() {
+    // No `\c` at all: a one-chapter book missing `\c 1` → chapter 1, everywhere.
+    let src = "\\id PHM\n\\p\n\\v 1 One.\n";
+    assert_eq!(vref_text(&parse_vref(src), "PHM 1:1"), Some("One."));
+    assert_eq!(
+        collect_by_type(&parse_usj(src), "verse")[0]["sid"],
+        "PHM 1:1"
+    );
+    assert!(parse(src).to_usx().contains("sid=\"PHM 1:1\""));
+    assert!(
+        parse_with_diagnostics(src)
+            .diagnostics()
+            .iter()
+            .any(|d| d.code == DiagnosticCode::MissingChapterMarker)
+    );
+
+    // Stray verses ahead of a real `\c 1` → chapter 0, so they don't merge into it.
+    let src = "\\id GEN\n\\p\n\\v 1 Stray.\n\\c 1\n\\p\n\\v 1 Real.\n";
+    let rows = parse_vref(src);
+    assert_eq!(vref_text(&rows, "GEN 0:1"), Some("Stray."));
+    assert_eq!(vref_text(&rows, "GEN 1:1"), Some("Real."));
+    let sids: Vec<_> = collect_by_type(&parse_usj(src), "verse")
+        .iter()
+        .map(|v| v["sid"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(sids, ["GEN 0:1", "GEN 1:1"]);
+    assert!(parse(src).to_usx().contains("sid=\"GEN 0:1\""));
+    assert!(
+        parse_with_diagnostics(src)
+            .diagnostics()
+            .iter()
+            .any(|d| d.code == DiagnosticCode::BodyParagraphBeforeChapter)
+    );
+}

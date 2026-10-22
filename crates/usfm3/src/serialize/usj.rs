@@ -22,7 +22,7 @@ impl Document<'_> {
     /// Serialize to USJ (JSON).
     pub fn to_usj(&self) -> String {
         let mut s = String::new();
-        let _ = write_usj(self.cursor(), &mut s);
+        let _ = write_usj(self.cursor(), self.implicit_chapter(), &mut s);
         s
     }
 }
@@ -34,8 +34,11 @@ struct Ctx {
     chapter: String, // current chapter number, e.g. "1"
 }
 
-fn write_usj<W: Write>(root: Cursor<'_>, out: &mut W) -> fmt::Result {
-    let mut ctx = Ctx::default();
+fn write_usj<W: Write>(root: Cursor<'_>, implicit_chapter: u16, out: &mut W) -> fmt::Result {
+    let mut ctx = Ctx {
+        chapter: implicit_chapter.to_string(),
+        ..Ctx::default()
+    };
     out.write_str("{\"type\":\"USJ\",\"version\":\"3.1\",\"content\":")?;
     write_content(root, out, &mut ctx)?;
     out.write_char('}')
