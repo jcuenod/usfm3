@@ -476,6 +476,19 @@ impl<'a> Builder<'a> {
             return j;
         }
 
+        // A milestone is always empty (`\zaln-s |…\*`), so one still open when the
+        // next marker starts never got its `\*` — as in usfm-js "oldformat"
+        // alignment. Close it here rather than let it swallow what follows.
+        if let Some(&top) = self.stack.last()
+            && self
+                .table
+                .info(self.nodes[top as usize].marker)
+                .map(|m| m.category)
+                == Some(Category::Milestone)
+        {
+            self.close_blocks_down_to(self.stack.len() - 1, b, Some(tag));
+        }
+
         let id = self.table.lookup(tag);
 
         if is_close {

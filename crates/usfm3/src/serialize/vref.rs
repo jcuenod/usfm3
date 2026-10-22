@@ -374,7 +374,10 @@ impl VerseBody {
         // non-space character should turn into a single separator? This is what
         // keeps a marker boundary with no surrounding whitespace (e.g. a footnote
         // wedged between `.` and `”`) from inserting a spurious space.
-        let mut pending_space = false;
+        let mut pending_space = Gap::None;
+        // Set by an inline marker: the one space that delimits `\pn ` from its
+        // content is syntax, not text, so it must not become a separator.
+        let mut at_delimiter = false;
         while i < nodes.len() {
             let node = &nodes[i];
             if node.start as usize >= self.boundary {
@@ -382,12 +385,14 @@ impl VerseBody {
             }
             match node.kind {
                 NodeKind::Text => {
-                    push_collapsed(
-                        node.span().text(doc.source()),
-                        buf,
-                        start_len,
-                        &mut pending_space,
-                    );
+                    let mut text = node.span().text(doc.source());
+                    if at_delimiter {
+                        at_delimiter = false;
+                        if let Some(c) = text.chars().next().filter(|c| c.is_whitespace()) {
+                            text = &text[c.len_utf8()..];
+                        }
+                    }
+                    push_collapsed(text, buf, start_len, &mut pending_space);
                     i += 1;
                 }
                 NodeKind::MarkerOpen => {
@@ -395,10 +400,16 @@ impl VerseBody {
                         Some(TextRole::Excluded) => {
                             i = (node.link as usize) + 1; // skip subtree
                         }
-                        // Content/Boundary markers contribute no characters of their
-                        // own; spacing is decided purely by the source whitespace
-                        // around them, handled in `push_collapsed`.
-                        _ => i += 1,
+                        // Markers contribute no characters of their own; spacing comes
+                        // from the source whitespace around them (`push_collapsed`).
+                        // A paragraph boundary always sits on whitespace, so only
+                        // inline (and unknown) markers need their delimiter dropped:
+                        // `王后\pn 以斯帖\pn*` reads `王后以斯帖`, not `王后 以斯帖`.
+                        Some(TextRole::Boundary) => i += 1,
+                        _ => {
+                            at_delimiter = true;
+                            i += 1;
+                        }
                     }
                 }
                 _ => i += 1,
@@ -407,23 +418,85 @@ impl VerseBody {
     }
 }
 
+/// Whitespace seen since the last character written, carried across nodes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Gap {
+    None,
+    /// Only line breaks: layout, as in aligned USFM's one-word-per-line form.
+    LineBreak,
+    /// At least one space or tab: a word break the author typed.
+    Space,
+}
+
 /// Append `s` to `buf`, collapsing each run of whitespace to at most one space.
 /// A separator is emitted only before a non-space character that follows
 /// whitespace *and* only when the verse already has content — so leading and
 /// trailing whitespace are dropped, and adjacent characters split solely by a
-/// (dropped) marker stay adjacent. `verse_start` marks where this verse began in
-/// the shared arena; `pending_space` carries the "saw whitespace" state across
-/// the node boundary.
-fn push_collapsed(s: &str, buf: &mut String, verse_start: usize, pending_space: &mut bool) {
+/// (dropped) marker stay adjacent. A gap of line breaks alone is not emitted
+/// before punctuation that attaches to the preceding word, so
+/// `\w Paul\w*⏎\zaln-e\*,` reads `Paul,` rather than `Paul ,`. `verse_start`
+/// marks where this verse began in the shared arena; `gap` carries the
+/// whitespace state across the node boundary.
+fn push_collapsed(s: &str, buf: &mut String, verse_start: usize, gap: &mut Gap) {
     for ch in s.chars() {
         if ch.is_whitespace() {
-            *pending_space = true;
+            if ch != '\n' && ch != '\r' {
+                *gap = Gap::Space;
+            } else if *gap == Gap::None {
+                *gap = Gap::LineBreak;
+            }
         } else {
-            if *pending_space && buf.len() > verse_start {
+            let separate = match *gap {
+                Gap::None => false,
+                Gap::LineBreak => !attaches_left(ch),
+                Gap::Space => true,
+            };
+            if separate && buf.len() > verse_start {
                 buf.push(' ');
             }
-            *pending_space = false;
+            *gap = Gap::None;
             buf.push(ch);
         }
     }
+}
+
+/// Punctuation that closes or trails the word before it. Straight quotes are
+/// left out: they open as often as they close.
+fn attaches_left(ch: char) -> bool {
+    matches!(
+        ch,
+        ',' | '.'
+            | ';'
+            | ':'
+            | '!'
+            | '?'
+            | ')'
+            | ']'
+            | '}'
+            | '…'
+            | '”'
+            | '’'
+            | '»'
+            | '›'
+            | '、'
+            | '。'
+            | '，'
+            | '．'
+            | '：'
+            | '；'
+            | '！'
+            | '？'
+            | '）'
+            | '」'
+            | '』'
+            | '】'
+            | '》'
+            | '〉'
+            | '،'
+            | '؛'
+            | '؟'
+            | '۔'
+            | '।'
+            | '॥'
+    )
 }

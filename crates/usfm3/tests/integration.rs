@@ -1170,3 +1170,60 @@ fn schema_json_indices_match_marker_ids() {
         }
     }
 }
+
+// --- regressions against 0.2.1 ---------------------------------------------
+
+#[test]
+fn vref_inline_marker_delimiter_is_not_a_word_break() {
+    let rows = parse_vref(
+        "\\id EST\n\\c 2\n\\p\n\\v 1 王后\\pn 以斯帖\\pn*說\n\\v 2 G\\sc od\\sc* and \\nd Lord\\nd*.\n",
+    );
+    assert_eq!(vref_text(&rows, "EST 2:1"), Some("王后以斯帖說"));
+    // A space the author typed before the marker is still a word break.
+    assert_eq!(vref_text(&rows, "EST 2:2"), Some("God and Lord."));
+}
+
+#[test]
+fn vref_line_break_before_trailing_punctuation_is_layout() {
+    // Aligned USFM puts one word per line; a line break before punctuation that
+    // attaches leftward is layout, not a word break.
+    let rows = parse_vref(concat!(
+        "\\id TIT\n\\c 1\n\\p\n\\v 1\n",
+        "\\zaln-s |x-strong=\"G39720\"\\*\\w Paul|x-occurrence=\"1\"\\w*\n",
+        "\\zaln-e\\*,\n",
+        "\\zaln-s |x-strong=\"G14010\"\\*\\w a|x-occurrence=\"1\"\\w*\n",
+        "\\w servant|x-occurrence=\"1\"\\w*\n",
+        "\\zaln-e\\*.\n",
+    ));
+    assert_eq!(vref_text(&rows, "TIT 1:1"), Some("Paul, a servant."));
+}
+
+#[test]
+fn unclosed_milestone_does_not_swallow_following_content() {
+    // usfm-js "oldformat": `\zaln-s` without its `\*`.
+    let src = concat!(
+        "\\id TIT\n\\c 1\n\\p\n\\v 1\n",
+        "\\zaln-s | x-strong=\"G39720\" x-content=\"Παῦλος\"\n",
+        "\\w Paul|x-occurrence=\"1\"\\w*\n",
+        "\\zaln-e\\*, a servant.\n",
+        "\\v 2 Next.\n",
+    );
+    let rows = parse_vref(src);
+    assert_eq!(vref_text(&rows, "TIT 1:1"), Some("Paul, a servant."));
+    assert_eq!(vref_text(&rows, "TIT 1:2"), Some("Next."));
+
+    let usj = parse_usj(src);
+    let words = collect_by_type(&usj, "char");
+    assert!(
+        words.iter().any(|w| w["content"][0] == "Paul"),
+        "the \\w after an unclosed milestone must survive in USJ: {usj}"
+    );
+
+    let doc = parse_with_diagnostics(src);
+    assert!(
+        doc.diagnostics()
+            .iter()
+            .any(|d| d.code == DiagnosticCode::MissingMilestoneSelfClose),
+        "the missing \\* is still reported"
+    );
+}
