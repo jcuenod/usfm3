@@ -108,6 +108,13 @@ fn compare_usj(case: &Case) -> Result<(), String> {
         serde_json::from_str(&ours).map_err(|e| format!("our USJ is invalid JSON: {e}\n{ours}"))?;
     let expected = std::fs::read_to_string(&case.json).map_err(|e| e.to_string())?;
     let mut expected: Value = serde_json::from_str(&expected).map_err(|e| e.to_string())?;
+    // The top-level `version` is the spec version the reference generator targets
+    // (upstream moved to "3.1.2"), not document content.
+    for usj in [&mut ours, &mut expected] {
+        if let Value::Object(top) = usj {
+            top.remove("version");
+        }
+    }
     normalize(&mut ours);
     normalize(&mut expected);
     if ours == expected {

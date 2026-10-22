@@ -1,0 +1,13 @@
+{
+  // Type-checks the hand-written declarations shipped in the npm package
+  // (run after build.sh): `npx -p typescript@5 tsc -p crates/usfm3-wasm`.
+  "compilerOptions": {
+    "noEmit": true,
+    "strict": true,
+    "target": "es2022",
+    "lib": ["es2022", "dom"],
+    // Only our declarations: no ambient @types from any parent node_modules.
+    "types": []
+  },
+  "files": ["pkg/index.d.ts", "pkg/tape.d.ts"]
+}

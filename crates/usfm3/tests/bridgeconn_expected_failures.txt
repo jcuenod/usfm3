@@ -28,3 +28,20 @@ bugfixes/empty-table-cell
 # spec does not forbid an empty quoted value, so lemma="" is well-formed; we
 # keep it as an attribute and flag it only as a lint. Our output is correct.
 special-cases/empty-attributes
+
+# ==================== USFM 3.1.2 / 3.2 FEATURES NOT YET IMPLEMENTED =========
+# (added upstream after the 3.1 snapshot; each needs marker-table and
+# serializer work, not a bug fix)
+
+# \tl gains a default attribute, lang (3.1.2): `\tl …|Aramic\tl*`.
+bugfixes/attrib-for-tl
+# \z… user markers in milestone form (`\z-extra …\*`) as `ms` nodes.
+bugfixes/custom_markers
+# list start/end markers and list objects in USX/USJ (3.2).
+bugfixes/list_milestones
+# new character marker \ta with an a-identifier attribute (3.2).
+bugfixes/new-marker-ta
+# new character marker \wl with a lang attribute (3.2).
+bugfixes/new-marker-wl
+# new \vid milestone, which becomes attributes in USX/USJ (3.2).
+bugfixes/new-vid-milestone

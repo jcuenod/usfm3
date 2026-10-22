@@ -59,15 +59,15 @@ usfm3 diagnostics file.usfm
 ## Development
 
 The conformance tests use the [BridgeConn usfm-grammar](https://github.com/Bridgeconn/usfm-grammar)
-corpus, which is not vendored:
+corpus, which is not vendored. `scripts/fetch-fixtures.sh` fetches it at the commit CI
+pins:
 
 ```sh
-git clone --depth 1 https://github.com/Bridgeconn/usfm-grammar.git /tmp/usfm-grammar
-mkdir -p crates/usfm3/tests/fixtures/usfm-grammar
-cp -r /tmp/usfm-grammar/tests/* crates/usfm3/tests/fixtures/usfm-grammar/
+scripts/fetch-fixtures.sh
 
 cargo test --workspace
 crates/usfm3-wasm/build.sh && node --test 'crates/usfm3-wasm/test/*.test.mjs'
+npx -p typescript@5 tsc -p crates/usfm3-wasm   # checks the shipped .d.ts
 ```
 
 CI enforces `cargo fmt --check` and `cargo clippy --workspace --all-targets -- -D warnings`.

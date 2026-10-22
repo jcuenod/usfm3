@@ -62,10 +62,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-test-
 
       - name: Fetch BridgeConn test fixtures
-        run: |
-          git clone --depth 1 https://github.com/Bridgeconn/usfm-grammar.git /tmp/usfm-grammar
-          mkdir -p crates/usfm3/tests/fixtures/usfm-grammar
-          cp -r /tmp/usfm-grammar/tests/* crates/usfm3/tests/fixtures/usfm-grammar/
+        run: scripts/fetch-fixtures.sh
 
       - name: Run tests
         run: cargo test --workspace
@@ -102,16 +99,13 @@ jobs:
         run: crates/usfm3-wasm/build.sh
 
       - name: Fetch BridgeConn test fixtures
-        run: |
-          git clone --depth 1 https://github.com/Bridgeconn/usfm-grammar.git /tmp/usfm-grammar
-          mkdir -p crates/usfm3/tests/fixtures/usfm-grammar
-          cp -r /tmp/usfm-grammar/tests/* crates/usfm3/tests/fixtures/usfm-grammar/
+        run: scripts/fetch-fixtures.sh
 
       - name: JS tests
         run: node --test 'crates/usfm3-wasm/test/*.test.mjs'
 
       - name: Type check declarations
-        run: npx -y -p typescript@5 tsc --noEmit --strict crates/usfm3-wasm/pkg/index.d.ts crates/usfm3-wasm/pkg/tape.d.ts
+        run: npx -y -p typescript@5 tsc -p crates/usfm3-wasm
 
   python:
     name: Python Wheel Smoke Test
