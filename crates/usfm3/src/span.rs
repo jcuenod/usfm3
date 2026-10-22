@@ -38,7 +38,7 @@ impl Span {
 
     /// Zero-copy slice of the source this span points at.
     #[inline]
-    pub fn text<'s>(self, source: &'s str) -> &'s str {
+    pub fn text(self, source: &str) -> &str {
         &source[self.range()]
     }
 
@@ -342,12 +342,40 @@ mod tests {
     #[test]
     fn line_and_column_are_counted_in_the_requested_space() {
         let mut map = OffsetMap::new(MIXED, Offsets::Utf16);
-        assert_eq!(map.point_at(0), Point { offset: 0, line: 1, col: 1 });
-        assert_eq!(map.point_at(2), Point { offset: 2, line: 2, col: 1 });
+        assert_eq!(
+            map.point_at(0),
+            Point {
+                offset: 0,
+                line: 1,
+                col: 1
+            }
+        );
+        assert_eq!(
+            map.point_at(2),
+            Point {
+                offset: 2,
+                line: 2,
+                col: 1
+            }
+        );
         // The astral scalar is the second character on line 2 but the third UTF-16
         // unit; the column counts characters-as-units, i.e. 2.
-        assert_eq!(map.point_at(4), Point { offset: 3, line: 2, col: 2 });
-        assert_eq!(map.point_at(9), Point { offset: 6, line: 3, col: 1 });
+        assert_eq!(
+            map.point_at(4),
+            Point {
+                offset: 3,
+                line: 2,
+                col: 2
+            }
+        );
+        assert_eq!(
+            map.point_at(9),
+            Point {
+                offset: 6,
+                line: 3,
+                col: 1
+            }
+        );
     }
 
     #[test]
@@ -369,7 +397,14 @@ mod tests {
         // Nested spans mean this happens in practice; correctness must not depend on
         // monotonicity (only the amortized cost does).
         assert_eq!(map.at(2), 2);
-        assert_eq!(map.point_at(4), Point { offset: 3, line: 2, col: 2 });
+        assert_eq!(
+            map.point_at(4),
+            Point {
+                offset: 3,
+                line: 2,
+                col: 2
+            }
+        );
     }
 
     #[test]
@@ -395,7 +430,10 @@ mod tests {
             )
         );
         // ASCII short-circuit: all three coincide.
-        assert_eq!(OffsetMap::new("abc\ndef", Offsets::Utf16).lengths(), (7, 7, 7));
+        assert_eq!(
+            OffsetMap::new("abc\ndef", Offsets::Utf16).lengths(),
+            (7, 7, 7)
+        );
     }
 
     #[test]
@@ -403,7 +441,11 @@ mod tests {
         let mut map = OffsetMap::new(MIXED, Offsets::Utf16);
         assert_eq!(map.at(9999), 7);
         assert_eq!(map.span_len(9999, 10_000), 0);
-        assert_eq!(map.span_len(8, 4), 0, "reversed range is empty, not a panic");
+        assert_eq!(
+            map.span_len(8, 4),
+            0,
+            "reversed range is empty, not a panic"
+        );
         assert_eq!(map.point_at(9999).offset, 7);
     }
 
@@ -412,6 +454,13 @@ mod tests {
         let mut map = OffsetMap::new("", Offsets::Utf16);
         assert_eq!(map.at(0), 0);
         assert_eq!(map.lengths(), (0, 0, 0));
-        assert_eq!(map.point_at(0), Point { offset: 0, line: 1, col: 1 });
+        assert_eq!(
+            map.point_at(0),
+            Point {
+                offset: 0,
+                line: 1,
+                col: 1
+            }
+        );
     }
 }

@@ -9,7 +9,7 @@
 use std::io::{self, BufWriter, Write};
 use std::process::ExitCode;
 
-use usfm3::{parse, parse_with, BookId, Document, ParseOptions, Version};
+use usfm3::{BookId, Document, ParseOptions, Version, parse, parse_with};
 
 const USAGE: &str = "\
 usfm3 — USFM tooling
@@ -61,7 +61,11 @@ fn with_path(args: &[String], cmd: &str, f: impl FnOnce(&str) -> ExitCode) -> Ex
 
 /// Read + parse a file (reporting on failure), then hand a borrowed [`Document`]
 /// to `f`. `diagnostics` opts into the (cold-path) diagnostic + validation pass.
-fn read_and<R>(path: &str, diagnostics: bool, f: impl FnOnce(&Document<'_>) -> R) -> Result<R, ExitCode> {
+fn read_and<R>(
+    path: &str,
+    diagnostics: bool,
+    f: impl FnOnce(&Document<'_>) -> R,
+) -> Result<R, ExitCode> {
     let source = std::fs::read_to_string(path).map_err(|e| {
         eprintln!("error: cannot read {path}: {e}");
         ExitCode::FAILURE
@@ -103,12 +107,12 @@ fn run_vref(path: &str) -> ExitCode {
 
     // If the document had no `\id` (book reported as "???"), fall back to a book
     // code inferred from the (Paratext-style) filename, e.g. `21ECCBSB.usfm`.
-    if dict.iter().any(|(k, _)| k.starts_with("??? ")) {
-        if let Some(code) = infer_book_code(path) {
-            for (k, _) in dict.iter_mut() {
-                if let Some(rest) = k.strip_prefix("??? ") {
-                    *k = format!("{code} {rest}");
-                }
+    if dict.iter().any(|(k, _)| k.starts_with("??? "))
+        && let Some(code) = infer_book_code(path)
+    {
+        for (k, _) in dict.iter_mut() {
+            if let Some(rest) = k.strip_prefix("??? ") {
+                *k = format!("{code} {rest}");
             }
         }
     }
@@ -160,11 +164,18 @@ fn render(path: &str, f: impl FnOnce(&Document<'_>) -> String) -> ExitCode {
 /// → `ECC`): the first 3-letter window of the uppercased stem that is a valid
 /// USFM book code.
 fn infer_book_code(path: &str) -> Option<&'static str> {
-    let stem = std::path::Path::new(path).file_stem()?.to_str()?.to_ascii_uppercase();
+    let stem = std::path::Path::new(path)
+        .file_stem()?
+        .to_str()?
+        .to_ascii_uppercase();
     stem.as_bytes()
         .windows(3)
         .filter_map(|w| std::str::from_utf8(w).ok())
-        .find_map(|s| BookId::from_code(s).filter(|b| b.is_known()).map(|b| b.code()))
+        .find_map(|s| {
+            BookId::from_code(s)
+                .filter(|b| b.is_known())
+                .map(|b| b.code())
+        })
 }
 
 /// Write `entries` as a compact JSON object, preserving order.

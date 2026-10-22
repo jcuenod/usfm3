@@ -7,7 +7,10 @@
 
 use std::fmt::{self, Write};
 
-use super::render::{collect_attributes, figure_legacy, normalize_text, note_caller, remainder_after_first_token, trim_leading, verse_label};
+use super::render::{
+    collect_attributes, figure_legacy, normalize_text, note_caller, remainder_after_first_token,
+    trim_leading, verse_label,
+};
 use crate::Document;
 use crate::cst::Cursor;
 use crate::marker::Category;
@@ -84,7 +87,10 @@ fn is_top_level_block(c: Cursor<'_>) -> bool {
         NodeKind::Chapter => true,
         NodeKind::MarkerOpen => c.marker_info().is_some_and(|info| {
             info.name != "usfm"
-                && !matches!(info.category, Category::Character | Category::Note | Category::Milestone)
+                && !matches!(
+                    info.category,
+                    Category::Character | Category::Note | Category::Milestone
+                )
         }),
         _ => false,
     }
@@ -116,7 +122,9 @@ fn usx_node<W: Write>(c: Cursor<'_>, out: &mut W, st: &mut UsxState) -> fmt::Res
             st.verse_sid = Some(sid);
         }
         NodeKind::MarkerOpen => {
-            let Some(info) = c.marker_info() else { return Ok(()) };
+            let Some(info) = c.marker_info() else {
+                return Ok(());
+            };
             if info.name == "usfm" {
                 return Ok(());
             }
@@ -140,7 +148,11 @@ fn usx_inline<W: Write>(parent: Cursor<'_>, out: &mut W, st: &mut UsxState) -> f
     usx_inline_nodes(&children, out, st)
 }
 
-fn usx_inline_nodes<W: Write>(children: &[Cursor<'_>], out: &mut W, st: &mut UsxState) -> fmt::Result {
+fn usx_inline_nodes<W: Write>(
+    children: &[Cursor<'_>],
+    out: &mut W,
+    st: &mut UsxState,
+) -> fmt::Result {
     let mut prev: Option<NodeKind> = None;
     for &child in children {
         if child.kind() == NodeKind::Text {
@@ -160,7 +172,10 @@ fn usx_inline_nodes<W: Write>(children: &[Cursor<'_>], out: &mut W, st: &mut Usx
             // consumed by the enclosing element
         } else {
             usx_node(child, out, st)?;
-            if !matches!(child.kind(), NodeKind::MarkerClose | NodeKind::BlockEnd | NodeKind::Error) {
+            if !matches!(
+                child.kind(),
+                NodeKind::MarkerClose | NodeKind::BlockEnd | NodeKind::Error
+            ) {
                 prev = Some(child.kind());
             }
         }
@@ -169,7 +184,10 @@ fn usx_inline_nodes<W: Write>(children: &[Cursor<'_>], out: &mut W, st: &mut Usx
 }
 
 fn usx_para<W: Write>(c: Cursor<'_>, marker: &str, out: &mut W, st: &mut UsxState) -> fmt::Result {
-    if !c.children().any(|ch| !matches!(ch.kind(), NodeKind::MarkerClose | NodeKind::BlockEnd)) {
+    if !c
+        .children()
+        .any(|ch| !matches!(ch.kind(), NodeKind::MarkerClose | NodeKind::BlockEnd))
+    {
         write!(out, "<para style=\"{marker}\" />")?;
         return Ok(());
     }
@@ -212,7 +230,10 @@ fn usx_note<W: Write>(c: Cursor<'_>, marker: &str, out: &mut W, st: &mut UsxStat
             }
         } else if ch.kind() != NodeKind::Attribute {
             usx_node(ch, out, st)?;
-            if !matches!(ch.kind(), NodeKind::MarkerClose | NodeKind::BlockEnd | NodeKind::Error) {
+            if !matches!(
+                ch.kind(),
+                NodeKind::MarkerClose | NodeKind::BlockEnd | NodeKind::Error
+            ) {
                 prev = Some(ch.kind());
             }
         }
@@ -247,7 +268,11 @@ fn usx_figure<W: Write>(c: Cursor<'_>, out: &mut W, st: &mut UsxState) -> fmt::R
 }
 
 fn usx_book<W: Write>(c: Cursor<'_>, out: &mut W, st: &mut UsxState) -> fmt::Result {
-    let raw = c.children().find(|ch| ch.kind() == NodeKind::Text).map(|ch| ch.text()).unwrap_or("");
+    let raw = c
+        .children()
+        .find(|ch| ch.kind() == NodeKind::Text)
+        .map(|ch| ch.text())
+        .unwrap_or("");
     let mut tokens = raw.split_whitespace();
     let code = tokens.next().unwrap_or("");
     st.book = code.to_string();

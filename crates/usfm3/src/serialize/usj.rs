@@ -9,8 +9,8 @@
 use std::fmt::{self, Write};
 
 use super::render::{
-    collapse_all, collect_attributes, figure_legacy, json_str, normalize_text,
-    remainder_after_first_token, note_caller, trim_leading, verse_label,
+    collapse_all, collect_attributes, figure_legacy, json_str, normalize_text, note_caller,
+    remainder_after_first_token, trim_leading, verse_label,
 };
 use crate::Document;
 use crate::cst::Cursor;
@@ -196,7 +196,9 @@ fn emit_node<W: Write>(
             write_verse(c, None, None, out, ctx)?;
         }
         NodeKind::MarkerOpen => {
-            let Some(info) = c.marker_info() else { return Ok(false) };
+            let Some(info) = c.marker_info() else {
+                return Ok(false);
+            };
             // `\usfm` (version declaration) is metadata, not USJ content.
             if info.name == "usfm" {
                 return Ok(false);
@@ -253,18 +255,28 @@ fn write_char<W: Write>(c: Cursor<'_>, marker: &str, out: &mut W, ctx: &mut Ctx)
     // target). A plain `\xt` is a cross-reference list and stays flat. (Matches the
     // reference impl; the `+` nesting prefix is the discriminator.)
     if marker == "xt" && c.is_nested() {
-        let href = collect_attributes(c, marker).into_iter().find(|(k, _)| *k == "href");
-        let has_content = c.children().any(|ch| !matches!(ch.kind(), NodeKind::Attribute | NodeKind::MarkerClose | NodeKind::BlockEnd));
-        let has_ref = c.children().any(|ch| ch.kind() == NodeKind::MarkerOpen && ch.marker_name() == "ref");
-        if let Some((_, loc)) = href {
-            if has_content && !has_ref {
-                out.write_str("[{\"type\":\"ref\",\"loc\":")?;
-                json_str(&loc, out)?;
-                out.write_str(",\"content\":")?;
-                write_content(c, out, ctx)?;
-                out.write_str("}]")?;
-                return out.write_char('}');
-            }
+        let href = collect_attributes(c, marker)
+            .into_iter()
+            .find(|(k, _)| *k == "href");
+        let has_content = c.children().any(|ch| {
+            !matches!(
+                ch.kind(),
+                NodeKind::Attribute | NodeKind::MarkerClose | NodeKind::BlockEnd
+            )
+        });
+        let has_ref = c
+            .children()
+            .any(|ch| ch.kind() == NodeKind::MarkerOpen && ch.marker_name() == "ref");
+        if let Some((_, loc)) = href
+            && has_content
+            && !has_ref
+        {
+            out.write_str("[{\"type\":\"ref\",\"loc\":")?;
+            json_str(&loc, out)?;
+            out.write_str(",\"content\":")?;
+            write_content(c, out, ctx)?;
+            out.write_str("}]")?;
+            return out.write_char('}');
         }
     }
     write_content(c, out, ctx)?; // Attribute children are skipped by emit_node
@@ -306,7 +318,11 @@ fn write_figure<W: Write>(c: Cursor<'_>, out: &mut W, ctx: &mut Ctx) -> fmt::Res
 }
 
 fn write_book<W: Write>(c: Cursor<'_>, out: &mut W, ctx: &mut Ctx) -> fmt::Result {
-    let raw = c.children().find(|ch| ch.kind() == NodeKind::Text).map(|ch| ch.text()).unwrap_or("");
+    let raw = c
+        .children()
+        .find(|ch| ch.kind() == NodeKind::Text)
+        .map(|ch| ch.text())
+        .unwrap_or("");
     let mut tokens = raw.split_whitespace();
     let code = tokens.next().unwrap_or("");
     ctx.book = code.to_string();
@@ -409,7 +425,10 @@ fn marker_inner_text(c: Cursor<'_>) -> String {
 /// `\ref text|loc\ref*` → `{type:"ref", loc, content:[text]}` (scripture link).
 fn write_ref<W: Write>(c: Cursor<'_>, out: &mut W, ctx: &mut Ctx) -> fmt::Result {
     out.write_str("{\"type\":\"ref\"")?;
-    if let Some((_, loc)) = collect_attributes(c, "ref").into_iter().find(|(k, _)| *k == "loc") {
+    if let Some((_, loc)) = collect_attributes(c, "ref")
+        .into_iter()
+        .find(|(k, _)| *k == "loc")
+    {
         out.write_str(",\"loc\":")?;
         json_str(&loc, out)?;
     }
@@ -517,7 +536,11 @@ fn category_of<'a>(parent: Cursor<'a>) -> Option<&'a str> {
     parent
         .children()
         .find(|c| is_category_marker(*c))
-        .and_then(|cat| cat.children().find(|g| g.kind() == NodeKind::Text).map(|g| g.text()))
+        .and_then(|cat| {
+            cat.children()
+                .find(|g| g.kind() == NodeKind::Text)
+                .map(|g| g.text())
+        })
 }
 
 /// Emit `,"key":"value"` pairs from this node's `|…` attribute child (USJ).

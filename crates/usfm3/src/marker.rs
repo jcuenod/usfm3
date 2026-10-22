@@ -139,10 +139,10 @@ impl MarkerTable {
             return Some(MarkerId(*id));
         }
         let base = strip_level_suffix(name);
-        if base.len() != name.len() {
-            if let Some(id) = self.index.get(base) {
-                return Some(MarkerId(*id));
-            }
+        if base.len() != name.len()
+            && let Some(id) = self.index.get(base)
+        {
+            return Some(MarkerId(*id));
         }
         // Recovery for a verse/chapter number glued to its marker with no
         // separating space, *including a sub-verse segment letter* — `\v3b`,

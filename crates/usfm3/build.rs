@@ -66,7 +66,10 @@ fn main() {
             Some(c) => closing_variant(c, gid),
             None => default_closing(&g.category),
         };
-        let usx = g.usx.clone().unwrap_or_else(|| default_usx(&g.category).to_string());
+        let usx = g
+            .usx
+            .clone()
+            .unwrap_or_else(|| default_usx(&g.category).to_string());
         let since = ver_rank(g.since.as_deref().unwrap_or("3.0"));
         let until = g.until.as_deref().map(ver_rank);
         let deprecated_since = g.deprecated_since.as_deref().map(ver_rank);
@@ -97,7 +100,7 @@ fn main() {
     for (variant, rank) in VERSIONS {
         let filtered: Vec<&Marker> = markers
             .iter()
-            .filter(|m| m.since <= *rank && m.until.map_or(true, |u| *rank <= u))
+            .filter(|m| m.since <= *rank && m.until.is_none_or(|u| *rank <= u))
             .collect();
 
         // Entries slice.
@@ -142,7 +145,10 @@ fn main() {
 }
 
 fn ver_rank(v: &str) -> u32 {
-    v.rsplit('.').next().and_then(|s| s.parse().ok()).unwrap_or(0)
+    v.rsplit('.')
+        .next()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
 }
 
 fn category_variant(c: &str, gid: &str) -> &'static str {

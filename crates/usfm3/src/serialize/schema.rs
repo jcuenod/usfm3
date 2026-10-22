@@ -73,7 +73,11 @@ fn write_schema<W: Write>(version: Version, out: &mut W) -> fmt::Result {
         MarkerId::UNKNOWN.0,
     )?;
 
-    for (i, info) in MarkerTable::for_version(version).entries().iter().enumerate() {
+    for (i, info) in MarkerTable::for_version(version)
+        .entries()
+        .iter()
+        .enumerate()
+    {
         if i > 0 {
             out.write_char(',')?;
         }

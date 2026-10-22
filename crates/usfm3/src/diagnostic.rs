@@ -139,12 +139,27 @@ pub struct Diagnostic {
 
 impl Diagnostic {
     pub fn error(code: DiagnosticCode, span: Span, message: impl Into<String>) -> Self {
-        Self { severity: Severity::Error, code, span, message: message.into() }
+        Self {
+            severity: Severity::Error,
+            code,
+            span,
+            message: message.into(),
+        }
     }
     pub fn warning(code: DiagnosticCode, span: Span, message: impl Into<String>) -> Self {
-        Self { severity: Severity::Warning, code, span, message: message.into() }
+        Self {
+            severity: Severity::Warning,
+            code,
+            span,
+            message: message.into(),
+        }
     }
     pub fn info(code: DiagnosticCode, span: Span, message: impl Into<String>) -> Self {
-        Self { severity: Severity::Info, code, span, message: message.into() }
+        Self {
+            severity: Severity::Info,
+            code,
+            span,
+            message: message.into(),
+        }
     }
 }

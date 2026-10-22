@@ -23,7 +23,12 @@ pub struct Cursor<'a> {
 
 impl<'a> Cursor<'a> {
     pub(crate) fn new(tape: &'a Tape, source: &'a str, table: &'a MarkerTable, idx: u32) -> Self {
-        Self { tape, source, table, idx }
+        Self {
+            tape,
+            source,
+            table,
+            idx,
+        }
     }
 
     #[inline]

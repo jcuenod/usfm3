@@ -16,8 +16,10 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/usfm-grammar");
-const EXPECTED_FAILURES: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/bridgeconn_expected_failures.txt");
+const EXPECTED_FAILURES: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/bridgeconn_expected_failures.txt"
+);
 
 struct Case {
     name: String,
@@ -36,7 +38,9 @@ fn discover() -> Vec<Case> {
 }
 
 fn walk(dir: &Path, root: &Path, cases: &mut Vec<Case>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_dir() {
@@ -45,7 +49,11 @@ fn walk(dir: &Path, root: &Path, cases: &mut Vec<Case>) {
         let usfm = path.join("origin.usfm");
         let json = path.join("origin.json");
         if usfm.exists() && json.exists() {
-            let name = path.strip_prefix(root).unwrap().to_string_lossy().into_owned();
+            let name = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
             let meta = std::fs::read_to_string(path.join("metadata.xml")).unwrap_or_default();
             cases.push(Case {
                 name,
@@ -117,8 +125,7 @@ fn bridgeconn_usj() {
     let cases = discover();
     let expected_failures = load_expected_failures();
 
-    let (pass_cases, fail_cases): (Vec<_>, Vec<_>) =
-        cases.iter().partition(|c| c.validated_pass);
+    let (pass_cases, fail_cases): (Vec<_>, Vec<_>) = cases.iter().partition(|c| c.validated_pass);
 
     let mut passed = 0usize;
     let mut failures: Vec<(String, String)> = Vec::new();
@@ -135,7 +142,11 @@ fn bridgeconn_usj() {
         if let Ok(usfm) = std::fs::read_to_string(&c.usfm) {
             let opts = usfm3::ParseOptions { diagnostics: true };
             let doc = usfm3::parse_with(&usfm, usfm3::Version::V3_1, opts);
-            if doc.diagnostics().iter().any(|d| d.severity == usfm3::Severity::Error) {
+            if doc
+                .diagnostics()
+                .iter()
+                .any(|d| d.severity == usfm3::Severity::Error)
+            {
                 fail_detected += 1;
             }
         }
@@ -166,13 +177,20 @@ fn bridgeconn_usj() {
         }
     }
     if !fixed.is_empty() {
-        eprintln!("\n{} cases now pass — remove from expected-failures:", fixed.len());
+        eprintln!(
+            "\n{} cases now pass — remove from expected-failures:",
+            fixed.len()
+        );
         for name in &fixed {
             eprintln!("  FIXED {name}");
         }
     }
 
-    assert!(unexpected.is_empty(), "{} unexpected USJ failures", unexpected.len());
+    assert!(
+        unexpected.is_empty(),
+        "{} unexpected USJ failures",
+        unexpected.len()
+    );
 }
 
 /// Exporting to USFM and re-parsing must yield the same USJ (whitespace-normalized)
@@ -204,7 +222,11 @@ fn bridgeconn_usfm_roundtrip() {
         }
     }
 
-    eprintln!("\nUSFM round-trip: {}/{} matched", checked - broken.len(), checked);
+    eprintln!(
+        "\nUSFM round-trip: {}/{} matched",
+        checked - broken.len(),
+        checked
+    );
     for name in &broken {
         eprintln!("  ROUND-TRIP DIFF {name}");
     }
@@ -289,11 +311,18 @@ fn packed_tape_matches_cst_json_across_the_corpus() {
         }
     }
 
-    eprintln!("\npacked CST parity: {checked}/{} fixtures", checked + mismatches.len());
+    eprintln!(
+        "\npacked CST parity: {checked}/{} fixtures",
+        checked + mismatches.len()
+    );
     for name in mismatches.iter().take(10) {
         eprintln!("  PACKED CST DIFF {name}");
     }
-    assert!(mismatches.is_empty(), "{} packed/JSON CST mismatches", mismatches.len());
+    assert!(
+        mismatches.is_empty(),
+        "{} packed/JSON CST mismatches",
+        mismatches.len()
+    );
 }
 
 /// The packed offsets must slice the host's own encoding exactly, for every fixture and
@@ -321,8 +350,18 @@ fn packed_offsets_are_slice_exact_across_the_corpus() {
 
         let utf16 = Packed::new(doc.to_packed_tape(Offsets::Utf16));
         let chars = Packed::new(doc.to_packed_tape(Offsets::Chars));
-        assert_eq!(utf16.lengths().1, units.len() as u32, "{}: utf16 length", case.name);
-        assert_eq!(chars.lengths().2, scalars.len() as u32, "{}: char length", case.name);
+        assert_eq!(
+            utf16.lengths().1,
+            units.len() as u32,
+            "{}: utf16 length",
+            case.name
+        );
+        assert_eq!(
+            chars.lengths().2,
+            scalars.len() as u32,
+            "{}: char length",
+            case.name
+        );
 
         for (i, node) in doc.tape().nodes.iter().enumerate() {
             let expected = node.span().text(doc.source());
@@ -333,8 +372,9 @@ fn packed_offsets_are_slice_exact_across_the_corpus() {
             assert_eq!(got, expected, "{}: utf16 node {i}", case.name);
 
             let p = chars.node(i);
-            let got: String =
-                scalars[p.start as usize..(p.start + p.len) as usize].iter().collect();
+            let got: String = scalars[p.start as usize..(p.start + p.len) as usize]
+                .iter()
+                .collect();
             assert_eq!(got, expected, "{}: chars node {i}", case.name);
         }
     }

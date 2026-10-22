@@ -71,7 +71,12 @@ fn write_cst_node<W: Write>(c: Cursor<'_>, out: &mut W) -> fmt::Result {
     // The matching close token, so the editor can decorate `\xxx*` as well.
     if let Some(close) = c.matching_close() {
         let cs = close.span();
-        write!(out, ",\"close\":{{\"start\":{},\"end\":{}", cs.start, cs.end())?;
+        write!(
+            out,
+            ",\"close\":{{\"start\":{},\"end\":{}",
+            cs.start,
+            cs.end()
+        )?;
         if close.is_synthetic() {
             out.write_str(",\"synthetic\":true")?;
         }

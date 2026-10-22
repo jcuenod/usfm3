@@ -15,19 +15,25 @@ use crate::tape::NodeKind;
 /// Validate a document (given its root cursor) and return the diagnostics.
 pub(crate) fn validate(root: Cursor<'_>) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
-    let mut st = State::default();
-    st.expected_chapter = 1;
-    st.expected_verse = VersePart { num: 1, suffix: None };
+    let mut st = State {
+        expected_chapter: 1,
+        expected_verse: VersePart {
+            num: 1,
+            suffix: None,
+        },
+        ..State::default()
+    };
 
     // Text before the \id marker.
-    if let Some(first) = root.children().next() {
-        if first.kind() == NodeKind::Text && !first.text().trim().is_empty() {
-            diags.push(Diagnostic::warning(
-                DiagnosticCode::TextBeforeId,
-                first.span(),
-                "text appears before the \\id marker",
-            ));
-        }
+    if let Some(first) = root.children().next()
+        && first.kind() == NodeKind::Text
+        && !first.text().trim().is_empty()
+    {
+        diags.push(Diagnostic::warning(
+            DiagnosticCode::TextBeforeId,
+            first.span(),
+            "text appears before the \\id marker",
+        ));
     }
 
     walk(root, false, false, false, &mut st, &mut diags);
@@ -118,7 +124,10 @@ fn walk(
                     ));
                 }
                 st.expected_chapter = num + 1;
-                st.expected_verse = VersePart { num: 1, suffix: None };
+                st.expected_verse = VersePart {
+                    num: 1,
+                    suffix: None,
+                };
                 check_leading_zeros(child, "chapter", diags);
             }
             NodeKind::Verse => {
@@ -154,13 +163,16 @@ fn walk(
                             format!("expected verse {} but found {label}", st.expected_verse),
                         ));
                     }
-                    st.expected_verse =
-                        parse_verse_range_end(label).unwrap_or(start).next_expected();
+                    st.expected_verse = parse_verse_range_end(label)
+                        .unwrap_or(start)
+                        .next_expected();
                 }
                 check_leading_zeros(child, "verse", diags);
             }
             NodeKind::MarkerOpen => {
-                let Some(info) = child.marker_info() else { continue };
+                let Some(info) = child.marker_info() else {
+                    continue;
+                };
                 if info.name == "id" {
                     if st.saw_book {
                         diags.push(Diagnostic::error(
@@ -210,7 +222,10 @@ fn walk(
                     diags.push(Diagnostic::error(
                         DiagnosticCode::BodyParagraphBeforeChapter,
                         child.span(),
-                        format!("body paragraph \\{} appears before any \\c (chapter)", info.name),
+                        format!(
+                            "body paragraph \\{} appears before any \\c (chapter)",
+                            info.name
+                        ),
                     ));
                 }
                 if info.name == "fig" && figure_is_empty(child) {
@@ -232,26 +247,27 @@ fn walk(
                     validate_table_row(child, diags);
                 }
                 validate_attributes(child, child.marker_name(), diags);
-                if info.category == Category::Milestone {
-                    if let Some(base) = milestone_base(child.marker_name()) {
-                        if child.marker_name().ends_with("-s") {
-                            st.open_milestones.push((base.to_string(), child.span()));
-                        } else if child.marker_name().ends_with("-e") {
-                            match st.open_milestones.iter().rposition(|(b, _)| b == base) {
-                                Some(i) => {
-                                    st.open_milestones.remove(i);
-                                }
-                                None => diags.push(Diagnostic::error(
-                                    DiagnosticCode::MilestoneMismatch,
-                                    child.span(),
-                                    format!("milestone \\{base}-e has no matching \\{base}-s"),
-                                )),
+                if info.category == Category::Milestone
+                    && let Some(base) = milestone_base(child.marker_name())
+                {
+                    if child.marker_name().ends_with("-s") {
+                        st.open_milestones.push((base.to_string(), child.span()));
+                    } else if child.marker_name().ends_with("-e") {
+                        match st.open_milestones.iter().rposition(|(b, _)| b == base) {
+                            Some(i) => {
+                                st.open_milestones.remove(i);
                             }
+                            None => diags.push(Diagnostic::error(
+                                DiagnosticCode::MilestoneMismatch,
+                                child.span(),
+                                format!("milestone \\{base}-e has no matching \\{base}-s"),
+                            )),
                         }
                     }
                 }
                 let body = in_body_para
-                    || (info.category == Category::Paragraph && info.text_role == TextRole::Boundary);
+                    || (info.category == Category::Paragraph
+                        && info.text_role == TextRole::Boundary);
                 walk(
                     child,
                     body,
@@ -279,7 +295,8 @@ fn book_code<'a>(id: Cursor<'a>) -> Option<&'a str> {
 
 /// A figure with no caption text (attributes don't count as content).
 fn figure_is_empty(fig: Cursor<'_>) -> bool {
-    !fig.children().any(|c| c.kind() == NodeKind::Text && !c.text().trim().is_empty())
+    !fig.children()
+        .any(|c| c.kind() == NodeKind::Text && !c.text().trim().is_empty())
 }
 
 /// Whether a `\b` (blank line) carries genuine inline content (text, a character,
@@ -312,8 +329,10 @@ fn word_marker_is_empty(w: Cursor<'_>) -> bool {
 /// after a bare `|` (e.g. `\w word|lemma\w*`). A bare default on a marker NOT in
 /// this set is invalid (`DefaultAttributeNotDefined`), e.g. `\+pn name|keyword`.
 fn defines_default_attribute(marker: &str) -> bool {
-    matches!(marker, "w" | "wa" | "wg" | "wh" | "rb" | "xt" | "ref" | "jmp")
-        || marker.starts_with("qt")
+    matches!(
+        marker,
+        "w" | "wa" | "wg" | "wh" | "rb" | "xt" | "ref" | "jmp"
+    ) || marker.starts_with("qt")
 }
 
 /// Attributes a marker must carry (named, or supplied as the `|default`).
@@ -352,7 +371,9 @@ fn validate_table_row(tr: Cursor<'_>, diags: &mut Vec<Diagnostic>) {
         if cell.kind() != NodeKind::MarkerOpen {
             continue;
         }
-        let Some((start, end)) = table_cell_columns(cell.marker_name()) else { continue };
+        let Some((start, end)) = table_cell_columns(cell.marker_name()) else {
+            continue;
+        };
         if start != expected {
             diags.push(Diagnostic::error(
                 DiagnosticCode::InvalidTableColumnSequence,
@@ -426,7 +447,9 @@ fn validate_attributes(c: Cursor<'_>, marker: &str, diags: &mut Vec<Diagnostic>)
             if rest.is_empty() {
                 break;
             }
-            let stop = rest.find(|c: char| c == '=' || c.is_whitespace()).unwrap_or(rest.len());
+            let stop = rest
+                .find(|c: char| c == '=' || c.is_whitespace())
+                .unwrap_or(rest.len());
             if stop == rest.len() || rest.as_bytes()[stop] != b'=' {
                 diags.push(Diagnostic::error(
                     DiagnosticCode::InvalidAttributes,
@@ -513,7 +536,10 @@ fn is_valid_book_code(code: &str) -> bool {
 /// Front-matter / peripheral books that carry no chapters (so `\c` is not required
 /// and body paragraphs may appear without one).
 fn is_front_matter_code(code: &str) -> bool {
-    matches!(code, "FRT" | "INT" | "BAK" | "OTH" | "CNC" | "GLO" | "TDX" | "NDX")
+    matches!(
+        code,
+        "FRT" | "INT" | "BAK" | "OTH" | "CNC" | "GLO" | "TDX" | "NDX"
+    )
 }
 
 /// Valid USFM book identifiers: the 66 canonical
@@ -534,8 +560,19 @@ static VALID_BOOK_CODES: &[&str] = &[
 fn is_note_only_marker(marker: &str) -> bool {
     matches!(
         marker,
-        "fr" | "ft" | "fk" | "fq" | "fqa" | "fl" | "fw" | "fp" | "fv" | "fdc" | "xop" | "xot"
-            | "xnt" | "xdc"
+        "fr" | "ft"
+            | "fk"
+            | "fq"
+            | "fqa"
+            | "fl"
+            | "fw"
+            | "fp"
+            | "fv"
+            | "fdc"
+            | "xop"
+            | "xot"
+            | "xnt"
+            | "xdc"
     )
 }
 
@@ -550,8 +587,14 @@ struct VersePart {
 impl VersePart {
     fn next_expected(self) -> Self {
         match self.suffix {
-            None => Self { num: self.num + 1, suffix: None },
-            Some(c) => Self { num: self.num, suffix: Some((c as u8 + 1) as char) },
+            None => Self {
+                num: self.num + 1,
+                suffix: None,
+            },
+            Some(c) => Self {
+                num: self.num,
+                suffix: Some((c as u8 + 1) as char),
+            },
         }
     }
 }

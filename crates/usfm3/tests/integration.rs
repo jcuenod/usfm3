@@ -103,7 +103,10 @@ fn tape_is_lossless_and_cursor_exposes_explicit_and_synthetic_closes() {
         .filter(|node| !node.is_synthetic())
         .map(|node| node.span().text(doc.source()))
         .collect::<String>();
-    assert_eq!(reconstructed, src, "non-synthetic tape spans should be lossless");
+    assert_eq!(
+        reconstructed, src,
+        "non-synthetic tape spans should be lossless"
+    );
 
     let mut saw_explicit_close = false;
     let mut saw_synthetic_close = false;
@@ -117,14 +120,22 @@ fn tape_is_lossless_and_cursor_exposes_explicit_and_synthetic_closes() {
             saw_explicit_close = true;
         }
         if cur.marker_name() == "p" {
-            let close = cur.matching_close().expect("\\p should close synthetically");
+            let close = cur
+                .matching_close()
+                .expect("\\p should close synthetically");
             assert!(close.is_synthetic());
             saw_synthetic_close = true;
         }
     });
 
-    assert!(saw_explicit_close, "expected to see an explicit close marker");
-    assert!(saw_synthetic_close, "expected to see an implicit block close");
+    assert!(
+        saw_explicit_close,
+        "expected to see an explicit close marker"
+    );
+    assert!(
+        saw_synthetic_close,
+        "expected to see an implicit block close"
+    );
 }
 
 #[test]
@@ -145,7 +156,10 @@ fn cst_json_reports_close_ranges_and_nested_markers_are_flagged() {
             saw_nested = true;
         }
     });
-    assert!(saw_nested, "nested +nd marker should be preserved as nested");
+    assert!(
+        saw_nested,
+        "nested +nd marker should be preserved as nested"
+    );
 }
 
 #[test]
@@ -156,7 +170,9 @@ fn metadata_and_empty_document_usj_envelopes_are_valid() {
     assert_eq!(usj["type"], "USJ");
     assert_eq!(usj["version"], "3.1");
 
-    let content = usj["content"].as_array().expect("USJ content should be an array");
+    let content = usj["content"]
+        .as_array()
+        .expect("USJ content should be an array");
     assert_eq!(content[0]["type"], "book");
     assert_eq!(content[0]["code"], "GEN");
 
@@ -171,7 +187,11 @@ fn metadata_and_empty_document_usj_envelopes_are_valid() {
 
     let empty = parse_usj("");
     assert_eq!(empty["type"], "USJ");
-    assert!(empty["content"].as_array().is_some_and(|items| items.is_empty()));
+    assert!(
+        empty["content"]
+            .as_array()
+            .is_some_and(|items| items.is_empty())
+    );
 }
 
 #[test]
@@ -259,8 +279,16 @@ fn cst_note_marker_preserves_caller_and_submarker_structure() {
         .find(|child| child.kind() == NodeKind::Text)
         .expect("note should have text containing the caller");
     assert!(first_text.text().starts_with(" +"));
-    assert!(note_children.iter().any(|child| child.kind() == NodeKind::MarkerOpen && child.marker_name() == "fr"));
-    assert!(note_children.iter().any(|child| child.kind() == NodeKind::MarkerOpen && child.marker_name() == "ft"));
+    assert!(
+        note_children
+            .iter()
+            .any(|child| child.kind() == NodeKind::MarkerOpen && child.marker_name() == "fr")
+    );
+    assert!(
+        note_children
+            .iter()
+            .any(|child| child.kind() == NodeKind::MarkerOpen && child.marker_name() == "ft")
+    );
 }
 
 #[test]
@@ -272,7 +300,11 @@ fn cst_table_rows_and_cells_preserve_the_same_structure_the_ast_grouped() {
         .filter(|child| child.kind() == NodeKind::MarkerOpen && child.marker_name() == "tr")
         .collect::<Vec<_>>();
 
-    assert_eq!(rows.len(), 2, "CST should preserve both consecutive table rows");
+    assert_eq!(
+        rows.len(),
+        2,
+        "CST should preserve both consecutive table rows"
+    );
 
     let first_cells = direct_children(rows[0])
         .into_iter()
@@ -323,7 +355,8 @@ fn character_attributes_note_submarkers_and_vref_cleaning_work_together() {
 
 #[test]
 fn note_submarker_opening_whitespace_is_structural() {
-    let usj = parse_usj("\\id GEN\n\\c 1\n\\p\n\\v 1 Text \\f + \\fr   1:1 \\ft   note text \\f* rest.");
+    let usj =
+        parse_usj("\\id GEN\n\\c 1\n\\p\n\\v 1 Text \\f + \\fr   1:1 \\ft   note text \\f* rest.");
     let note = collect_by_type(&usj, "note")
         .into_iter()
         .next()
@@ -348,7 +381,9 @@ fn milestones_are_preserved_and_self_closed_cleanly() {
     let src = "\\id GEN\n\\c 1\n\\p\n\\v 1 \\qt-s |who=\"Jesus\"\\*In truth \\qt-e\\*";
     let doc = parse_with_diagnostics(src);
     assert!(
-        !doc.diagnostics().iter().any(|d| d.severity == Severity::Error),
+        !doc.diagnostics()
+            .iter()
+            .any(|d| d.severity == Severity::Error),
         "well-formed milestones should not emit errors: {:?}",
         doc.diagnostics()
     );
@@ -368,10 +403,22 @@ fn milestones_are_preserved_and_self_closed_cleanly() {
 fn verse_sids_cover_basic_ranges_and_subverse_labels() {
     let usj = parse_usj("\\id GEN\n\\c 1\n\\p\n\\v 1 In the beginning \\v 2 The earth");
     let verses = collect_by_type(&usj, "verse");
-    assert!(verses.iter().any(|node| node["number"] == "1" && node["sid"] == "GEN 1:1"));
-    assert!(verses.iter().any(|node| node["number"] == "2" && node["sid"] == "GEN 1:2"));
+    assert!(
+        verses
+            .iter()
+            .any(|node| node["number"] == "1" && node["sid"] == "GEN 1:1")
+    );
+    assert!(
+        verses
+            .iter()
+            .any(|node| node["number"] == "2" && node["sid"] == "GEN 1:2")
+    );
 
-    for (num, sid) in [("3-4", "GEN 1:3-4"), ("12-83", "GEN 1:12-83"), ("3b", "GEN 1:3b")] {
+    for (num, sid) in [
+        ("3-4", "GEN 1:3-4"),
+        ("12-83", "GEN 1:12-83"),
+        ("3b", "GEN 1:3b"),
+    ] {
         let usj = parse(&format!("\\id GEN\n\\c 1\n\\p\n\\v {num} text")).to_usj();
         assert!(usj.contains(&format!("\"number\":\"{num}\"")), "{num}");
         assert!(usj.contains(&format!("\"sid\":\"{sid}\"")), "{sid}");
@@ -384,13 +431,21 @@ fn table_rows_group_and_cell_spacing_matches_spec_examples() {
     let usj = parse_usj(src);
 
     let tables = collect_by_type(&usj, "table");
-    assert_eq!(tables.len(), 1, "consecutive rows should group into one table");
+    assert_eq!(
+        tables.len(),
+        1,
+        "consecutive rows should group into one table"
+    );
     assert_eq!(collect_by_type(&usj, "table:row").len(), 2);
 
     let cells = collect_by_type(&usj, "table:cell");
     let text = cells
         .iter()
-        .map(|cell| cell["content"][0].as_str().expect("cell should start with text"))
+        .map(|cell| {
+            cell["content"][0]
+                .as_str()
+                .expect("cell should start with text")
+        })
         .collect::<Vec<_>>();
     assert_eq!(
         text,
@@ -413,7 +468,10 @@ fn table_rows_group_and_cell_spacing_matches_spec_examples() {
     let diag_doc = parse_with_diagnostics(src);
     assert!(
         !diag_doc.diagnostics().iter().any(|d| {
-            matches!(d.code, DiagnosticCode::ImplicitClose | DiagnosticCode::UnclosedAtEof)
+            matches!(
+                d.code,
+                DiagnosticCode::ImplicitClose | DiagnosticCode::UnclosedAtEof
+            )
         }),
         "table rows/cells should close structurally without close diagnostics",
     );
@@ -428,7 +486,10 @@ fn table_rows_close_cleanly_at_row_eof_and_following_block_boundaries() {
         let doc = parse_with_diagnostics(src);
         assert!(
             !doc.diagnostics().iter().any(|d| {
-                matches!(d.code, DiagnosticCode::ImplicitClose | DiagnosticCode::UnclosedAtEof)
+                matches!(
+                    d.code,
+                    DiagnosticCode::ImplicitClose | DiagnosticCode::UnclosedAtEof
+                )
             }),
             "table structure should close cleanly for {src:?}: {:?}",
             doc.diagnostics(),
@@ -510,7 +571,10 @@ fn vref_handles_continuations_root_level_verses_and_boundary_spacing() {
         "\\id MRK\n\\c 9\n\\v 1 Truly I say to you, some standing here will not taste death.\n\\s The Transfiguration\n\\p\n\\v 2 After six days Jesus took Peter with him.",
     )
     .vref_dict();
-    assert_eq!(root[0].1, "Truly I say to you, some standing here will not taste death.");
+    assert_eq!(
+        root[0].1,
+        "Truly I say to you, some standing here will not taste death."
+    );
     assert_eq!(root[1].1, "After six days Jesus took Peter with him.");
 }
 
@@ -521,7 +585,9 @@ fn quoted_and_poetry_continuations_preserve_word_boundaries_and_quotes() {
     );
     assert_eq!(
         vref_text(&luk, "LUK 4:10"),
-        Some("For it is written: “‘He will command his angels concerning you to guard you carefully;"),
+        Some(
+            "For it is written: “‘He will command his angels concerning you to guard you carefully;"
+        ),
     );
 
     let mrk = parse_vref(
@@ -529,11 +595,15 @@ fn quoted_and_poetry_continuations_preserve_word_boundaries_and_quotes() {
     );
     assert_eq!(
         vref_text(&mrk, "MRK 1:2"),
-        Some("As it is written in Isaiah the prophet, “Behold, I send my messenger before your face. He will prepare your way."),
+        Some(
+            "As it is written in Isaiah the prophet, “Behold, I send my messenger before your face. He will prepare your way."
+        ),
     );
     assert_eq!(
         vref_text(&mrk, "MRK 1:3"),
-        Some("A voice cries in the wilderness, ‘Prepare the way of the Lord, make his paths straight.’”"),
+        Some(
+            "A voice cries in the wilderness, ‘Prepare the way of the Lord, make his paths straight.’”"
+        ),
     );
 }
 
@@ -544,7 +614,9 @@ fn punctuation_boundaries_restore_spaces_in_vref() {
     );
     assert_eq!(
         vref_text(&dash, "DEU 32:31"),
-        Some("Because their rock is not like our Rock; even our enemies themselves - they agree that it is so."),
+        Some(
+            "Because their rock is not like our Rock; even our enemies themselves - they agree that it is so."
+        ),
     );
 
     let paragraph = parse_vref(
@@ -552,7 +624,9 @@ fn punctuation_boundaries_restore_spaces_in_vref() {
     );
     assert_eq!(
         vref_text(&paragraph, "MRK 5:40"),
-        Some("And they laughed at him. He put them all outside and took the child's father and mother and those who were with him into the room."),
+        Some(
+            "And they laughed at him. He put them all outside and took the child's father and mother and those who were with him into the room."
+        ),
     );
 }
 
@@ -593,7 +667,9 @@ fn repeated_verse_markers_merge_in_vref_across_paragraph_breaks() {
     );
     assert_eq!(
         vref_text(&dict, "2CH 35:19"),
-        Some("The Passover was kept in the eighteenth year of the king. ‘A’ The king burned the idols. ‘B’ No king before him turned to the Lord like this. ‘C’ Yet the fierce anger of the Lord did not turn away. ‘D’ The Lord said, “I will remove Judah from before me.”"),
+        Some(
+            "The Passover was kept in the eighteenth year of the king. ‘A’ The king burned the idols. ‘B’ No king before him turned to the Lord like this. ‘C’ Yet the fierce anger of the Lord did not turn away. ‘D’ The Lord said, “I will remove Judah from before me.”"
+        ),
     );
     assert_eq!(
         vref_text(&dict, "2CH 35:20"),
@@ -623,7 +699,9 @@ fn usfm_serialization_normalizes_spacing_for_continuation_cases() {
         "\\id MRK\n\\c 9\n\\v 1 Truly I say to you, some standing here will not taste death.\n\\s The Transfiguration\n\\p\n\\v 2 After six days Jesus took Peter with him.",
     )
     .to_usfm();
-    assert!(root.contains("\\c 9 \\v 1 Truly I say to you, some standing here will not taste death."));
+    assert!(
+        root.contains("\\c 9 \\v 1 Truly I say to you, some standing here will not taste death.")
+    );
     assert!(root.contains("\\s The Transfiguration"));
     assert!(root.contains("\\p \\v 2 After six days Jesus took Peter with him."));
     assert!(!root.contains("death. \n\\s"));
@@ -654,7 +732,11 @@ fn parse_and_export_basic_document_covers_book_structure_and_note_stripping() {
     let src = "\\id GEN\n\\c 1\n\\s1 The Beginning\n\\p\n\\v 1 In the beginning \\w God|strong=\"H430\"\\w* created the heavens and the earth.\n\\v 2 Now the earth was formless and empty, \\f + \\ft Or possibly \"without form and void\"\\f* darkness was over the surface of the deep, and the Spirit of God was hovering over the waters.\n";
     let usj = parse_usj(src);
     assert_eq!(usj["content"][0]["code"], "GEN");
-    assert!(usj["content"].as_array().is_some_and(|content| content.len() >= 3));
+    assert!(
+        usj["content"]
+            .as_array()
+            .is_some_and(|content| content.len() >= 3)
+    );
 
     let dict = parse_vref(src);
     let v1 = vref_text(&dict, "GEN 1:1").expect("GEN 1:1 should exist");
@@ -679,7 +761,10 @@ fn usfm_roundtrip_preserves_usj_structure_for_basic_document() {
         serde_json::from_str(&roundtripped).expect("round-tripped USJ should parse");
     normalize_json(&mut first);
     normalize_json(&mut roundtripped);
-    assert_eq!(first, roundtripped, "USFM export should round-trip through USJ");
+    assert_eq!(
+        first, roundtripped,
+        "USFM export should round-trip through USJ"
+    );
 }
 
 #[test]
@@ -697,7 +782,9 @@ fn diagnostics_json_reports_unclosed_character_marker_with_location() {
     let diag = doc
         .diagnostics()
         .iter()
-        .find(|d| d.code == DiagnosticCode::UnclosedAtEof || d.code == DiagnosticCode::ImplicitClose)
+        .find(|d| {
+            d.code == DiagnosticCode::UnclosedAtEof || d.code == DiagnosticCode::ImplicitClose
+        })
         .expect("unclosed character marker should emit a diagnostic");
 
     assert!(matches!(diag.severity, Severity::Error | Severity::Warning));
@@ -728,7 +815,11 @@ fn verse_number_fused_to_marker_parses_as_verse_eleven() {
 
     let vref = parse_vref(src);
     assert_eq!(vref[0].0, "GEN 1:11");
-    assert!(vref[0].1.contains("fused verse text"), "vref: {:?}", vref[0]);
+    assert!(
+        vref[0].1.contains("fused verse text"),
+        "vref: {:?}",
+        vref[0]
+    );
 
     let usx = parse(src).to_usx();
     assert!(usx.contains("number=\"11\""), "USX: {usx}");
@@ -745,7 +836,9 @@ fn verse_number_fused_to_marker_parses_as_verse_eleven() {
 fn chapter_inline_title_is_absorbed_not_emitted_as_root_text() {
     let src = "\\id 2SA\n\\c 4 Ish-bosheth Murdered\n\\p\n\\v 1 When Abner's son Ish-bosheth heard";
     let usj = parse_usj(src);
-    let content = usj["content"].as_array().expect("content should be an array");
+    let content = usj["content"]
+        .as_array()
+        .expect("content should be an array");
 
     // Root-level strings are not valid USJ; none should be present.
     assert!(
@@ -779,13 +872,19 @@ fn deprecated_positional_figure_maps_fields_to_named_attributes() {
         .expect("figure should exist");
 
     // The raw bar-list must NOT survive as a `lemma` (the old buggy behavior).
-    assert!(fig.get("lemma").is_none(), "figure should not carry a lemma: {fig}");
+    assert!(
+        fig.get("lemma").is_none(),
+        "figure should not carry a lemma: {fig}"
+    );
     // Positional fields are mapped to their named attributes; empties dropped.
     assert_eq!(fig["alt"], "Sea of Galilee");
     assert_eq!(fig["file"], "avnt016.tif");
     assert_eq!(fig["size"], "span");
     assert!(fig.get("loc").is_none(), "empty LOC field must be dropped");
-    assert!(fig.get("copy").is_none(), "empty COPY field must be dropped");
+    assert!(
+        fig.get("copy").is_none(),
+        "empty COPY field must be dropped"
+    );
     assert_eq!(fig["ref"], "1.18");
     // CAP is the caption (figure element content).
     assert_eq!(fig["content"][0], "At once they left their nets.");
@@ -795,16 +894,27 @@ fn deprecated_positional_figure_maps_fields_to_named_attributes() {
     assert!(usx.contains("alt=\"Sea of Galilee\""), "USX: {usx}");
     assert!(usx.contains("file=\"avnt016.tif\""), "USX: {usx}");
     assert!(usx.contains("ref=\"1.18\""), "USX: {usx}");
-    assert!(usx.contains(">At once they left their nets.</figure>"), "USX: {usx}");
-    assert!(!usx.contains("lemma="), "USX must not emit a lemma attribute: {usx}");
+    assert!(
+        usx.contains(">At once they left their nets.</figure>"),
+        "USX: {usx}"
+    );
+    assert!(
+        !usx.contains("lemma="),
+        "USX must not emit a lemma attribute: {usx}"
+    );
 
     // USFM round-trips the deprecated positional form verbatim (no lemma corruption).
     let usfm = parse(src).to_usfm();
     assert!(
-        usfm.contains("\\fig Sea of Galilee|avnt016.tif|span|||At once they left their nets.|1.18\\fig*"),
+        usfm.contains(
+            "\\fig Sea of Galilee|avnt016.tif|span|||At once they left their nets.|1.18\\fig*"
+        ),
         "USFM round-trip must preserve the positional figure: {usfm}"
     );
-    assert!(!usfm.contains("lemma="), "USFM must not introduce a lemma attribute: {usfm}");
+    assert!(
+        !usfm.contains("lemma="),
+        "USFM must not introduce a lemma attribute: {usfm}"
+    );
 }
 
 /// Modern `\fig caption|src="…" …\fig*` is unaffected by the deprecated-form
@@ -821,7 +931,10 @@ fn modern_figure_attributes_are_unaffected_by_legacy_handling() {
     assert_eq!(fig["file"], "avnt016.tif");
     assert_eq!(fig["size"], "span");
     assert_eq!(fig["ref"], "1.18");
-    assert!(fig.get("alt").is_none(), "modern form has no alt here: {fig}");
+    assert!(
+        fig.get("alt").is_none(),
+        "modern form has no alt here: {fig}"
+    );
     assert_eq!(fig["content"][0], "At once they left their nets.");
 }
 
@@ -835,8 +948,14 @@ fn empty_paragraph_emits_content_array_but_empty_b_omits_it() {
     let usj = parse_usj(src);
     let paras = collect_by_type(&usj, "para");
 
-    let b = paras.iter().find(|p| p["marker"] == "b").expect("\\b should exist");
-    assert!(b.get("content").is_none(), "empty \\b must omit content: {b}");
+    let b = paras
+        .iter()
+        .find(|p| p["marker"] == "b")
+        .expect("\\b should exist");
+    assert!(
+        b.get("content").is_none(),
+        "empty \\b must omit content: {b}"
+    );
 
     // The empty \p preceding \b must carry an explicit empty content array.
     let empty_p = paras
@@ -857,7 +976,8 @@ fn schema_for(version: Version) -> Value {
     serde_json::from_str(&usfm3::schema_json(version)).expect("schema should be valid JSON")
 }
 
-const MIXED_SRC: &str = "\\id GEN\n\\c 1\n\\p\n\\v 1 \\nd יהוה\\nd* said \\f + \\ft note\\f* \u{1F600}\n";
+const MIXED_SRC: &str =
+    "\\id GEN\n\\c 1\n\\p\n\\v 1 \\nd יהוה\\nd* said \\f + \\ft note\\f* \u{1F600}\n";
 
 #[test]
 fn packed_tape_decodes_to_the_tape() {
@@ -865,7 +985,11 @@ fn packed_tape_decodes_to_the_tape() {
     let packed = Packed::new(doc.to_packed_tape(Offsets::Utf8));
     let nodes = &doc.tape().nodes;
 
-    assert_eq!(packed.count(), nodes.len(), "header node count is the TAPE count");
+    assert_eq!(
+        packed.count(),
+        nodes.len(),
+        "header node count is the TAPE count"
+    );
     assert_eq!(packed.offset_space(), Offsets::Utf8.code());
     assert_eq!(packed.version_rank(), Version::V3_1.rank());
     assert_eq!(
@@ -900,7 +1024,10 @@ fn packed_tape_decodes_to_the_tape() {
             _ => {}
         }
     }
-    assert!(saw_number_link && saw_self_link, "fixture should cover both link overloads");
+    assert!(
+        saw_number_link && saw_self_link,
+        "fixture should cover both link overloads"
+    );
 
     // Root's link is the last node index, NOT a close node — the traversal rules have
     // to tolerate that, so pin it.
@@ -912,11 +1039,18 @@ fn packed_node_starts_are_monotonically_non_decreasing() {
     // A *performance* invariant, not a correctness one: `OffsetMap` is forward-only, so
     // one backwards node silently degrades packing toward O(N x len) with nothing
     // failing. Nothing else would catch that, so assert it here.
-    for src in [MIXED_SRC, "\\id GEN", "\\c 1\n\\p text \\add x\\add* more\n\\q1 poetry\n"] {
+    for src in [
+        MIXED_SRC,
+        "\\id GEN",
+        "\\c 1\n\\p text \\add x\\add* more\n\\q1 poetry\n",
+    ] {
         let doc = parse(src);
         let mut prev = 0u32;
         for (i, node) in doc.tape().nodes.iter().enumerate() {
-            assert!(node.start >= prev, "node {i} start went backwards in {src:?}");
+            assert!(
+                node.start >= prev,
+                "node {i} start went backwards in {src:?}"
+            );
             prev = node.start;
         }
     }
@@ -953,7 +1087,9 @@ fn packed_utf16_and_chars_offsets_are_slice_exact() {
         assert_eq!(got, expected, "utf16 slice for node {i}");
 
         let p = chars.node(i);
-        let got: String = scalars[p.start as usize..(p.start + p.len) as usize].iter().collect();
+        let got: String = scalars[p.start as usize..(p.start + p.len) as usize]
+            .iter()
+            .collect();
         assert_eq!(got, expected, "chars slice for node {i}");
     }
 }
@@ -972,18 +1108,23 @@ fn diagnostics_offsets_agree_with_the_packed_tape() {
     // diagnostic's offsets and a tape node's offsets against the *same* string.
     let src = "\\id GEN\n\\c 1\n\\p\n\\v 1 יהוה \\add unclosed\n";
     let doc = parse_with_diagnostics(src);
-    assert!(!doc.diagnostics().is_empty(), "fixture should produce diagnostics");
+    assert!(
+        !doc.diagnostics().is_empty(),
+        "fixture should produce diagnostics"
+    );
 
     for (space, index) in [(Offsets::Utf16, 1usize), (Offsets::Chars, 2usize)] {
-        let diags: Value =
-            serde_json::from_str(&doc.to_diagnostics_json_with(space)).unwrap();
+        let diags: Value = serde_json::from_str(&doc.to_diagnostics_json_with(space)).unwrap();
         let packed = Packed::new(doc.to_packed_tape(space));
         let source_len = [packed.lengths().0, packed.lengths().1, packed.lengths().2][index];
 
         for d in diags.as_array().unwrap() {
             let start = d["start"].as_u64().unwrap() as u32;
             let end = d["end"].as_u64().unwrap() as u32;
-            assert!(start <= end && end <= source_len, "{space:?}: {d} out of range");
+            assert!(
+                start <= end && end <= source_len,
+                "{space:?}: {d} out of range"
+            );
             assert!(d["column"].as_u64().unwrap() >= 1, "columns are 1-based");
         }
     }

@@ -79,7 +79,10 @@ impl ParsedDocument {
     /// rather than a property because it now carries that keyword.
     #[pyo3(signature = (*, offsets="chars"))]
     fn diagnostics(&self, py: Python<'_>, offsets: &str) -> PyResult<PyObject> {
-        json_loads(py, &self.doc().to_diagnostics_json_with(offsets_from(offsets)))
+        json_loads(
+            py,
+            &self.doc().to_diagnostics_json_with(offsets_from(offsets)),
+        )
     }
 
     /// The tape as packed bytes: an 8-word header, then 4 words per node, little-endian

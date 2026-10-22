@@ -32,7 +32,9 @@ pub struct VerseRef(pub u32);
 impl VerseRef {
     #[inline]
     pub fn new(book: BookId, chapter: u16, verse: u16) -> Self {
-        VerseRef(((book.0 as u32) << 24) | (((chapter as u32) & 0xFFF) << 12) | ((verse as u32) & 0xFFF))
+        VerseRef(
+            ((book.0 as u32) << 24) | (((chapter as u32) & 0xFFF) << 12) | ((verse as u32) & 0xFFF),
+        )
     }
     #[inline]
     pub fn book(self) -> BookId {
@@ -50,7 +52,13 @@ impl VerseRef {
 
 impl std::fmt::Display for VerseRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} {}:{}", self.book().code(), self.chapter(), self.verse())
+        write!(
+            f,
+            "{} {}:{}",
+            self.book().code(),
+            self.chapter(),
+            self.verse()
+        )
     }
 }
 
@@ -65,7 +73,10 @@ impl BookId {
 
     pub fn from_code(code: &str) -> Option<BookId> {
         // TODO(build-gen): perfect-hash this lookup.
-        BOOK_CODES.iter().position(|&c| c == code).map(|i| BookId(i as u8))
+        BOOK_CODES
+            .iter()
+            .position(|&c| c == code)
+            .map(|i| BookId(i as u8))
     }
     pub fn code(self) -> &'static str {
         BOOK_CODES.get(self.0 as usize).copied().unwrap_or("???")
@@ -302,10 +313,10 @@ impl<'src> Document<'src> {
                     expect_book = self.table.info(node.marker).map(|m| m.name) == Some("id");
                 }
                 NodeKind::Text if expect_book => {
-                    if let Some(code) = node.span().text(self.source()).split_whitespace().next() {
-                        if let Some(b) = BookId::from_code(code) {
-                            book = b;
-                        }
+                    if let Some(code) = node.span().text(self.source()).split_whitespace().next()
+                        && let Some(b) = BookId::from_code(code)
+                    {
+                        book = b;
                     }
                     expect_book = false;
                 }
@@ -320,7 +331,9 @@ impl<'src> Document<'src> {
                     let label = span_text.split_whitespace().nth(1).unwrap_or_else(|| {
                         // Fallback: malformed \v11 — number embedded in marker name
                         let name = span_text.trim_start_matches('\\');
-                        let d = name.find(|c: char| c.is_ascii_digit()).unwrap_or(name.len());
+                        let d = name
+                            .find(|c: char| c.is_ascii_digit())
+                            .unwrap_or(name.len());
                         &name[d..]
                     });
                     pending = Some((reference, label, node.span().end() as usize, i));
@@ -369,7 +382,12 @@ impl VerseBody {
             }
             match node.kind {
                 NodeKind::Text => {
-                    push_collapsed(node.span().text(doc.source()), buf, start_len, &mut pending_space);
+                    push_collapsed(
+                        node.span().text(doc.source()),
+                        buf,
+                        start_len,
+                        &mut pending_space,
+                    );
                     i += 1;
                 }
                 NodeKind::MarkerOpen => {

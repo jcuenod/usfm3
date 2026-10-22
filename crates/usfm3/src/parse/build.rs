@@ -13,7 +13,7 @@
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::marker::{Category, Closing, MarkerId, MarkerTable, TextRole};
 use crate::span::Span;
-use crate::tape::{flags, Node, NodeKind, Tape};
+use crate::tape::{Node, NodeKind, Tape, flags};
 
 use super::scan;
 
@@ -52,7 +52,15 @@ impl<'a> Builder<'a> {
             len: bytes.len() as u32,
             link: 0,
         });
-        Self { src, bytes, table, nodes, diags: Vec::new(), collect_diags, stack: Vec::new() }
+        Self {
+            src,
+            bytes,
+            table,
+            nodes,
+            diags: Vec::new(),
+            collect_diags,
+            stack: Vec::new(),
+        }
     }
 
     /// Record a diagnostic (no-op when diagnostics are disabled).
@@ -84,28 +92,27 @@ impl<'a> Builder<'a> {
                     if b + 1 < len
                         && self.bytes[b + 1] == b'"'
                         && self.top_takes_attributes()
+                        && let Some(bar_rel) = memchr::memchr(b'|', &self.bytes[pos..b])
                     {
-                        if let Some(bar_rel) = memchr::memchr(b'|', &self.bytes[pos..b]) {
-                            let bar = pos + bar_rel;
-                            if bar > pos {
-                                self.push_leaf(
-                                    NodeKind::Text,
-                                    Span::new(pos as u32, (bar - pos) as u32),
-                                    MarkerId::UNKNOWN,
-                                );
-                            }
-                            let end = self.scan_attr_region(bar);
+                        let bar = pos + bar_rel;
+                        if bar > pos {
                             self.push_leaf(
-                                NodeKind::Attribute,
-                                Span::new(bar as u32, (end - bar) as u32),
+                                NodeKind::Text,
+                                Span::new(pos as u32, (bar - pos) as u32),
                                 MarkerId::UNKNOWN,
                             );
-                            if let Some(&open) = self.stack.last() {
-                                self.nodes[open as usize].flags |= flags::HAS_ATTRS;
-                            }
-                            pos = end;
-                            continue;
                         }
+                        let end = self.scan_attr_region(bar);
+                        self.push_leaf(
+                            NodeKind::Attribute,
+                            Span::new(bar as u32, (end - bar) as u32),
+                            MarkerId::UNKNOWN,
+                        );
+                        if let Some(&open) = self.stack.last() {
+                            self.nodes[open as usize].flags |= flags::HAS_ATTRS;
+                        }
+                        pos = end;
+                        continue;
                     }
                     self.emit_text(pos, b);
                     pos = self.parse_marker(b);
@@ -116,7 +123,10 @@ impl<'a> Builder<'a> {
         self.close_blocks_down_to(0, len, None);
         let last = (self.nodes.len() - 1) as u32;
         self.nodes[0].link = last;
-        BuildOutput { tape: Tape { nodes: self.nodes }, diagnostics: self.diags }
+        BuildOutput {
+            tape: Tape { nodes: self.nodes },
+            diagnostics: self.diags,
+        }
     }
 
     // --- emission helpers --------------------------------------------------
@@ -127,23 +137,42 @@ impl<'a> Builder<'a> {
         if from >= to {
             return;
         }
-        if self.top_takes_attributes() {
-            if let Some(rel) = memchr::memchr(b'|', &self.bytes[from..to]) {
-                let bar = from + rel;
-                self.push_leaf(NodeKind::Text, Span::new(from as u32, (bar - from) as u32), MarkerId::UNKNOWN);
-                self.push_leaf(NodeKind::Attribute, Span::new(bar as u32, (to - bar) as u32), MarkerId::UNKNOWN);
-                if let Some(&open) = self.stack.last() {
-                    self.nodes[open as usize].flags |= flags::HAS_ATTRS;
-                }
-                return;
+        if self.top_takes_attributes()
+            && let Some(rel) = memchr::memchr(b'|', &self.bytes[from..to])
+        {
+            let bar = from + rel;
+            self.push_leaf(
+                NodeKind::Text,
+                Span::new(from as u32, (bar - from) as u32),
+                MarkerId::UNKNOWN,
+            );
+            self.push_leaf(
+                NodeKind::Attribute,
+                Span::new(bar as u32, (to - bar) as u32),
+                MarkerId::UNKNOWN,
+            );
+            if let Some(&open) = self.stack.last() {
+                self.nodes[open as usize].flags |= flags::HAS_ATTRS;
             }
+            return;
         }
-        self.push_leaf(NodeKind::Text, Span::new(from as u32, (to - from) as u32), MarkerId::UNKNOWN);
+        self.push_leaf(
+            NodeKind::Text,
+            Span::new(from as u32, (to - from) as u32),
+            MarkerId::UNKNOWN,
+        );
     }
 
     fn push_leaf(&mut self, kind: NodeKind, span: Span, marker: MarkerId) -> u32 {
         let idx = self.nodes.len() as u32;
-        self.nodes.push(Node { kind, flags: 0, marker, start: span.start, len: span.len, link: idx });
+        self.nodes.push(Node {
+            kind,
+            flags: 0,
+            marker,
+            start: span.start,
+            len: span.len,
+            link: idx,
+        });
         idx
     }
 
@@ -184,7 +213,10 @@ impl<'a> Builder<'a> {
         self.stack
             .last()
             .and_then(|&i| self.table.info(self.nodes[i as usize].marker))
-            .map(|m| matches!(m.category, Category::Character | Category::Milestone) || m.usx_element == "periph")
+            .map(|m| {
+                matches!(m.category, Category::Character | Category::Milestone)
+                    || m.usx_element == "periph"
+            })
             .unwrap_or(false)
     }
 
@@ -224,7 +256,10 @@ impl<'a> Builder<'a> {
     /// ends a remark nested mid-paragraph, leaving the paragraph itself open.
     fn close_rem(&mut self, at: usize) {
         if let Some(pos) = self.stack.iter().rposition(|&oi| {
-            self.table.info(self.nodes[oi as usize].marker).map(|m| m.usx_element) == Some("rem")
+            self.table
+                .info(self.nodes[oi as usize].marker)
+                .map(|m| m.usx_element)
+                == Some("rem")
         }) {
             self.close_blocks_down_to(pos, at, Some("v"));
         }
@@ -233,7 +268,9 @@ impl<'a> Builder<'a> {
     /// Whether the open node at `idx` is a block container (sidebar / periph).
     fn is_container(&self, idx: u32) -> bool {
         matches!(
-            self.table.info(self.nodes[idx as usize].marker).map(|m| m.usx_element),
+            self.table
+                .info(self.nodes[idx as usize].marker)
+                .map(|m| m.usx_element),
             Some("sidebar") | Some("periph")
         )
     }
@@ -246,7 +283,9 @@ impl<'a> Builder<'a> {
         let len = self.bytes.len();
         let mut p = from;
         while p < len {
-            let Some(rel) = memchr::memchr(b'\\', &self.bytes[p..]) else { return false };
+            let Some(rel) = memchr::memchr(b'\\', &self.bytes[p..]) else {
+                return false;
+            };
             let m = p + rel;
             let mut k = m + 1;
             if k < len && self.bytes[k] == b'+' {
@@ -306,7 +345,8 @@ impl<'a> Builder<'a> {
                 || category == Some(Category::Milestone);
 
             if diagnose {
-                let make: Box<dyn FnOnce() -> Diagnostic> = if category == Some(Category::Milestone) {
+                let make: Box<dyn FnOnce() -> Diagnostic> = if category == Some(Category::Milestone)
+                {
                     // Every milestone must self-close with `\*` (`\zaln-s |…\*`).
                     Box::new(move || {
                         Diagnostic::error(
@@ -320,7 +360,9 @@ impl<'a> Builder<'a> {
                         Diagnostic::error(
                             DiagnosticCode::UnclosedNote,
                             span,
-                            format!("note \\{name} was not closed before a paragraph/chapter boundary"),
+                            format!(
+                                "note \\{name} was not closed before a paragraph/chapter boundary"
+                            ),
                         )
                     })
                 } else if let Some(by) = closer {
@@ -329,7 +371,9 @@ impl<'a> Builder<'a> {
                         Diagnostic::error(
                             DiagnosticCode::ImplicitClose,
                             span,
-                            format!("\\{name} is missing its explicit \\{name}*; it was closed implicitly by \\{by}"),
+                            format!(
+                                "\\{name} is missing its explicit \\{name}*; it was closed implicitly by \\{by}"
+                            ),
                         )
                     })
                 } else {
@@ -375,7 +419,11 @@ impl<'a> Builder<'a> {
                     return end;
                 }
             }
-            self.push_leaf(NodeKind::Error, Span::new(b as u32, (end - b) as u32), MarkerId::UNKNOWN);
+            self.push_leaf(
+                NodeKind::Error,
+                Span::new(b as u32, (end - b) as u32),
+                MarkerId::UNKNOWN,
+            );
             return end;
         }
 
@@ -388,7 +436,11 @@ impl<'a> Builder<'a> {
                     "stray '\\' at end of input",
                 )
             });
-            self.push_leaf(NodeKind::Error, Span::new(b as u32, (j - b) as u32), MarkerId::UNKNOWN);
+            self.push_leaf(
+                NodeKind::Error,
+                Span::new(b as u32, (j - b) as u32),
+                MarkerId::UNKNOWN,
+            );
             return j;
         }
 
@@ -416,7 +468,11 @@ impl<'a> Builder<'a> {
                     "'\\' not followed by a marker tag",
                 )
             });
-            self.push_leaf(NodeKind::Error, Span::new(b as u32, (j - b) as u32), MarkerId::UNKNOWN);
+            self.push_leaf(
+                NodeKind::Error,
+                Span::new(b as u32, (j - b) as u32),
+                MarkerId::UNKNOWN,
+            );
             return j;
         }
 
@@ -429,16 +485,17 @@ impl<'a> Builder<'a> {
         // Deprecated-but-valid markers parse normally and carry an advisory. The
         // deprecation (and its version) is data from the marker table; the lookup is
         // gated so the hot path (diagnostics off) pays nothing.
-        if self.collect_diags {
-            if let Some(replacement) = id.and_then(|id| self.table.info(id)).and_then(|m| m.deprecated)
-            {
-                let span = Span::new(b as u32, (j - b) as u32);
-                self.diags.push(Diagnostic::warning(
-                    DiagnosticCode::DeprecatedMarker,
-                    span,
-                    format!("\\{tag} is deprecated; prefer {replacement}"),
-                ));
-            }
+        if self.collect_diags
+            && let Some(replacement) = id
+                .and_then(|id| self.table.info(id))
+                .and_then(|m| m.deprecated)
+        {
+            let span = Span::new(b as u32, (j - b) as u32);
+            self.diags.push(Diagnostic::warning(
+                DiagnosticCode::DeprecatedMarker,
+                span,
+                format!("\\{tag} is deprecated; prefer {replacement}"),
+            ));
         }
 
         match id.and_then(|id| self.table.info(id).map(|m| (id, m.category))) {
@@ -448,7 +505,9 @@ impl<'a> Builder<'a> {
                     // `\esbe` closes the nearest open sidebar and anything inside it,
                     // owning its own token bytes as the sidebar's close node.
                     let sidebar = self.stack.iter().rposition(|&oi| {
-                        self.table.info(self.nodes[oi as usize].marker).map(|m| m.usx_element)
+                        self.table
+                            .info(self.nodes[oi as usize].marker)
+                            .map(|m| m.usx_element)
                             == Some("sidebar")
                     });
                     if let Some(pos) = sidebar {
@@ -472,9 +531,10 @@ impl<'a> Builder<'a> {
                     // Inside a body paragraph, \rem nests as a child remark instead
                     // of ending the paragraph; at the top level it is an ordinary block.
                     let nest = self.stack.last().is_some_and(|&top| {
-                        self.table.info(self.nodes[top as usize].marker).map(|m| {
-                            (m.category, m.text_role)
-                        }) == Some((Category::Paragraph, TextRole::Boundary))
+                        self.table
+                            .info(self.nodes[top as usize].marker)
+                            .map(|m| (m.category, m.text_role))
+                            == Some((Category::Paragraph, TextRole::Boundary))
                     });
                     if nest {
                         let idx = self.push_open(Span::new(b as u32, (j - b) as u32), id);
@@ -486,7 +546,11 @@ impl<'a> Builder<'a> {
                 // level; ordinary blocks only close down to the innermost container,
                 // so they nest inside an open sidebar/periph.
                 let is_container = matches!(usx, "sidebar" | "periph");
-                let target = if is_container { 0 } else { self.container_floor() };
+                let target = if is_container {
+                    0
+                } else {
+                    self.container_floor()
+                };
                 self.close_blocks_down_to(target, b, Some(tag));
                 let idx = self.push_open(Span::new(b as u32, (j - b) as u32), id);
                 self.stack.push(idx);
@@ -500,8 +564,9 @@ impl<'a> Builder<'a> {
                 // line. Extending the span consumes it so it is never emitted as a
                 // floating root-level Text node in USJ/USX (chapters have no text body).
                 let end = self.consume_line_remainder(end);
-                let idx = self.push_leaf(NodeKind::Chapter, Span::new(b as u32, (end - b) as u32), id);
-                self.nodes[idx as usize].link = num as u32; // number, not a jump pointer
+                let idx =
+                    self.push_leaf(NodeKind::Chapter, Span::new(b as u32, (end - b) as u32), id);
+                self.nodes[idx as usize].link = num; // number, not a jump pointer
                 self.nodes[idx as usize].flags |= flags::SELF_CLOSING;
                 end
             }
@@ -510,8 +575,9 @@ impl<'a> Builder<'a> {
                 // — except a \rem nested in the paragraph, which ends at the verse.
                 self.close_rem(b);
                 let (num, end) = self.read_number_from_tag_or_text(id, tag, j);
-                let idx = self.push_leaf(NodeKind::Verse, Span::new(b as u32, (end - b) as u32), id);
-                self.nodes[idx as usize].link = num as u32;
+                let idx =
+                    self.push_leaf(NodeKind::Verse, Span::new(b as u32, (end - b) as u32), id);
+                self.nodes[idx as usize].link = num;
                 self.nodes[idx as usize].flags |= flags::SELF_CLOSING;
                 end
             }
@@ -534,20 +600,15 @@ impl<'a> Builder<'a> {
                         }
                         _ => false,
                     };
-                if acts_as_sibling {
-                    if let Some(&top) = self.stack.last() {
-                        let top_is_sibling = self
-                            .table
-                            .info(self.nodes[top as usize].marker)
-                            .map(|m| {
-                                m.category == Category::Character
-                                    && matches!(m.closing, Closing::None | Closing::Optional)
-                            })
-                            == Some(true);
-                        if top_is_sibling {
-                            self.stack.pop();
-                            self.emit_close(top, b, NodeKind::MarkerClose, true);
-                        }
+                if acts_as_sibling && let Some(&top) = self.stack.last() {
+                    let top_is_sibling =
+                        self.table.info(self.nodes[top as usize].marker).map(|m| {
+                            m.category == Category::Character
+                                && matches!(m.closing, Closing::None | Closing::Optional)
+                        }) == Some(true);
+                    if top_is_sibling {
+                        self.stack.pop();
+                        self.emit_close(top, b, NodeKind::MarkerClose, true);
                     }
                 }
                 let idx = self.push_open(Span::new(b as u32, (j - b) as u32), id);
@@ -581,7 +642,9 @@ impl<'a> Builder<'a> {
     fn handle_close(&mut self, b: usize, j: usize, id: Option<MarkerId>, tag: &str) -> usize {
         let span = Span::new(b as u32, (j - b) as u32);
         let matching = id.and_then(|id| {
-            self.stack.iter().rposition(|&oi| self.nodes[oi as usize].marker == id)
+            self.stack
+                .iter()
+                .rposition(|&oi| self.nodes[oi as usize].marker == id)
         });
         match matching {
             Some(pos_in_stack) => {
@@ -629,14 +692,21 @@ impl<'a> Builder<'a> {
     /// in the marker name itself. When the tag is longer than the base marker name
     /// and starts with a digit after the base letters, extract the number from the
     /// tag rather than reading it from the text after the marker.
-    fn read_number_from_tag_or_text(&self, id: MarkerId, tag: &str, after_tag: usize) -> (u32, usize) {
+    fn read_number_from_tag_or_text(
+        &self,
+        id: MarkerId,
+        tag: &str,
+        after_tag: usize,
+    ) -> (u32, usize) {
         let base_len = self.table.info(id).map_or(0, |m| m.name.len());
         let suffix = &tag[base_len..];
         if suffix.starts_with(|c: char| c.is_ascii_digit()) {
             let value = suffix
                 .bytes()
                 .take_while(|b| b.is_ascii_digit())
-                .fold(0u32, |acc, b| acc.saturating_mul(10).saturating_add((b - b'0') as u32));
+                .fold(0u32, |acc, b| {
+                    acc.saturating_mul(10).saturating_add((b - b'0') as u32)
+                });
             (value, after_tag) // number came from tag; no extra bytes consumed
         } else {
             self.read_number(after_tag)
@@ -657,13 +727,17 @@ impl<'a> Builder<'a> {
         let mut saw_digit = false;
         // Leading integer.
         while k < len && self.bytes[k].is_ascii_digit() {
-            value = value.saturating_mul(10).saturating_add((self.bytes[k] - b'0') as u32);
+            value = value
+                .saturating_mul(10)
+                .saturating_add((self.bytes[k] - b'0') as u32);
             saw_digit = true;
             k += 1;
         }
         // Trailing range/letter part (e.g. "-2", "a") stays inside the token.
         while k < len
-            && (self.bytes[k].is_ascii_alphanumeric() || self.bytes[k] == b'-' || self.bytes[k] == b',')
+            && (self.bytes[k].is_ascii_alphanumeric()
+                || self.bytes[k] == b'-'
+                || self.bytes[k] == b',')
         {
             k += 1;
         }

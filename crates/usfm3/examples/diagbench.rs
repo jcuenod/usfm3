@@ -18,8 +18,16 @@ fn diag_doc(n: usize) -> String {
 }
 
 fn med(mut f: impl FnMut() -> usize) -> f64 {
-    for _ in 0..3 { f(); }
-    let mut runs: Vec<f64> = (0..9).map(|_| { let t = Instant::now(); f(); t.elapsed().as_secs_f64() * 1e3 }).collect();
+    for _ in 0..3 {
+        f();
+    }
+    let mut runs: Vec<f64> = (0..9)
+        .map(|_| {
+            let t = Instant::now();
+            f();
+            t.elapsed().as_secs_f64() * 1e3
+        })
+        .collect();
     runs.sort_by(f64::total_cmp);
     runs[4]
 }
@@ -59,19 +67,42 @@ fn main() {
     );
     for n in [0usize, 5, 50, 500, 5000] {
         let src = diag_doc(n);
-        let count = usfm3::parse_with(&src, Version::V3_1, opts).diagnostics().len();
-        let bytes = usfm3::parse_with(&src, Version::V3_1, opts).to_diagnostics_json().len();
-        let base = med(|| usfm3::parse_with(&src, Version::V3_1, opts).diagnostics().len());
-        let full = med(|| usfm3::parse_with(&src, Version::V3_1, opts).to_diagnostics_json().len());
-        let per = if count > 0 { (full - base) * 1000.0 / count as f64 } else { 0.0 };
+        let count = usfm3::parse_with(&src, Version::V3_1, opts)
+            .diagnostics()
+            .len();
+        let bytes = usfm3::parse_with(&src, Version::V3_1, opts)
+            .to_diagnostics_json()
+            .len();
+        let base = med(|| {
+            usfm3::parse_with(&src, Version::V3_1, opts)
+                .diagnostics()
+                .len()
+        });
+        let full = med(|| {
+            usfm3::parse_with(&src, Version::V3_1, opts)
+                .to_diagnostics_json()
+                .len()
+        });
+        let per = if count > 0 {
+            (full - base) * 1000.0 / count as f64
+        } else {
+            0.0
+        };
         println!(
             "{:>7} {:>7.2}ms {:>9.2}ms {:>11} {:>7.2}us",
-            count, base, full - base, bytes, per
+            count,
+            base,
+            full - base,
+            bytes,
+            per
         );
     }
 
     println!("\nline/column resolution in isolation — the part Phase 1 changed:\n");
-    println!("{:>7} {:>14} {:>14} {:>10}", "diags", "line_col each", "one OffsetMap", "speedup");
+    println!(
+        "{:>7} {:>14} {:>14} {:>10}",
+        "diags", "line_col each", "one OffsetMap", "speedup"
+    );
     for n in [50usize, 500, 5000] {
         let src = diag_doc(n);
         let doc = usfm3::parse_with(&src, Version::V3_1, opts);
@@ -82,7 +113,10 @@ fn main() {
         assert_eq!(line_col_per_diagnostic(&doc), offsetmap_for_all(&doc));
         println!(
             "{:>7} {:>11.3}ms {:>11.3}ms {:>9.0}x",
-            count, old, new, old / new.max(f64::MIN_POSITIVE)
+            count,
+            old,
+            new,
+            old / new.max(f64::MIN_POSITIVE)
         );
     }
 }

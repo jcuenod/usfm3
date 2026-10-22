@@ -36,9 +36,7 @@ use tape::Tape;
 // --- public API surface ----------------------------------------------------
 
 pub use diagnostic::{Diagnostic, DiagnosticCode, Severity};
-pub use serialize::packed::{
-    PACKED_FORMAT, PACKED_HEADER_WORDS, PACKED_MAGIC, PACKED_NODE_WORDS,
-};
+pub use serialize::packed::{PACKED_FORMAT, PACKED_HEADER_WORDS, PACKED_MAGIC, PACKED_NODE_WORDS};
 pub use serialize::schema::schema_json;
 pub use serialize::vref::{BOOK_CODES, BookId, VerseRef, VrefRow, VrefText};
 
@@ -57,16 +55,11 @@ pub mod low_level {
 pub use span::Offsets;
 
 /// USFM specification version. Selects the [`MarkerTable`] and lint rules.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Version {
+    #[default]
     V3_1,
     V3_2,
-}
-
-impl Default for Version {
-    fn default() -> Self {
-        Version::V3_1
-    }
 }
 
 impl Version {
@@ -121,7 +114,8 @@ pub fn parse_with(source: &str, version: Version, options: ParseOptions) -> Docu
         doc.validate();
         // Emit in source order. Stable, so parser vs. validation order is kept
         // for diagnostics at the same offset.
-        doc.diagnostics.sort_by_key(|d| (d.span.start, d.span.end()));
+        doc.diagnostics
+            .sort_by_key(|d| (d.span.start, d.span.end()));
     }
     doc
 }
@@ -216,7 +210,8 @@ mod tests {
             doc.vref_dict(),
             vec![(
                 "PSA 132:5".into(),
-                "until I find a place for the LORD, a dwelling for the Mighty One of Jacob.”".into()
+                "until I find a place for the LORD, a dwelling for the Mighty One of Jacob.”"
+                    .into()
             )]
         );
     }
@@ -236,7 +231,11 @@ mod tests {
     fn milestone_does_not_error() {
         // \qt-s\* ... \qt-e\* milestones parse cleanly; the quoted text is kept.
         let opts = ParseOptions { diagnostics: true };
-        let doc = parse_with("\\id MAT\n\\c 1\n\\p\n\\v 1 He said \\qt-s\\*Follow me\\qt-e\\* today.", Version::V3_1, opts);
+        let doc = parse_with(
+            "\\id MAT\n\\c 1\n\\p\n\\v 1 He said \\qt-s\\*Follow me\\qt-e\\* today.",
+            Version::V3_1,
+            opts,
+        );
         assert!(doc.diagnostics().is_empty(), "{:?}", doc.diagnostics());
         assert_eq!(doc.vref_dict()[0].1, "He said Follow me today.");
     }
@@ -246,10 +245,20 @@ mod tests {
         let opts = ParseOptions { diagnostics: true };
         // \v directly after \c with no \p.
         let outside = parse_with("\\id GEN\n\\c 1\n\\v 1 text", Version::V3_1, opts);
-        assert!(outside.diagnostics().iter().any(|d| d.code == DiagnosticCode::VerseOutsideParagraph));
+        assert!(
+            outside
+                .diagnostics()
+                .iter()
+                .any(|d| d.code == DiagnosticCode::VerseOutsideParagraph)
+        );
         // Same content but inside \p → no such warning.
         let inside = parse_with("\\id GEN\n\\c 1\n\\p\n\\v 1 text", Version::V3_1, opts);
-        assert!(!inside.diagnostics().iter().any(|d| d.code == DiagnosticCode::VerseOutsideParagraph));
+        assert!(
+            !inside
+                .diagnostics()
+                .iter()
+                .any(|d| d.code == DiagnosticCode::VerseOutsideParagraph)
+        );
     }
 
     #[test]
@@ -257,13 +266,27 @@ mod tests {
         let opts = ParseOptions { diagnostics: true };
         // Bad book code.
         let bad = parse_with("\\id XYZ\n\\c 1\n\\p\n\\v 1 t", Version::V3_1, opts);
-        assert!(bad.diagnostics().iter().any(|d| d.code == DiagnosticCode::InvalidBookCode));
+        assert!(
+            bad.diagnostics()
+                .iter()
+                .any(|d| d.code == DiagnosticCode::InvalidBookCode)
+        );
         // Valid deuterocanonical code → no InvalidBookCode.
         let good = parse_with("\\id TOB\n\\c 1\n\\p\n\\v 1 t", Version::V3_1, opts);
-        assert!(!good.diagnostics().iter().any(|d| d.code == DiagnosticCode::InvalidBookCode));
+        assert!(
+            !good
+                .diagnostics()
+                .iter()
+                .any(|d| d.code == DiagnosticCode::InvalidBookCode)
+        );
         // \v inside a \s heading (no body \p) → verse-outside-paragraph.
         let heading = parse_with("\\id GEN\n\\c 1\n\\s Heading\n\\v 1 t", Version::V3_1, opts);
-        assert!(heading.diagnostics().iter().any(|d| d.code == DiagnosticCode::VerseOutsideParagraph));
+        assert!(
+            heading
+                .diagnostics()
+                .iter()
+                .any(|d| d.code == DiagnosticCode::VerseOutsideParagraph)
+        );
     }
 
     #[test]
@@ -274,44 +297,94 @@ mod tests {
         // Opt-in: the \add closed by the following \p is reported, plus a
         // missing-id validation error.
         let doc = parse_with(src, Version::V3_1, ParseOptions { diagnostics: true });
-        assert!(doc.diagnostics().iter().any(|d| d.code == DiagnosticCode::ImplicitClose));
-        assert!(doc.diagnostics().iter().any(|d| d.code == DiagnosticCode::MissingIdMarker));
+        assert!(
+            doc.diagnostics()
+                .iter()
+                .any(|d| d.code == DiagnosticCode::ImplicitClose)
+        );
+        assert!(
+            doc.diagnostics()
+                .iter()
+                .any(|d| d.code == DiagnosticCode::MissingIdMarker)
+        );
     }
 
     /// Helper: does parsing `src` (with diagnostics on) emit `code` at `severity`?
     fn emits(src: &str, code: DiagnosticCode, sev: crate::diagnostic::Severity) -> bool {
         let doc = parse_with(src, Version::V3_1, ParseOptions { diagnostics: true });
-        doc.diagnostics().iter().any(|d| d.code == code && d.severity == sev)
+        doc.diagnostics()
+            .iter()
+            .any(|d| d.code == code && d.severity == sev)
     }
 
     #[test]
     fn structural_validation_errors() {
         use crate::diagnostic::Severity::Error;
         // A second \id is an error.
-        assert!(emits("\\id GEN\n\\c 1\n\\p\n\\v 1 t\n\\id MAT", DiagnosticCode::DuplicateId, Error));
+        assert!(emits(
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 t\n\\id MAT",
+            DiagnosticCode::DuplicateId,
+            Error
+        ));
         // A body paragraph before the first \c (in a scripture book).
-        assert!(emits("\\id GAL\n\\p before\n\\c 1\n\\p\n\\v 1 t", DiagnosticCode::BodyParagraphBeforeChapter, Error));
+        assert!(emits(
+            "\\id GAL\n\\p before\n\\c 1\n\\p\n\\v 1 t",
+            DiagnosticCode::BodyParagraphBeforeChapter,
+            Error
+        ));
         // An unknown marker (outside the \z user namespace).
-        assert!(emits("\\id GEN\n\\c 1\n\\p\n\\v 1 t\n\\ix bad", DiagnosticCode::UnknownMarker, Error));
+        assert!(emits(
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 t\n\\ix bad",
+            DiagnosticCode::UnknownMarker,
+            Error
+        ));
         // A \z… custom marker is allowed silently.
-        assert!(!emits("\\id GEN\n\\c 1\n\\p\n\\v 1 t \\zwhatever x", DiagnosticCode::UnknownMarker, Error));
+        assert!(!emits(
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 t \\zwhatever x",
+            DiagnosticCode::UnknownMarker,
+            Error
+        ));
         // A \esb sidebar with no \esbe, left open at EOF.
-        assert!(emits("\\id GEN\n\\c 1\n\\p \\v 1 text\\esb", DiagnosticCode::UnclosedAtEof, Error));
+        assert!(emits(
+            "\\id GEN\n\\c 1\n\\p \\v 1 text\\esb",
+            DiagnosticCode::UnclosedAtEof,
+            Error
+        ));
     }
 
     #[test]
     fn content_validation_errors() {
         use crate::diagnostic::Severity::Error;
         // \w with neither content nor attributes.
-        assert!(emits("\\id GEN\n\\c 1\n\\p\n\\v 1 a \\w \\w* b", DiagnosticCode::EmptyWordMarker, Error));
+        assert!(emits(
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 a \\w \\w* b",
+            DiagnosticCode::EmptyWordMarker,
+            Error
+        ));
         // \rb missing its required gloss attribute.
-        assert!(emits("\\id GEN\n\\c 1\n\\p\n\\v 1 \\rb text\\rb*", DiagnosticCode::MissingRequiredAttribute, Error));
+        assert!(emits(
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 \\rb text\\rb*",
+            DiagnosticCode::MissingRequiredAttribute,
+            Error
+        ));
         // …but providing the gloss (default attribute) clears it.
-        assert!(!emits("\\id GEN\n\\c 1\n\\p\n\\v 1 \\rb text|gloss\\rb*", DiagnosticCode::MissingRequiredAttribute, Error));
+        assert!(!emits(
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 \\rb text|gloss\\rb*",
+            DiagnosticCode::MissingRequiredAttribute,
+            Error
+        ));
         // A milestone missing its self-closing \*.
-        assert!(emits("\\id GEN\n\\c 1\n\\p\n\\v 1 \\zaln-s |x-lemma=\"a\"\n\\w b\\w*", DiagnosticCode::MissingMilestoneSelfClose, Error));
+        assert!(emits(
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 \\zaln-s |x-lemma=\"a\"\n\\w b\\w*",
+            DiagnosticCode::MissingMilestoneSelfClose,
+            Error
+        ));
         // …but a properly self-closed milestone is fine.
-        assert!(!emits("\\id GEN\n\\c 1\n\\p\n\\v 1 \\qt-s |who=\"X\"\\*hi\\qt-e\\*", DiagnosticCode::MissingMilestoneSelfClose, Error));
+        assert!(!emits(
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 \\qt-s |who=\"X\"\\*hi\\qt-e\\*",
+            DiagnosticCode::MissingMilestoneSelfClose,
+            Error
+        ));
     }
 
     // --- marker-handling minutiae (ported from rsusfm3's builder/markers tests,
@@ -327,7 +400,11 @@ mod tests {
     fn fm_marker_parses_as_character() {
         // \fm (footnote reference mark) is a known character marker, not unknown.
         let src = "\\id GEN\n\\c 1\n\\p\n\\v 17 text\\fm GEN 2:9\\fm* more text";
-        assert!(!emits(src, DiagnosticCode::UnknownMarker, crate::diagnostic::Severity::Error));
+        assert!(!emits(
+            src,
+            DiagnosticCode::UnknownMarker,
+            crate::diagnostic::Severity::Error
+        ));
         assert!(usj_has_char(src, "fm"));
     }
 
@@ -335,7 +412,10 @@ mod tests {
     fn addpn_parses_as_character_with_deprecation_warning() {
         use crate::diagnostic::Severity::{Error, Warning};
         let src = "\\id GEN\n\\c 1\n\\p\n\\v 1 text \\addpn Added Name\\addpn* more";
-        assert!(!emits(src, DiagnosticCode::UnknownMarker, Error), "\\addpn is known");
+        assert!(
+            !emits(src, DiagnosticCode::UnknownMarker, Error),
+            "\\addpn is known"
+        );
         assert!(usj_has_char(src, "addpn"), "\\addpn parses as a char node");
         let doc = parse_with(src, Version::V3_1, ParseOptions { diagnostics: true });
         let deprecations = doc
@@ -350,14 +430,30 @@ mod tests {
     fn implicit_close_vs_unclosed_at_eof_vs_unclosed_note() {
         use crate::diagnostic::Severity::Error;
         // \add crossing a paragraph boundary → ImplicitClose, naming both markers.
-        let doc = parse_with("\\id GEN\n\\c 1\n\\p\n\\v 1 \\add text\n\\p next", Version::V3_1, ParseOptions { diagnostics: true });
-        assert!(doc.diagnostics().iter().any(|d| d.code == DiagnosticCode::ImplicitClose
-            && d.message.contains("\\add")
-            && d.message.contains("\\p")));
+        let doc = parse_with(
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 \\add text\n\\p next",
+            Version::V3_1,
+            ParseOptions { diagnostics: true },
+        );
+        assert!(
+            doc.diagnostics()
+                .iter()
+                .any(|d| d.code == DiagnosticCode::ImplicitClose
+                    && d.message.contains("\\add")
+                    && d.message.contains("\\p"))
+        );
         // \add open at EOF → UnclosedAtEof (not ImplicitClose).
-        assert!(emits("\\id GEN\n\\c 1\n\\p\n\\v 1 \\add text", DiagnosticCode::UnclosedAtEof, Error));
+        assert!(emits(
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 \\add text",
+            DiagnosticCode::UnclosedAtEof,
+            Error
+        ));
         // \f note open at a paragraph boundary → UnclosedNote.
-        assert!(emits("\\id GEN\n\\c 1\n\\p\n\\v 1 t\\f + note\n\\p next", DiagnosticCode::UnclosedNote, Error));
+        assert!(emits(
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 t\\f + note\n\\p next",
+            DiagnosticCode::UnclosedNote,
+            Error
+        ));
     }
 
     #[test]
@@ -370,26 +466,47 @@ mod tests {
             "\\id GEN\n\\c 1\n\\p\n\\v 1 \\zcustom text",
         ] {
             let doc = parse_with(src, Version::V3_1, ParseOptions { diagnostics: true });
-            assert!(!doc.diagnostics().iter().any(|d| matches!(
-                d.code,
-                DiagnosticCode::UnknownMarker | DiagnosticCode::ImplicitClose | DiagnosticCode::UnclosedAtEof
-            ) && d.severity == Error), "no diagnostics for {src:?}");
+            assert!(
+                !doc.diagnostics().iter().any(|d| matches!(
+                    d.code,
+                    DiagnosticCode::UnknownMarker
+                        | DiagnosticCode::ImplicitClose
+                        | DiagnosticCode::UnclosedAtEof
+                ) && d.severity == Error),
+                "no diagnostics for {src:?}"
+            );
         }
     }
 
     #[test]
     fn root_level_verse_warns_once() {
         // Two verses at chapter root (no \p) warn exactly once, not per verse.
-        let doc = parse_with("\\id GEN\n\\c 1\n\\v 1 text\n\\v 2 more", Version::V3_1, ParseOptions { diagnostics: true });
-        let warns = doc.diagnostics().iter().filter(|d| d.code == DiagnosticCode::VerseOutsideParagraph).count();
+        let doc = parse_with(
+            "\\id GEN\n\\c 1\n\\v 1 text\n\\v 2 more",
+            Version::V3_1,
+            ParseOptions { diagnostics: true },
+        );
+        let warns = doc
+            .diagnostics()
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::VerseOutsideParagraph)
+            .count();
         assert_eq!(warns, 1, "only the first root-level verse warns");
     }
 
     #[test]
     fn verse_range_and_subverse_sids() {
         // Bridges (3-4, 12-83) and sub-verse letters (3b) keep their label in the sid.
-        for (num, sid) in [("3-4", "GEN 1:3-4"), ("12-83", "GEN 1:12-83"), ("3b", "GEN 1:3b")] {
-            let usj = parse(&format!("\\id GEN\n\\c 1\n\\p\n\\v {num} text"), Version::V3_1).to_usj();
+        for (num, sid) in [
+            ("3-4", "GEN 1:3-4"),
+            ("12-83", "GEN 1:12-83"),
+            ("3b", "GEN 1:3b"),
+        ] {
+            let usj = parse(
+                &format!("\\id GEN\n\\c 1\n\\p\n\\v {num} text"),
+                Version::V3_1,
+            )
+            .to_usj();
             assert!(usj.contains(&format!("\"number\":\"{num}\"")), "{num}");
             assert!(usj.contains(&format!("\"sid\":\"{sid}\"")), "{sid}");
         }
@@ -406,9 +523,24 @@ mod tests {
         let cat = |name: &str| t.lookup(name).and_then(|id| t.info(id)).map(|m| m.category);
 
         let groups: &[(Category, &[&str])] = &[
-            (Category::Identification, &["id", "h", "toc", "usfm", "ide", "sts", "rem", "periph"]),
-            (Category::Paragraph, &["p", "m", "q", "b", "pb", "tr", "li", "mt", "ms", "s", "imt", "io", "cl", "cd", "esb", "esbe"]),
-            (Category::Character, &["add", "nd", "wj", "w", "bk", "fm", "addpn", "pn", "ca", "vp", "xt", "ref", "fr", "ft", "fdc", "xo", "th", "tc", "fig"]),
+            (
+                Category::Identification,
+                &["id", "h", "toc", "usfm", "ide", "sts", "rem", "periph"],
+            ),
+            (
+                Category::Paragraph,
+                &[
+                    "p", "m", "q", "b", "pb", "tr", "li", "mt", "ms", "s", "imt", "io", "cl", "cd",
+                    "esb", "esbe",
+                ],
+            ),
+            (
+                Category::Character,
+                &[
+                    "add", "nd", "wj", "w", "bk", "fm", "addpn", "pn", "ca", "vp", "xt", "ref",
+                    "fr", "ft", "fdc", "xo", "th", "tc", "fig",
+                ],
+            ),
             (Category::Note, &["f", "fe", "ef", "x", "ex"]),
             (Category::Milestone, &["qt-s", "zaln-s", "ts-s", "k-s"]),
             (Category::Chapter, &["c"]),
@@ -416,7 +548,11 @@ mod tests {
         ];
         for (expected, names) in groups {
             for name in *names {
-                assert_eq!(cat(name), Some(*expected), "\\{name} should be {expected:?}");
+                assert_eq!(
+                    cat(name),
+                    Some(*expected),
+                    "\\{name} should be {expected:?}"
+                );
             }
         }
         // Numbered / level / column-span variants resolve to their base's family.
@@ -436,7 +572,10 @@ mod tests {
         // boundary space joining the parts.
         let src = "\\id GEN\n\\c 1\n\\p\n\\v 1 first part\n\\p continued part\n\\v 2 next";
         let dict = parse(src, Version::V3_1).vref_dict();
-        assert_eq!(dict[0], ("GEN 1:1".into(), "first part continued part".into()));
+        assert_eq!(
+            dict[0],
+            ("GEN 1:1".into(), "first part continued part".into())
+        );
         assert_eq!(dict[1].0, "GEN 1:2");
     }
 
@@ -445,45 +584,90 @@ mod tests {
         // The wire name is indexed by `self as usize` into a parallel array; guard
         // the ends and a reordered middle entry so drift is caught immediately.
         assert_eq!(DiagnosticCode::UnknownMarker.as_str(), "UnknownMarker");
-        assert_eq!(DiagnosticCode::InvalidTableColumnSequence.as_str(), "InvalidTableColumnSequence");
-        assert_eq!(DiagnosticCode::MissingMilestoneSelfClose.as_str(), "MissingMilestoneSelfClose");
+        assert_eq!(
+            DiagnosticCode::InvalidTableColumnSequence.as_str(),
+            "InvalidTableColumnSequence"
+        );
+        assert_eq!(
+            DiagnosticCode::MissingMilestoneSelfClose.as_str(),
+            "MissingMilestoneSelfClose"
+        );
         assert_eq!(DiagnosticCode::ImplicitClose.as_str(), "ImplicitClose");
         assert_eq!(DiagnosticCode::UnclosedAtEof.as_str(), "UnclosedAtEof");
-        assert_eq!(DiagnosticCode::DefaultAttributeNotDefined.as_str(), "DefaultAttributeNotDefined");
+        assert_eq!(
+            DiagnosticCode::DefaultAttributeNotDefined.as_str(),
+            "DefaultAttributeNotDefined"
+        );
     }
 
     #[test]
     fn table_column_sequence_is_validated() {
         use crate::diagnostic::Severity::Error;
         // \th1 then \th3 skips column 2.
-        assert!(emits("\\id GEN\n\\c 1\n\\p\n\\v 1 x\n\\tr \\th1 a \\th3 b", DiagnosticCode::InvalidTableColumnSequence, Error));
+        assert!(emits(
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 x\n\\tr \\th1 a \\th3 b",
+            DiagnosticCode::InvalidTableColumnSequence,
+            Error
+        ));
         // A well-ordered row is clean.
-        assert!(!emits("\\id GEN\n\\c 1\n\\p\n\\v 1 x\n\\tr \\th1 a \\th2 b", DiagnosticCode::InvalidTableColumnSequence, Error));
+        assert!(!emits(
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 x\n\\tr \\th1 a \\th2 b",
+            DiagnosticCode::InvalidTableColumnSequence,
+            Error
+        ));
         // A column span (\tcr1-2) advances past column 2.
-        assert!(!emits("\\id GEN\n\\c 1\n\\p\n\\v 1 x\n\\tr \\tc1 a \\tcr2-3 b", DiagnosticCode::InvalidTableColumnSequence, Error));
+        assert!(!emits(
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 x\n\\tr \\tc1 a \\tcr2-3 b",
+            DiagnosticCode::InvalidTableColumnSequence,
+            Error
+        ));
     }
 
     #[test]
     fn blank_line_content_and_default_attribute_rules() {
         use crate::diagnostic::Severity::Error;
         // \b carrying inline content (a figure) is an error...
-        assert!(emits("\\id GEN\n\\c 1\n\\b \\fig cap|src=\"x.jpg\"\\fig*", DiagnosticCode::NonEmptyBlankLine, Error));
+        assert!(emits(
+            "\\id GEN\n\\c 1\n\\b \\fig cap|src=\"x.jpg\"\\fig*",
+            DiagnosticCode::NonEmptyBlankLine,
+            Error
+        ));
         // ...but a \b that merely precedes a verse is a structural boundary, not
         // content (this keeps valid poetry-style blank lines clean).
-        assert!(!emits("\\id GEN\n\\c 1\n\\q1 a\n\\b\n\\v 2 text", DiagnosticCode::NonEmptyBlankLine, Error));
+        assert!(!emits(
+            "\\id GEN\n\\c 1\n\\q1 a\n\\b\n\\v 2 text",
+            DiagnosticCode::NonEmptyBlankLine,
+            Error
+        ));
         // A bare default attribute on a marker with no default defined (\pn).
-        assert!(emits("\\id GEN\n\\c 1\n\\p\n\\v 1 \\w \\+pn name|keyword\\+pn*\\w*", DiagnosticCode::DefaultAttributeNotDefined, Error));
+        assert!(emits(
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 \\w \\+pn name|keyword\\+pn*\\w*",
+            DiagnosticCode::DefaultAttributeNotDefined,
+            Error
+        ));
         // ...but a nested \+pn with no keyword is fine.
-        assert!(!emits("\\id GEN\n\\c 1\n\\p\n\\v 1 \\w \\+pn name\\+pn*\\w*", DiagnosticCode::DefaultAttributeNotDefined, Error));
+        assert!(!emits(
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 \\w \\+pn name\\+pn*\\w*",
+            DiagnosticCode::DefaultAttributeNotDefined,
+            Error
+        ));
         // ...and a bare default on a marker that DOES define one (\w) is fine.
-        assert!(!emits("\\id GEN\n\\c 1\n\\p\n\\v 1 \\w word|grace\\w*", DiagnosticCode::DefaultAttributeNotDefined, Error));
+        assert!(!emits(
+            "\\id GEN\n\\c 1\n\\p\n\\v 1 \\w word|grace\\w*",
+            DiagnosticCode::DefaultAttributeNotDefined,
+            Error
+        ));
     }
 
     #[test]
     fn front_matter_books_need_no_chapter() {
         // \id FRT (front matter) with paragraphs but no \c is valid — no chapter
         // errors. A scripture book in the same shape would error.
-        let frt = parse_with("\\id FRT\n\\periph Title|id=\"title\"\n\\p text", Version::V3_1, ParseOptions { diagnostics: true });
+        let frt = parse_with(
+            "\\id FRT\n\\periph Title|id=\"title\"\n\\p text",
+            Version::V3_1,
+            ParseOptions { diagnostics: true },
+        );
         assert!(!frt.diagnostics().iter().any(|d| matches!(
             d.code,
             DiagnosticCode::MissingChapterMarker | DiagnosticCode::BodyParagraphBeforeChapter
@@ -498,8 +682,14 @@ mod tests {
         let src = "\\id GEN\r\n\\ide 65001 - Unicode (UTF8)\r\n\\c 1\r\n\\p\r\n\\v 1 text\r\n";
         let usj = parse(src, Version::V3_1).to_usj();
         // The ide text must be trimmed of \r
-        assert!(usj.contains("\"65001 - Unicode (UTF8)\""), "trailing \\r became a space: {usj}");
-        assert!(!usj.contains("\"65001 - Unicode (UTF8) \""), "spurious trailing space in CRLF file");
+        assert!(
+            usj.contains("\"65001 - Unicode (UTF8)\""),
+            "trailing \\r became a space: {usj}"
+        );
+        assert!(
+            !usj.contains("\"65001 - Unicode (UTF8) \""),
+            "spurious trailing space in CRLF file"
+        );
     }
 
     /// Empty non-`\b` paragraphs (like `\q2` with no content) must emit `content:[]`,
@@ -509,9 +699,15 @@ mod tests {
         let src = "\\id GEN\n\\c 1\n\\q1 a\n\\q2\n\\b\n\\q1 b";
         let usj = parse(src, Version::V3_1).to_usj();
         // \q2 with no text → content:[]
-        assert!(usj.contains("\"marker\":\"q2\",\"content\":[]"), "empty \\q2 should have content:[]: {usj}");
+        assert!(
+            usj.contains("\"marker\":\"q2\",\"content\":[]"),
+            "empty \\q2 should have content:[]: {usj}"
+        );
         // \b → no content key at all
-        assert!(!usj.contains("\"marker\":\"b\",\"content\":"), "\\b must not emit content: {usj}");
+        assert!(
+            !usj.contains("\"marker\":\"b\",\"content\":"),
+            "\\b must not emit content: {usj}"
+        );
     }
 
     /// Malformed USFM: `\v11` (number fused to marker with no space) should parse
@@ -521,12 +717,22 @@ mod tests {
         let src = "\\id GEN\n\\c 1\n\\p \\v11 text eleven";
         let doc = parse(src, Version::V3_1);
         let usj = doc.to_usj();
-        assert!(usj.contains("\"number\":\"11\""), "\\v11 should parse as verse 11: {usj}");
-        assert!(usj.contains("\"sid\":\"GEN 1:11\""), "sid should be GEN 1:11: {usj}");
+        assert!(
+            usj.contains("\"number\":\"11\""),
+            "\\v11 should parse as verse 11: {usj}"
+        );
+        assert!(
+            usj.contains("\"sid\":\"GEN 1:11\""),
+            "sid should be GEN 1:11: {usj}"
+        );
         // vref should also work
         let dict = doc.vref_dict();
         assert_eq!(dict[0].0, "GEN 1:11", "vref key should be GEN 1:11");
-        assert!(dict[0].1.contains("text eleven"), "vref text: {:?}", dict[0]);
+        assert!(
+            dict[0].1.contains("text eleven"),
+            "vref text: {:?}",
+            dict[0]
+        );
     }
 
     /// Malformed no-space verse forms with a *sub-verse segment letter* (`\v3b`)
@@ -544,17 +750,37 @@ mod tests {
             let doc = parse(&src, Version::V3_1);
             let usj = doc.to_usj();
             if glued.starts_with("\\v") {
-                assert!(usj.contains(&format!("\"number\":\"{label}\"")), "{glued}: number in {usj}");
-                assert!(usj.contains(&format!("\"sid\":\"{sid}\"")), "{glued}: sid in {usj}");
+                assert!(
+                    usj.contains(&format!("\"number\":\"{label}\"")),
+                    "{glued}: number in {usj}"
+                );
+                assert!(
+                    usj.contains(&format!("\"sid\":\"{sid}\"")),
+                    "{glued}: sid in {usj}"
+                );
                 let dict = doc.vref_dict();
                 assert_eq!(dict[0].0, sid, "{glued}: vref key");
-                assert!(dict[0].1.contains("the text"), "{glued}: vref text {:?}", dict[0]);
+                assert!(
+                    dict[0].1.contains("the text"),
+                    "{glued}: vref text {:?}",
+                    dict[0]
+                );
             } else {
                 // \c2 → a second chapter node with sid "GEN 2".
-                assert!(usj.contains("\"sid\":\"GEN 2\""), "{glued}: chapter sid in {usj}");
+                assert!(
+                    usj.contains("\"sid\":\"GEN 2\""),
+                    "{glued}: chapter sid in {usj}"
+                );
             }
             // None of these should be reported as an unknown marker.
-            assert!(!emits(&src, DiagnosticCode::UnknownMarker, crate::diagnostic::Severity::Error), "{glued} should not be unknown");
+            assert!(
+                !emits(
+                    &src,
+                    DiagnosticCode::UnknownMarker,
+                    crate::diagnostic::Severity::Error
+                ),
+                "{glued} should not be unknown"
+            );
         }
     }
 

@@ -7,7 +7,10 @@
 
 use std::fmt::{self, Write};
 
-use super::render::{collapse_all, collect_attributes, figure_legacy_raw, note_caller, remainder_after_first_token, verse_label};
+use super::render::{
+    collapse_all, collect_attributes, figure_legacy_raw, note_caller, remainder_after_first_token,
+    verse_label,
+};
 use crate::Document;
 use crate::cst::Cursor;
 use crate::marker::Category;
@@ -68,11 +71,11 @@ impl<W: Write> Usfm<'_, W> {
         // Deprecated positional figure (`\fig DESC|FILE|SIZE|…\fig*`): re-emit the
         // raw `|`-field list verbatim. collect_attributes would mislabel it as a
         // single default attribute (`lemma="FILE|SIZE|…"`), corrupting the round-trip.
-        if marker == "fig" {
-            if let Some(raw) = figure_legacy_raw(c) {
-                self.put(raw)?; // raw already includes the leading `|`
-                return Ok(());
-            }
+        if marker == "fig"
+            && let Some(raw) = figure_legacy_raw(c)
+        {
+            self.put(raw)?; // raw already includes the leading `|`
+            return Ok(());
         }
         let attrs = collect_attributes(c, marker);
         if attrs.is_empty() {
@@ -123,7 +126,9 @@ impl<W: Write> Usfm<'_, W> {
                 self.put(verse_label(c))?;
             }
             NodeKind::MarkerOpen => {
-                let Some(info) = c.marker_info() else { return Ok(()) };
+                let Some(info) = c.marker_info() else {
+                    return Ok(());
+                };
                 let name = c.marker_name(); // actual token, e.g. "q1", "tcr1-2"
                 match info.category {
                     Category::Note => {

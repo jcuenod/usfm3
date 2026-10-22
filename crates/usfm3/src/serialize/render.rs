@@ -49,7 +49,11 @@ pub(crate) fn verse_label<'a>(c: Cursor<'a>) -> &'a str {
     // Fallback: number embedded in marker name (malformed \v11 or \c2 with no space)
     let name = c.marker_name();
     let base_len = c.marker_info().map_or(0, |m| m.name.len());
-    if base_len < name.len() { &name[base_len..] } else { "" }
+    if base_len < name.len() {
+        &name[base_len..]
+    } else {
+        ""
+    }
 }
 
 /// Per docs.usfm.bible: the single space separating a marker (or verse/chapter
@@ -176,8 +180,8 @@ pub(crate) fn default_attribute(marker: &str) -> &'static str {
     match marker {
         "w" | "wa" | "wg" | "wh" => "lemma",
         "rb" => "gloss",
-        "xt" => "href",  // \xt text|GEN 1:1\xt* → href="GEN 1:1"
-        "ref" => "loc",  // \ref text|GEN 1:1\ref* → {type:ref, loc:"GEN 1:1"}
+        "xt" => "href", // \xt text|GEN 1:1\xt* → href="GEN 1:1"
+        "ref" => "loc", // \ref text|GEN 1:1\ref* → {type:ref, loc:"GEN 1:1"}
         "periph" => "id",
         m if m.starts_with("qt") => "who", // \qt-s |Speaker\*
         _ => "lemma",
@@ -232,7 +236,14 @@ pub(crate) fn figure_legacy<'a>(c: Cursor<'a>) -> Option<(Vec<(&'static str, &'a
     let cap = f.next().unwrap_or("").trim();
     let refr = f.next().unwrap_or("").trim();
     let mut attrs = Vec::new();
-    for (k, v) in [("alt", desc), ("file", file), ("size", size), ("loc", loc), ("copy", copy), ("ref", refr)] {
+    for (k, v) in [
+        ("alt", desc),
+        ("file", file),
+        ("size", size),
+        ("loc", loc),
+        ("copy", copy),
+        ("ref", refr),
+    ] {
         if !v.is_empty() {
             attrs.push((k, v));
         }

@@ -30,7 +30,10 @@ pub struct PackedNode {
 impl Packed {
     /// Decode and validate the header, exactly as a host constructor would.
     pub fn new(words: Vec<u32>) -> Self {
-        assert!(words.len() >= PACKED_HEADER_WORDS, "buffer shorter than the header");
+        assert!(
+            words.len() >= PACKED_HEADER_WORDS,
+            "buffer shorter than the header"
+        );
         assert_eq!(words[0], PACKED_MAGIC, "bad magic");
         assert_eq!(words[1], PACKED_FORMAT, "unexpected wire format");
         let packed = Packed { words };
@@ -144,7 +147,11 @@ impl Packed {
 
     /// Rebuild `Document::to_cst_json`'s shape from the packed words.
     pub fn to_cst_json(&self, source: &str, schema: &Value) -> Value {
-        assert_eq!(self.offset_space(), 0, "to_cst_json parity needs utf8 offsets");
+        assert_eq!(
+            self.offset_space(),
+            0,
+            "to_cst_json parity needs utf8 offsets"
+        );
         self.cst_node(0, source, schema)
     }
 
