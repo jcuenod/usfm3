@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use crate::cst::Cursor;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::marker::{Category, TextRole};
+use crate::serialize::vref::BookId;
 use crate::span::Span;
 use crate::tape::NodeKind;
 
@@ -185,14 +186,21 @@ fn walk(
                     st.has_id = true;
                     if let Some(code) = book_code(child) {
                         st.front_matter = is_front_matter_code(code);
-                        if !is_valid_book_code(code) {
+                        if BookId::from_code(code).is_none() {
                             // Warning: an unrecognized code is suspicious but not
                             // malformed — the corpus has valid documents using
-                            // placeholder codes (e.g. TST, XXA).
+                            // placeholder codes (e.g. TST). Outputs keep the code as
+                            // written either way.
+                            let upper = code.to_ascii_uppercase();
+                            let message = if BookId::from_code(&upper).is_some() {
+                                format!("book code \"{code}\" should be uppercase: \"{upper}\"")
+                            } else {
+                                format!("\"{code}\" is not a valid USFM book code")
+                            };
                             diags.push(Diagnostic::warning(
                                 DiagnosticCode::InvalidBookCode,
                                 child.span(),
-                                format!("\"{code}\" is not a valid USFM book code"),
+                                message,
                             ));
                         }
                     }
@@ -529,10 +537,6 @@ fn check_leading_zeros(c: Cursor<'_>, kind: &str, diags: &mut Vec<Diagnostic>) {
     }
 }
 
-fn is_valid_book_code(code: &str) -> bool {
-    VALID_BOOK_CODES.contains(&code)
-}
-
 /// Front-matter / peripheral books that carry no chapters (so `\c` is not required
 /// and body paragraphs may appear without one).
 fn is_front_matter_code(code: &str) -> bool {
@@ -541,20 +545,6 @@ fn is_front_matter_code(code: &str) -> bool {
         "FRT" | "INT" | "BAK" | "OTH" | "CNC" | "GLO" | "TDX" | "NDX"
     )
 }
-
-/// Valid USFM book identifiers: the 66 canonical
-/// books, the deuterocanon/apocrypha, and the peripheral/extra codes.
-static VALID_BOOK_CODES: &[&str] = &[
-    "GEN", "EXO", "LEV", "NUM", "DEU", "JOS", "JDG", "RUT", "1SA", "2SA", "1KI", "2KI", "1CH",
-    "2CH", "EZR", "NEH", "EST", "JOB", "PSA", "PRO", "ECC", "SNG", "ISA", "JER", "LAM", "EZK",
-    "DAN", "HOS", "JOL", "AMO", "OBA", "JON", "MIC", "NAM", "HAB", "ZEP", "HAG", "ZEC", "MAL",
-    "MAT", "MRK", "LUK", "JHN", "ACT", "ROM", "1CO", "2CO", "GAL", "EPH", "PHP", "COL", "1TH",
-    "2TH", "1TI", "2TI", "TIT", "PHM", "HEB", "JAS", "1PE", "2PE", "1JN", "2JN", "3JN", "JUD",
-    "REV", "TOB", "JDT", "ESG", "WIS", "SIR", "BAR", "LJE", "S3Y", "SUS", "BEL", "1MA", "2MA",
-    "3MA", "4MA", "1ES", "2ES", "MAN", "PS2", "ODA", "PSS", "EZA", "5EZ", "6EZ", "DAG", "PS3",
-    "2BA", "LBA", "JUB", "ENO", "1MQ", "2MQ", "3MQ", "REP", "4BA", "LAO", "FRT", "BAK", "OTH",
-    "INT", "CNC", "GLO", "TDX", "NDX",
-];
 
 /// Note-internal markers that should only appear inside a `\f…\f*` / `\x…\x*`.
 fn is_note_only_marker(marker: &str) -> bool {

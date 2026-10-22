@@ -1227,3 +1227,52 @@ fn unclosed_milestone_does_not_swallow_following_content() {
         "the missing \\* is still reported"
     );
 }
+
+#[test]
+fn vref_keys_use_the_book_code_as_written() {
+    for code in ["SIR", "1MA", "FRT", "XXA", "TST", "php"] {
+        let src = format!("\\id {code}\n\\c 1\n\\p\n\\v 1 Text.\n");
+        let rows = parse_vref(&src);
+        assert_eq!(
+            vref_text(&rows, &format!("{code} 1:1")),
+            Some("Text."),
+            "{code}: {rows:?}"
+        );
+    }
+    // No `\id` at all: there is no code to use.
+    let rows = parse_vref("\\c 1\n\\p\n\\v 1 Text.\n");
+    assert_eq!(vref_text(&rows, "??? 1:1"), Some("Text."));
+}
+
+#[test]
+fn vref_verse_before_a_second_id_keeps_its_own_book() {
+    let rows =
+        parse_vref("\\id GEN\n\\c 1\n\\p\n\\v 1 First.\n\\id EXO\n\\c 1\n\\p\n\\v 1 Second.\n");
+    assert_eq!(vref_text(&rows, "GEN 1:1"), Some("First."));
+    assert_eq!(vref_text(&rows, "EXO 1:1"), Some("Second."));
+}
+
+#[test]
+fn book_code_warnings_distinguish_lowercase_from_unknown() {
+    let book_warnings = |code: &str| -> Vec<String> {
+        let src = format!("\\id {code}\n\\c 1\n\\p\n\\v 1 Text.\n");
+        parse_with_diagnostics(&src)
+            .diagnostics()
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::InvalidBookCode)
+            .inspect(|d| assert_eq!(d.severity, Severity::Warning))
+            .map(|d| d.message.clone())
+            .collect()
+    };
+    assert_eq!(
+        book_warnings("php"),
+        ["book code \"php\" should be uppercase: \"PHP\""]
+    );
+    assert_eq!(
+        book_warnings("TST"),
+        ["\"TST\" is not a valid USFM book code"]
+    );
+    for code in ["PHP", "SIR", "XXG", "GLO"] {
+        assert!(book_warnings(code).is_empty(), "{code}");
+    }
+}

@@ -25,7 +25,9 @@ use super::render::json_str;
 /// A packed verse reference: `book:u8 | chapter:u12 | verse:u12`.
 ///
 /// Integer-keyed so map inserts during extraction are trivially cheap; the human
-/// string (`"GEN 1:1"`) is formatted only on demand.
+/// string (`"GEN 1:1"`) is formatted only on demand. Only codes in [`BOOK_CODES`]
+/// can be packed; any other `\id` code is [`BookId::UNKNOWN`] here, while
+/// [`VrefRow::book_code`] and [`Document::vref_dict`] keep the code as written.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct VerseRef(pub u32);
 
@@ -119,6 +121,9 @@ impl VrefText {
 /// borrow internal buffers and are only valid for the duration of the callback.
 pub struct VrefRow<'a> {
     pub book: BookId,
+    /// The `\id` code as written (`"GEN"`, `"php"`, `"XYZ"`), or `"???"` when the
+    /// document has no `\id`.
+    pub book_code: &'a str,
     pub chapter: u16,
     /// Leading integer of the verse number (e.g. `1` for `1-2`).
     pub verse: u16,
@@ -129,25 +134,30 @@ pub struct VrefRow<'a> {
 }
 
 impl VrefRow<'_> {
-    /// Format the reference as `"GEN 1:1"` (preserving a range/sub-verse label).
+    /// Format the reference as `"GEN 1:1"`, using the book code as written and
+    /// preserving a range/sub-verse label.
     pub fn key(&self) -> String {
         if self.label.is_empty() {
-            format!("{} {}:{}", self.book.code(), self.chapter, self.verse)
+            format!("{} {}:{}", self.book_code, self.chapter, self.verse)
         } else {
-            format!("{} {}:{}", self.book.code(), self.chapter, self.label)
+            format!("{} {}:{}", self.book_code, self.chapter, self.label)
         }
     }
 }
 
-/// USFM book identifiers. (Canonical 66 for the bootstrap; the full set incl.
-/// deuterocanon/apocrypha + peripherals will be generated.)
+/// USFM book identifiers: the 66 canonical books (first, so their [`BookId`]s are
+/// stable), the deuterocanon/apocrypha, and the peripheral and extra-material codes.
+/// Codes are case-sensitive: `php` is not `PHP`.
 pub static BOOK_CODES: &[&str] = &[
     "GEN", "EXO", "LEV", "NUM", "DEU", "JOS", "JDG", "RUT", "1SA", "2SA", "1KI", "2KI", "1CH",
     "2CH", "EZR", "NEH", "EST", "JOB", "PSA", "PRO", "ECC", "SNG", "ISA", "JER", "LAM", "EZK",
     "DAN", "HOS", "JOL", "AMO", "OBA", "JON", "MIC", "NAM", "HAB", "ZEP", "HAG", "ZEC", "MAL",
     "MAT", "MRK", "LUK", "JHN", "ACT", "ROM", "1CO", "2CO", "GAL", "EPH", "PHP", "COL", "1TH",
     "2TH", "1TI", "2TI", "TIT", "PHM", "HEB", "JAS", "1PE", "2PE", "1JN", "2JN", "3JN", "JUD",
-    "REV",
+    "REV", "TOB", "JDT", "ESG", "WIS", "SIR", "BAR", "LJE", "S3Y", "SUS", "BEL", "1MA", "2MA",
+    "3MA", "4MA", "1ES", "2ES", "MAN", "PS2", "ODA", "PSS", "EZA", "5EZ", "6EZ", "DAG", "PS3",
+    "2BA", "LBA", "JUB", "ENO", "1MQ", "2MQ", "3MQ", "REP", "4BA", "LAO", "FRT", "BAK", "OTH",
+    "INT", "CNC", "GLO", "TDX", "NDX", "XXA", "XXB", "XXC", "XXD", "XXE", "XXF", "XXG",
 ];
 
 // --- extraction (Document methods) -----------------------------------------
@@ -189,6 +199,7 @@ impl<'src> Document<'src> {
             hit.body.write_clean(self, &mut buf);
             f(VrefRow {
                 book: hit.book,
+                book_code: hit.book_code,
                 chapter: hit.chapter,
                 verse: hit.reference.verse(),
                 label: hit.label,
@@ -277,24 +288,30 @@ impl<'src> Document<'src> {
     fn walk_verses(&self, mut f: impl FnMut(VerseHit<'src>)) {
         let nodes = &self.tape().nodes;
         let mut book = BookId::UNKNOWN;
+        let mut book_code: &'src str = "???";
         let mut chapter: u16 = 0;
         let mut expect_book = false;
-        // (reference, label, body_start, open_idx)
-        let mut pending: Option<(VerseRef, &'src str, usize, usize)> = None;
+        let mut pending: Option<Pending<'src>> = None;
 
-        // Emits the pending verse (if any) with the given context. Takes context
-        // by value so the loop can keep mutating `book`/`chapter`.
+        // Emits the pending verse (if any), ending its body at `boundary`.
         fn flush<'s>(
-            pending: &mut Option<(VerseRef, &'s str, usize, usize)>,
-            book: BookId,
-            chapter: u16,
+            pending: &mut Option<Pending<'s>>,
             boundary: usize,
             f: &mut dyn FnMut(VerseHit<'s>),
         ) {
-            if let Some((reference, label, body_start, open_idx)) = pending.take() {
+            if let Some(Pending {
+                reference,
+                book_code,
+                chapter,
+                label,
+                body_start,
+                open_idx,
+            }) = pending.take()
+            {
                 f(VerseHit {
                     reference,
-                    book,
+                    book: reference.book(),
+                    book_code,
                     chapter,
                     label,
                     raw_start: body_start,
@@ -313,19 +330,18 @@ impl<'src> Document<'src> {
                     expect_book = self.table.info(node.marker).map(|m| m.name) == Some("id");
                 }
                 NodeKind::Text if expect_book => {
-                    if let Some(code) = node.span().text(self.source()).split_whitespace().next()
-                        && let Some(b) = BookId::from_code(code)
-                    {
-                        book = b;
+                    if let Some(code) = node.span().text(self.source()).split_whitespace().next() {
+                        book_code = code;
+                        book = BookId::from_code(code).unwrap_or(BookId::UNKNOWN);
                     }
                     expect_book = false;
                 }
                 NodeKind::Chapter => {
-                    flush(&mut pending, book, chapter, node.start as usize, &mut f);
+                    flush(&mut pending, node.start as usize, &mut f);
                     chapter = node.link as u16; // number packed in `link`
                 }
                 NodeKind::Verse => {
-                    flush(&mut pending, book, chapter, node.start as usize, &mut f);
+                    flush(&mut pending, node.start as usize, &mut f);
                     let reference = VerseRef::new(book, chapter, node.link as u16);
                     let span_text = node.span().text(self.source());
                     let label = span_text.split_whitespace().nth(1).unwrap_or_else(|| {
@@ -336,19 +352,38 @@ impl<'src> Document<'src> {
                             .unwrap_or(name.len());
                         &name[d..]
                     });
-                    pending = Some((reference, label, node.span().end() as usize, i));
+                    pending = Some(Pending {
+                        reference,
+                        book_code,
+                        chapter,
+                        label,
+                        body_start: node.span().end() as usize,
+                        open_idx: i,
+                    });
                 }
                 _ => {}
             }
         }
-        flush(&mut pending, book, chapter, self.source().len(), &mut f);
+        flush(&mut pending, self.source().len(), &mut f);
     }
+}
+
+/// A verse seen but not yet emitted: its body runs to the next boundary. Carries
+/// its own book and chapter so a following `\id` or `\c` can't relabel it.
+struct Pending<'a> {
+    reference: VerseRef,
+    book_code: &'a str,
+    chapter: u16,
+    label: &'a str,
+    body_start: usize,
+    open_idx: usize,
 }
 
 /// One verse occurrence yielded by `Document::walk_verses`.
 struct VerseHit<'a> {
     reference: VerseRef,
     book: BookId,
+    book_code: &'a str,
     chapter: u16,
     label: &'a str,
     raw_start: usize,
