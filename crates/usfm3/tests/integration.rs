@@ -460,10 +460,12 @@ fn table_rows_group_and_cell_spacing_matches_spec_examples() {
     );
 
     let usx = parse(src).to_usx();
-    assert!(usx.contains("<para style=\"tr\"><char style=\"th1\" closed=\"false\">Day </char>"));
-    assert!(usx.contains("<char style=\"th3\" closed=\"false\">Leader</char>"));
-    assert!(usx.contains("<char style=\"tc2\" closed=\"false\">Judah </char>"));
-    assert!(usx.contains("<char style=\"tc3\" closed=\"false\">Nahshon son of Amminadab</char>"));
+    assert_eq!(usx.matches("<table>").count(), 1, "{usx}");
+    assert_eq!(usx.matches("<row style=\"tr\">").count(), 2, "{usx}");
+    assert!(usx.contains("<cell style=\"th1\" align=\"start\">Day </cell>"));
+    assert!(usx.contains("<cell style=\"th3\" align=\"start\">Leader</cell>"));
+    assert!(usx.contains("<cell style=\"tcr1\" align=\"end\">1st </cell>"));
+    assert!(usx.contains("<cell style=\"tc3\" align=\"start\">Nahshon son of Amminadab</cell>"));
 
     let diag_doc = parse_with_diagnostics(src);
     assert!(
@@ -1275,4 +1277,96 @@ fn book_code_warnings_distinguish_lowercase_from_unknown() {
     for code in ["PHP", "SIR", "XXG", "GLO"] {
         assert!(book_warnings(code).is_empty(), "{code}");
     }
+}
+
+#[test]
+fn usx_sidebar_and_periph_are_containers() {
+    let usx = parse(concat!(
+        "\\id GEN\n\\c 1\n\\esb \\cat People\\cat*\n\\ms John\n\\p About John.\n\\esbe\n",
+        "\\p After.\n\\esb\n\\p Never closed.\n",
+    ))
+    .to_usx();
+    assert!(
+        usx.contains("<sidebar style=\"esb\" category=\"People\">\n    <para style=\"ms\">John</para>\n    <para style=\"p\">About John.</para>\n  </sidebar>"),
+        "{usx}"
+    );
+    assert!(
+        usx.contains("<sidebar style=\"esb\" closed=\"false\">"),
+        "{usx}"
+    );
+    assert!(
+        !usx.contains("style=\"cat\""),
+        "\\cat folds into category: {usx}"
+    );
+
+    let usx = parse("\\id FRT\n\\periph Title Page|id=\"title\"\n\\mt1 A Title\n").to_usx();
+    assert!(
+        usx.contains("<periph alt=\"Title Page\" id=\"title\">\n    <para style=\"mt1\">A Title</para>\n  </periph>"),
+        "{usx}"
+    );
+}
+
+#[test]
+fn usx_folds_alternate_and_published_numbers() {
+    let usx =
+        parse("\\id MAT\n\\c 1\n\\ca 2\\ca*\n\\cp M\n\\p\n\\v 1 \\va 3\\va*\\vp 1b\\vp* Text.\n")
+            .to_usx();
+    assert!(
+        usx.contains(
+            "<chapter number=\"1\" style=\"c\" altnumber=\"2\" pubnumber=\"M\" sid=\"MAT 1\" />"
+        ),
+        "{usx}"
+    );
+    assert!(
+        usx.contains(
+            "<verse number=\"1\" style=\"v\" altnumber=\"3\" sid=\"MAT 1:1\" pubnumber=\"1b\" />"
+        ),
+        "{usx}"
+    );
+    for style in ["ca", "cp", "va", "vp"] {
+        assert!(
+            !usx.contains(&format!("style=\"{style}\"")),
+            "{style}: {usx}"
+        );
+    }
+}
+
+#[test]
+fn usx_notes_refs_and_links() {
+    let usx = parse(concat!(
+        "\\id GEN\n\\c 1\n\\p\n\\v 1 Text\\f + \\cat ex\\cat*\\fr 1:1 \\ft See ",
+        "\\+xt verse 6|GEN 2:6\\+xt*.\\f* and \\ref Mark 1:4|MRK 1:4\\ref*.\n",
+    ))
+    .to_usx();
+    assert!(
+        usx.contains("<note caller=\"+\" style=\"f\" category=\"ex\">"),
+        "{usx}"
+    );
+    assert!(
+        usx.contains(
+            "<char style=\"xt\" href=\"GEN 2:6\"><ref loc=\"GEN 2:6\">verse 6</ref></char>"
+        ),
+        "{usx}"
+    );
+    assert!(usx.contains("<ref loc=\"MRK 1:4\">Mark 1:4</ref>"), "{usx}");
+}
+
+#[test]
+fn malformed_attributes_parse_leniently_into_valid_names() {
+    // `lemma` is a dangling bare word before the real key.
+    let src = "\\id GEN\n\\c 1\n\\p\n\\v 1 \\w word|lemma strong=\"l\" x-morph=\"He\"\\w*\n";
+    let usx = parse(src).to_usx();
+    assert!(
+        usx.contains("<char style=\"w\" strong=\"l\" x-morph=\"He\">word</char>"),
+        "{usx}"
+    );
+    let usj = parse_usj(src);
+    let words = collect_by_type(&usj, "char");
+    assert_eq!(words[0]["strong"], "l");
+    assert!(words[0].get("lemma strong").is_none());
+
+    // A bare value on a marker with no default attribute keeps the value under
+    // `default` (0.2.1's name), not some other marker's default.
+    let usj = parse_usj("\\id GEN\n\\c 1\n\\p\n\\v 1 \\em text|value\\em*\n");
+    assert_eq!(collect_by_type(&usj, "char")[0]["default"], "value");
 }

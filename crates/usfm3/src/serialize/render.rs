@@ -143,7 +143,10 @@ pub(crate) fn collect_attributes<'a>(c: Cursor<'a>, marker: &str) -> Vec<(&'a st
         while !rest.trim_start().is_empty() {
             rest = rest.trim_start();
             let Some(eq) = rest.find('=') else { break };
-            let key = rest[..eq].trim();
+            // Lenient on malformed input: `lemma strong="l"` has a dangling bare
+            // word before the real key. Keep the last word, so the name stays a
+            // valid XML attribute / sensible JSON key; validation reports the rest.
+            let key = rest[..eq].split_whitespace().last().unwrap_or("");
             rest = rest[eq + 1..].trim_start();
             let value: Cow<'a, str> = if let Some(stripped) = rest.strip_prefix('"') {
                 // Closing quote, honoring `\"` as an escaped literal quote.
@@ -169,22 +172,27 @@ pub(crate) fn collect_attributes<'a>(c: Cursor<'a>, marker: &str) -> Vec<(&'a st
                 rest = &rest[end..];
                 Cow::Borrowed(v)
             };
-            pairs.push((attr_key(marker, key), value));
+            if !key.is_empty() {
+                pairs.push((attr_key(marker, key), value));
+            }
         }
     }
     pairs
 }
 
-/// The default (unnamed) attribute name for a marker, per USFM 3.x.
+/// The default (unnamed) attribute name for a marker, per USFM 3.x. A marker
+/// with no default (`\em|value\em*`) is malformed; the value is kept as
+/// `default`, and validation reports DefaultAttributeNotDefined.
 pub(crate) fn default_attribute(marker: &str) -> &'static str {
     match marker {
         "w" | "wa" | "wg" | "wh" => "lemma",
         "rb" => "gloss",
         "xt" => "href", // \xt text|GEN 1:1\xt* → href="GEN 1:1"
         "ref" => "loc", // \ref text|GEN 1:1\ref* → {type:ref, loc:"GEN 1:1"}
+        "jmp" => "link-href",
         "periph" => "id",
         m if m.starts_with("qt") => "who", // \qt-s |Speaker\*
-        _ => "lemma",
+        _ => "default",
     }
 }
 
@@ -194,6 +202,75 @@ pub(crate) fn attr_key<'a>(marker: &str, key: &'a str) -> &'a str {
         ("fig", "src") => "file",
         _ => key,
     }
+}
+
+// --- structure shared by USJ and USX ---------------------------------------
+
+/// A `\tr` row; consecutive rows group into one table.
+pub(crate) fn is_table_row(c: Cursor<'_>) -> bool {
+    c.kind() == NodeKind::MarkerOpen && c.marker_info().map(|m| m.name) == Some("tr")
+}
+
+/// Cell alignment from the marker prefix: `thr/tcr`→end, `thc/tcc`→center, else start.
+pub(crate) fn cell_align(marker: &str) -> &'static str {
+    if marker.starts_with("thr") || marker.starts_with("tcr") {
+        "end"
+    } else if marker.starts_with("thc") || marker.starts_with("tcc") {
+        "center"
+    } else {
+        "start"
+    }
+}
+
+/// Whether a `\ca`/`\va` (alternate) or `\cp`/`\vp` (published) number.
+pub(crate) enum AltPub {
+    Alt,
+    Pub,
+}
+
+/// Classify a node as an alternate (`\ca`/`\va`) or published (`\cp`/`\vp`) number.
+pub(crate) fn alt_pub_kind(c: Cursor<'_>) -> Option<AltPub> {
+    if c.kind() != NodeKind::MarkerOpen {
+        return None;
+    }
+    match c.marker_name() {
+        "ca" | "va" => Some(AltPub::Alt),
+        "cp" | "vp" => Some(AltPub::Pub),
+        _ => None,
+    }
+}
+
+/// Whether a marker's content is plain text (no nested marker children).
+pub(crate) fn is_plain_text(c: Cursor<'_>) -> bool {
+    !c.children().any(|ch| ch.kind() == NodeKind::MarkerOpen)
+}
+
+/// The whitespace-collapsed concatenation of a marker's direct text children.
+pub(crate) fn marker_inner_text(c: Cursor<'_>) -> String {
+    let mut s = String::new();
+    for ch in c.children() {
+        if ch.kind() == NodeKind::Text {
+            s.push_str(ch.text());
+        }
+    }
+    collapse_all(&s)
+}
+
+/// A `\cat` marker, folded into its note's or sidebar's `category`.
+pub(crate) fn is_category_marker(c: Cursor<'_>) -> bool {
+    c.kind() == NodeKind::MarkerOpen && c.marker_name() == "cat"
+}
+
+/// The text of a `\cat …\cat*` child, if present (note/sidebar category).
+pub(crate) fn category_of<'a>(parent: Cursor<'a>) -> Option<&'a str> {
+    parent
+        .children()
+        .find(|c| is_category_marker(*c))
+        .and_then(|cat| {
+            cat.children()
+                .find(|g| g.kind() == NodeKind::Text)
+                .map(|g| g.text())
+        })
 }
 
 // --- deprecated figure syntax ----------------------------------------------

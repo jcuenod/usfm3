@@ -240,6 +240,25 @@ fn bridgeconn_usfm_roundtrip() {
 /// scanner is amortized across the whole array instead of rescanning the prefix per
 /// diagnostic, so the risk is not that it is slow but that it *drifts* — and it walks
 /// every fixture in the corpus here, non-ASCII ones included.
+/// Every case serializes to well-formed USX, valid USFM or not: a recovering
+/// parser must never hand a consumer XML it cannot load.
+#[test]
+fn bridgeconn_usx_is_well_formed() {
+    let mut malformed = Vec::new();
+    for case in discover() {
+        let usfm = std::fs::read_to_string(&case.usfm).unwrap();
+        let usx = usfm3::parse(&usfm, usfm3::Version::V3_1).to_usx();
+        if let Err(e) = roxmltree::Document::parse(&usx) {
+            malformed.push(format!("{}: {e}", case.name));
+        }
+    }
+    assert!(
+        malformed.is_empty(),
+        "malformed USX:\n{}",
+        malformed.join("\n")
+    );
+}
+
 #[test]
 fn diagnostic_line_col_matches_span_line_col() {
     use usfm3::Offsets;

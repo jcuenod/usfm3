@@ -9,8 +9,9 @@
 use std::fmt::{self, Write};
 
 use super::render::{
-    collapse_all, collect_attributes, figure_legacy, json_str, normalize_text, note_caller,
-    remainder_after_first_token, trim_leading, verse_label,
+    AltPub, alt_pub_kind, category_of, cell_align, collapse_all, collect_attributes, figure_legacy,
+    is_category_marker, is_plain_text, is_table_row, json_str, marker_inner_text, normalize_text,
+    note_caller, remainder_after_first_token, trim_leading, verse_label,
 };
 use crate::Document;
 use crate::cst::Cursor;
@@ -100,10 +101,6 @@ fn write_content<W: Write>(parent: Cursor<'_>, out: &mut W, ctx: &mut Ctx) -> fm
     out.write_char(']')
 }
 
-fn is_table_row(c: Cursor<'_>) -> bool {
-    c.kind() == NodeKind::MarkerOpen && c.marker_info().map(|m| m.name) == Some("tr")
-}
-
 /// Emit `{type:table, content:[{type:table:row, …}]}` for a run of `\tr` rows.
 fn write_table<W: Write>(rows: &[Cursor<'_>], out: &mut W, ctx: &mut Ctx) -> fmt::Result {
     out.write_str("{\"type\":\"table\",\"content\":[")?;
@@ -132,17 +129,6 @@ fn write_table<W: Write>(rows: &[Cursor<'_>], out: &mut W, ctx: &mut Ctx) -> fmt
         out.write_str("]}")?;
     }
     out.write_str("]}")
-}
-
-/// Cell alignment from the marker prefix: `thr/tcr`→end, `thc/tcc`→center, else start.
-fn cell_align(marker: &str) -> &'static str {
-    if marker.starts_with("thr") || marker.starts_with("tcr") {
-        "end"
-    } else if marker.starts_with("thc") || marker.starts_with("tcc") {
-        "center"
-    } else {
-        "start"
-    }
 }
 
 fn sep<W: Write>(out: &mut W, first: &mut bool) -> fmt::Result {
@@ -389,39 +375,6 @@ fn write_verse<W: Write>(
     out.write_char('}')
 }
 
-enum AltPub {
-    Alt,
-    Pub,
-}
-
-/// Classify a node as an alternate (`\ca`/`\va`) or published (`\cp`/`\vp`) number.
-fn alt_pub_kind(c: Cursor<'_>) -> Option<AltPub> {
-    if c.kind() != NodeKind::MarkerOpen {
-        return None;
-    }
-    match c.marker_name() {
-        "ca" | "va" => Some(AltPub::Alt),
-        "cp" | "vp" => Some(AltPub::Pub),
-        _ => None,
-    }
-}
-
-/// Whether a marker's content is plain text (no nested marker children).
-fn is_plain_text(c: Cursor<'_>) -> bool {
-    !c.children().any(|ch| ch.kind() == NodeKind::MarkerOpen)
-}
-
-/// The whitespace-collapsed concatenation of a marker's direct text children.
-fn marker_inner_text(c: Cursor<'_>) -> String {
-    let mut s = String::new();
-    for ch in c.children() {
-        if ch.kind() == NodeKind::Text {
-            s.push_str(ch.text());
-        }
-    }
-    collapse_all(&s)
-}
-
 /// `\ref text|loc\ref*` → `{type:"ref", loc, content:[text]}` (scripture link).
 fn write_ref<W: Write>(c: Cursor<'_>, out: &mut W, ctx: &mut Ctx) -> fmt::Result {
     out.write_str("{\"type\":\"ref\"")?;
@@ -525,22 +478,6 @@ fn write_note<W: Write>(c: Cursor<'_>, out: &mut W, ctx: &mut Ctx) -> fmt::Resul
         }
     }
     out.write_str("]}")
-}
-
-fn is_category_marker(c: Cursor<'_>) -> bool {
-    c.kind() == NodeKind::MarkerOpen && c.marker_name() == "cat"
-}
-
-/// The text of a `\cat …\cat*` child, if present (note/sidebar category).
-fn category_of<'a>(parent: Cursor<'a>) -> Option<&'a str> {
-    parent
-        .children()
-        .find(|c| is_category_marker(*c))
-        .and_then(|cat| {
-            cat.children()
-                .find(|g| g.kind() == NodeKind::Text)
-                .map(|g| g.text())
-        })
 }
 
 /// Emit `,"key":"value"` pairs from this node's `|…` attribute child (USJ).
