@@ -1428,3 +1428,54 @@ fn verses_before_any_chapter_get_a_consistent_implicit_chapter() {
             .any(|d| d.code == DiagnosticCode::BodyParagraphBeforeChapter)
     );
 }
+
+#[test]
+fn unknown_markers_become_paragraphs_or_chars() {
+    // Not closed → a paragraph, as in the reference USX. Its text is not verse text.
+    let src = "\\id GEN\n\\c 1\n\\p \\v 1 Hi \\nd Bob\\nd*.\n\\ix text\n";
+    let usj = parse_usj(src);
+    let paras = collect_by_type(&usj, "para");
+    assert_eq!(paras.last().unwrap()["marker"], "ix");
+    assert_eq!(paras.last().unwrap()["content"][0], "text");
+    assert!(
+        parse(src)
+            .to_usx()
+            .contains("<para style=\"ix\" status=\"unknown\">text</para>")
+    );
+    assert_eq!(vref_text(&parse_vref(src), "GEN 1:1"), Some("Hi Bob."));
+    assert!(
+        parse_with_diagnostics(src)
+            .diagnostics()
+            .iter()
+            .any(|d| d.code == DiagnosticCode::UnknownMarker)
+    );
+
+    // Closed explicitly → a char, whose text is verse text.
+    let src = "\\id GEN\n\\c 1\n\\p\n\\v 1 A \\zfoo b\\zfoo* c.\n";
+    let usj = parse_usj(src);
+    let chars = collect_by_type(&usj, "char");
+    assert_eq!(chars[0]["marker"], "zfoo");
+    assert_eq!(chars[0]["content"][0], "b");
+    assert!(
+        parse(src)
+            .to_usx()
+            .contains("<char style=\"zfoo\" status=\"unknown\">b</char>")
+    );
+    assert_eq!(vref_text(&parse_vref(src), "GEN 1:1"), Some("A b c."));
+    assert!(parse(src).to_usfm().contains("\\zfoo b\\zfoo*"));
+
+    // Inside a note, an unclosed unknown marker must not end the note.
+    let src = "\\id GEN\n\\c 1\n\\p\n\\v 1 A\\f + \\ft note \\zbar x\\f* b.\n";
+    let usj = parse_usj(src);
+    assert_eq!(collect_by_type(&usj, "note").len(), 1);
+    assert!(
+        !parse_with_diagnostics(src)
+            .diagnostics()
+            .iter()
+            .any(|d| matches!(
+                d.code,
+                DiagnosticCode::UnclosedNote | DiagnosticCode::StrayCloseMarker
+            ))
+    );
+    assert_eq!(vref_text(&parse_vref(src), "GEN 1:1"), Some("A b."));
+}

@@ -8,9 +8,9 @@
 use std::fmt::{self, Write};
 
 use super::render::{
-    AltPub, alt_pub_kind, category_of, cell_align, collect_attributes, figure_legacy,
+    AltPub, Unknown, alt_pub_kind, category_of, cell_align, collect_attributes, figure_legacy,
     is_category_marker, is_plain_text, is_table_row, marker_inner_text, normalize_text,
-    note_caller, remainder_after_first_token, trim_leading, verse_label,
+    note_caller, remainder_after_first_token, trim_leading, unknown_shape, verse_label,
 };
 use crate::Document;
 use crate::cst::Cursor;
@@ -142,13 +142,16 @@ fn usx_blocks<W: Write>(
 fn is_top_level_block(c: Cursor<'_>) -> bool {
     match c.kind() {
         NodeKind::Chapter => true,
-        NodeKind::MarkerOpen => c.marker_info().is_some_and(|info| {
-            info.name != "usfm"
-                && !matches!(
-                    info.category,
-                    Category::Character | Category::Note | Category::Milestone
-                )
-        }),
+        NodeKind::MarkerOpen => match c.marker_info() {
+            Some(info) => {
+                info.name != "usfm"
+                    && !matches!(
+                        info.category,
+                        Category::Character | Category::Note | Category::Milestone
+                    )
+            }
+            None => unknown_shape(c) == Some(Unknown::Block),
+        },
         _ => false,
     }
 }
@@ -343,6 +346,22 @@ fn usx_node<W: Write>(c: Cursor<'_>, out: &mut W, st: &mut UsxState) -> fmt::Res
         NodeKind::Verse => usx_verse(c, None, None, out, st)?,
         NodeKind::MarkerOpen => {
             let Some(info) = c.marker_info() else {
+                // An unknown marker keeps the shape the parser gave it, flagged as
+                // the reference USX does.
+                let name = c.marker_name();
+                match unknown_shape(c) {
+                    Some(Unknown::Block) => {
+                        write!(out, "<para style=\"{name}\" status=\"unknown\">")?;
+                        usx_inline(c, out, st)?;
+                        out.write_str("</para>")?;
+                    }
+                    Some(Unknown::Inline) => {
+                        write!(out, "<char style=\"{name}\" status=\"unknown\">")?;
+                        usx_inline(c, out, st)?;
+                        out.write_str("</char>")?;
+                    }
+                    _ => {}
+                }
                 return Ok(());
             };
             if info.name == "usfm" {

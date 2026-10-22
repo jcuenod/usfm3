@@ -9,9 +9,10 @@
 use std::fmt::{self, Write};
 
 use super::render::{
-    AltPub, alt_pub_kind, category_of, cell_align, collapse_all, collect_attributes, figure_legacy,
-    is_category_marker, is_plain_text, is_table_row, json_str, marker_inner_text, normalize_text,
-    note_caller, remainder_after_first_token, trim_leading, verse_label,
+    AltPub, Unknown, alt_pub_kind, category_of, cell_align, collapse_all, collect_attributes,
+    figure_legacy, is_category_marker, is_plain_text, is_table_row, json_str, marker_inner_text,
+    normalize_text, note_caller, remainder_after_first_token, trim_leading, unknown_shape,
+    verse_label,
 };
 use crate::Document;
 use crate::cst::Cursor;
@@ -186,7 +187,19 @@ fn emit_node<W: Write>(
         }
         NodeKind::MarkerOpen => {
             let Some(info) = c.marker_info() else {
-                return Ok(false);
+                // An unknown marker keeps the shape the parser gave it.
+                match unknown_shape(c) {
+                    Some(Unknown::Block) => {
+                        sep(out, first)?;
+                        write_para(c, c.marker_name(), out, ctx)?;
+                    }
+                    Some(Unknown::Inline) => {
+                        sep(out, first)?;
+                        write_char(c, c.marker_name(), out, ctx)?;
+                    }
+                    _ => return Ok(false),
+                }
+                return Ok(true);
             };
             // `\usfm` (version declaration) is metadata, not USJ content.
             if info.name == "usfm" {

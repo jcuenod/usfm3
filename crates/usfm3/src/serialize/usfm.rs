@@ -8,8 +8,8 @@
 use std::fmt::{self, Write};
 
 use super::render::{
-    collapse_all, collect_attributes, figure_legacy_raw, note_caller, remainder_after_first_token,
-    verse_label,
+    Unknown, collapse_all, collect_attributes, figure_legacy_raw, note_caller,
+    remainder_after_first_token, unknown_shape, verse_label,
 };
 use crate::Document;
 use crate::cst::Cursor;
@@ -127,6 +127,32 @@ impl<W: Write> Usfm<'_, W> {
             }
             NodeKind::MarkerOpen => {
                 let Some(info) = c.marker_info() else {
+                    // Unknown: re-emit it in the shape it was parsed as.
+                    let name = c.marker_name();
+                    match unknown_shape(c) {
+                        Some(Unknown::Block) => {
+                            self.newline()?;
+                            self.marker(name)?;
+                            self.children(c)?;
+                        }
+                        Some(Unknown::Inline) => {
+                            let prefix = if c.is_nested() { "+" } else { "" };
+                            self.space()?;
+                            self.put("\\")?;
+                            self.put(prefix)?;
+                            self.put(name)?;
+                            self.put(" ")?;
+                            self.children(c)?;
+                            self.put("\\")?;
+                            self.put(prefix)?;
+                            self.put(name)?;
+                            self.put("*")?;
+                        }
+                        _ => {
+                            self.space()?;
+                            self.marker(name)?;
+                        }
+                    }
                     return Ok(());
                 };
                 let name = c.marker_name(); // actual token, e.g. "q1", "tcr1-2"

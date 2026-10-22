@@ -443,6 +443,12 @@ impl VerseBody {
                         // inline (and unknown) markers need their delimiter dropped:
                         // `王后\pn 以斯帖\pn*` reads `王后以斯帖`, not `王后 以斯帖`.
                         Some(TextRole::Boundary) => i += 1,
+                        // An unknown paragraph (`\ix text`): we can't know it is
+                        // scripture text, so leave it out, as 0.2.1 did. An unknown
+                        // char (`\zfoo x\zfoo*`) keeps its text like any char.
+                        None if nodes[node.link as usize].kind == NodeKind::BlockEnd => {
+                            i = (node.link as usize) + 1;
+                        }
                         _ => {
                             at_delimiter = true;
                             i += 1;

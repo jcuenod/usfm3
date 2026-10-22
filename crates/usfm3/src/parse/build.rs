@@ -265,6 +265,24 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// The tag of the open marker at `idx`, as written (`\+zfoo` → `zfoo`).
+    fn open_name(&self, idx: u32) -> &str {
+        let span = self.nodes[idx as usize].span();
+        let s = &self.src[span.range()];
+        let s = s.strip_prefix('\\').unwrap_or(s);
+        s.strip_prefix('+').unwrap_or(s).trim_end()
+    }
+
+    /// Whether a note or character marker is open, so a new block can't start
+    /// without ending it.
+    fn in_inline_context(&self) -> bool {
+        self.stack.iter().any(|&oi| {
+            self.table
+                .info(self.nodes[oi as usize].marker)
+                .is_some_and(|m| matches!(m.category, Category::Note | Category::Character))
+        })
+    }
+
     /// Whether the open node at `idx` is a block container (sidebar / periph).
     fn is_container(&self, idx: u32) -> bool {
         matches!(
@@ -632,10 +650,13 @@ impl<'a> Builder<'a> {
                 j
             }
             None => {
-                // Unknown marker: keep its text (error-tolerant), but don't give it
-                // block/close semantics we can't know. Markers in the `z` namespace
-                // are the spec's user-extension space, so they're allowed silently;
-                // any other unrecognized marker is an error.
+                // Unknown marker. Markers in the `z` namespace are the spec's
+                // user-extension space, so they're allowed silently; any other
+                // unrecognized marker is an error. We can't know its semantics, so
+                // take its shape from the source: explicitly closed ahead → a char
+                // that nests until `\tag*`; otherwise a paragraph (as Paratext and
+                // the reference USX treat `\ix text`) — except inside a note or
+                // char, where a block would wrongly end it, so it stays a leaf.
                 if !tag.starts_with('z') {
                     self.report(|| {
                         Diagnostic::error(
@@ -645,8 +666,23 @@ impl<'a> Builder<'a> {
                         )
                     });
                 }
-                let idx = self.push_open(Span::new(b as u32, (j - b) as u32), MarkerId::UNKNOWN);
-                self.nodes[idx as usize].flags |= flags::HAS_ERROR | flags::SELF_CLOSING;
+                let span = Span::new(b as u32, (j - b) as u32);
+                if self.has_close_ahead(tag, j) {
+                    let idx = self.push_open(span, MarkerId::UNKNOWN);
+                    self.nodes[idx as usize].flags |= flags::HAS_ERROR;
+                    if nested {
+                        self.nodes[idx as usize].flags |= flags::NESTED;
+                    }
+                    self.stack.push(idx);
+                } else if self.in_inline_context() {
+                    let idx = self.push_open(span, MarkerId::UNKNOWN);
+                    self.nodes[idx as usize].flags |= flags::HAS_ERROR | flags::SELF_CLOSING;
+                } else {
+                    self.close_blocks_down_to(self.container_floor(), b, Some(tag));
+                    let idx = self.push_open(span, MarkerId::UNKNOWN);
+                    self.nodes[idx as usize].flags |= flags::HAS_ERROR;
+                    self.stack.push(idx);
+                }
                 j
             }
         }
@@ -654,11 +690,17 @@ impl<'a> Builder<'a> {
 
     fn handle_close(&mut self, b: usize, j: usize, id: Option<MarkerId>, tag: &str) -> usize {
         let span = Span::new(b as u32, (j - b) as u32);
-        let matching = id.and_then(|id| {
-            self.stack
+        let matching = match id {
+            Some(id) => self
+                .stack
                 .iter()
-                .rposition(|&oi| self.nodes[oi as usize].marker == id)
-        });
+                .rposition(|&oi| self.nodes[oi as usize].marker == id),
+            // Unknown markers share one id, so match an open one by name.
+            None => self.stack.iter().rposition(|&oi| {
+                let open = &self.nodes[oi as usize];
+                open.marker == MarkerId::UNKNOWN && self.open_name(oi) == tag
+            }),
+        };
         match matching {
             Some(pos_in_stack) => {
                 // Close any inner markers left open inside this one — they were

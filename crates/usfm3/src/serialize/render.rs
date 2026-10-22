@@ -275,6 +275,29 @@ pub(crate) fn category_of<'a>(parent: Cursor<'a>) -> Option<&'a str> {
         })
 }
 
+/// How the parser shaped a marker that isn't in the table (see `parse_marker`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Unknown {
+    /// Not explicitly closed: a paragraph, ended by the next block.
+    Block,
+    /// Closed by its own `\tag*`: a char.
+    Inline,
+    /// Inside a note or char: just the marker; its text follows as siblings.
+    Leaf,
+}
+
+/// The shape of an unknown marker, or `None` for anything else.
+pub(crate) fn unknown_shape(c: Cursor<'_>) -> Option<Unknown> {
+    if c.kind() != NodeKind::MarkerOpen || c.marker_info().is_some() {
+        return None;
+    }
+    Some(match c.matching_close().map(|close| close.kind()) {
+        Some(NodeKind::BlockEnd) => Unknown::Block,
+        Some(NodeKind::MarkerClose) => Unknown::Inline,
+        _ => Unknown::Leaf,
+    })
+}
+
 // --- deprecated figure syntax ----------------------------------------------
 
 /// The `|…` attribute child of a figure when it uses the *deprecated* USFM 2.x
