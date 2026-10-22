@@ -112,10 +112,20 @@ These apply to every package.
 - Text strings no longer keep the space after a marker (`" the first verse "` is now
   `"the first verse"`), and whitespace-only strings between inline elements are dropped.
 - The `\xt` link attribute is `href` (the USFM 3.1 name) instead of `link-href`.
+- An unknown marker is a `para` (or a `char`, when it has an explicit `\tag*` close)
+  carrying its own marker name, instead of a `type: "unknown"` node.
+
+**All formats**
+- Verses before any `\c` belong to chapter 1 when the book has no `\c` at all (a
+  one-chapter book missing `\c 1`), and to chapter 0 when a real `\c` follows, so
+  they can't merge into it. 0.2.1 wrote `BOOK :N` in vref and `BOOK 0:N` in sids.
+- Malformed attributes are parsed leniently instead of kept as text:
+  `|lemma strong="l"` yields `strong="l"`, dropping the dangling word.
 
 **USX**
 - No `<?xml?>` declaration; one top-level element per line with a two-space indent.
 - Implicitly closed character and note markers carry `closed="false"`.
+- Unknown markers carry `status="unknown"`, as in the reference USX.
 
 **vref**
 - Duplicate references are concatenated; 0.2.1 kept only the last one.
@@ -125,12 +135,18 @@ These apply to every package.
 - Doubled spaces left behind by removed notes are collapsed.
 - `\qa`, `\rq` and `\vp` text, and the attributes of milestones that span several
   lines, no longer leak into verse text.
-- Verses before any `\c` are keyed `BOOK 0:N`; 0.2.1 used `BOOK :N`.
+- In aligned USFM (one word per line), a line break before trailing punctuation is
+  layout, not a space: `Paul, a servant` rather than 0.2.1's `Paul,a servant`.
+- `//` (an optional line break) is dropped rather than kept verbatim.
 - Glued `\v1` and `\c2` (no space) are recovered as verse 1 and chapter 2.
 
 ### Added
 
 - `Version`, which selects the USFM 3.1 or 3.2 marker table.
+- `BOOK_CODES` covers the deuterocanon/apocrypha, peripherals and `XXA`–`XXG` as well
+  as the 66 books. vref keys use the `\id` code as written (`VrefRow::book_code`),
+  even for codes outside the list. InvalidBookCode says when a code is a lowercase
+  known one (`php` → `PHP`).
 - `Document::to_packed_tape(offsets)` and `schema_json(version)`. These give the tape as
   a flat `u32` buffer, with offsets in UTF-8, UTF-16 or code points, plus the tables
   needed to decode it. The JS and Python packages use them to hand the parse to a host
