@@ -1370,3 +1370,25 @@ fn malformed_attributes_parse_leniently_into_valid_names() {
     let usj = parse_usj("\\id GEN\n\\c 1\n\\p\n\\v 1 \\em text|value\\em*\n");
     assert_eq!(collect_by_type(&usj, "char")[0]["default"], "value");
 }
+
+#[test]
+fn non_ascii_spaces_are_text_and_tilde_is_a_no_break_space() {
+    // U+00A0 before « », U+3000 between CJK words, `~` and `//` (optional break).
+    let src =
+        "\\id GEN\n\\c 1\n\\p\n\\v 1 «\u{a0}Bonjour\u{a0}» 東京\u{3000}駅 10~000 long//word.\n";
+    let expected = "«\u{a0}Bonjour\u{a0}» 東京\u{3000}駅 10\u{a0}000 longword.";
+    assert_eq!(vref_text(&parse_vref(src), "GEN 1:1"), Some(expected));
+
+    let usj = parse_usj(src);
+    let para = &collect_by_type(&usj, "para")[0];
+    let text: String = para["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(
+        text,
+        "«\u{a0}Bonjour\u{a0}» 東京\u{3000}駅 10\u{a0}000 longword."
+    );
+}

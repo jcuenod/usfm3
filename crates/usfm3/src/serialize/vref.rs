@@ -423,8 +423,8 @@ impl VerseBody {
                     let mut text = node.span().text(doc.source());
                     if at_delimiter {
                         at_delimiter = false;
-                        if let Some(c) = text.chars().next().filter(|c| c.is_whitespace()) {
-                            text = &text[c.len_utf8()..];
+                        if text.starts_with(|c: char| c.is_ascii_whitespace()) {
+                            text = &text[1..];
                         }
                     }
                     push_collapsed(text, buf, start_len, &mut pending_space);
@@ -467,31 +467,58 @@ enum Gap {
 /// A separator is emitted only before a non-space character that follows
 /// whitespace *and* only when the verse already has content — so leading and
 /// trailing whitespace are dropped, and adjacent characters split solely by a
-/// (dropped) marker stay adjacent. A gap of line breaks alone is not emitted
+/// (dropped) marker stay adjacent. Only ASCII whitespace is collapsible: a
+/// no-break or ideographic space in the source is text and is kept, and `~` (USFM
+/// for a no-break space) becomes U+00A0. `//` (an optional line break) is markup
+/// and is dropped. A gap of line breaks alone is not emitted
 /// before punctuation that attaches to the preceding word, so
 /// `\w Paul\w*⏎\zaln-e\*,` reads `Paul,` rather than `Paul ,`. `verse_start`
 /// marks where this verse began in the shared arena; `gap` carries the
 /// whitespace state across the node boundary.
 fn push_collapsed(s: &str, buf: &mut String, verse_start: usize, gap: &mut Gap) {
-    for ch in s.chars() {
-        if ch.is_whitespace() {
-            if ch != '\n' && ch != '\r' {
-                *gap = Gap::Space;
-            } else if *gap == Gap::None {
-                *gap = Gap::LineBreak;
+    // Byte scan: every byte that needs handling is ASCII, so a run of anything
+    // else is copied in one `push_str`, and every index we stop at is a char
+    // boundary.
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\n' | b'\r' => {
+                if *gap == Gap::None {
+                    *gap = Gap::LineBreak;
+                }
+                i += 1;
+                continue;
             }
-        } else {
-            let separate = match *gap {
-                Gap::None => false,
-                Gap::LineBreak => !attaches_left(ch),
-                Gap::Space => true,
-            };
+            b' ' | b'\t' | 0x0c => {
+                *gap = Gap::Space;
+                i += 1;
+                continue;
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                i += 2;
+                continue;
+            }
+            _ => {}
+        }
+        if *gap != Gap::None {
+            let separate = *gap == Gap::Space || !s[i..].chars().next().is_some_and(attaches_left);
             if separate && buf.len() > verse_start {
                 buf.push(' ');
             }
             *gap = Gap::None;
-            buf.push(ch);
         }
+        if bytes[i] == b'~' {
+            buf.push('\u{a0}');
+            i += 1;
+            continue;
+        }
+        let end = bytes[i + 1..]
+            .iter()
+            .position(|&b| matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 0x0c | b'~' | b'/'))
+            .map_or(bytes.len(), |k| i + 1 + k);
+        buf.push_str(&s[i..end]);
+        i = end;
     }
 }
 

@@ -67,10 +67,11 @@ pub(crate) fn trim_leading(prev: Option<NodeKind>) -> bool {
 /// Collapse internal whitespace runs to a single space (docs.usfm.bible). A
 /// leading space is dropped when it is a marker separator (`trim_leading`); a
 /// trailing space is preserved as a word separator before the next sibling.
-/// The no-break space `~` (U+00A0 per spec) is substituted *after* the collapse,
-/// since it is itself whitespace and must not be collapsed away.
+/// Only ASCII whitespace is collapsible: a no-break or ideographic space in the
+/// source is text. The no-break space `~` (U+00A0 per spec) is substituted after
+/// the collapse.
 pub(crate) fn normalize_text(s: &str, trim_leading: bool) -> String {
-    let collapsed = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let collapsed = collapse_all(s);
     if collapsed.is_empty() {
         return String::new();
     }
@@ -92,9 +93,10 @@ pub(crate) fn normalize_text(s: &str, trim_leading: bool) -> String {
     out
 }
 
-/// Collapse every whitespace run to a single space, with no leading/trailing space.
+/// Collapse every ASCII whitespace run to a single space, with no leading/trailing
+/// space. Non-ASCII spaces (U+00A0, U+3000, …) are text and are kept.
 pub(crate) fn collapse_all(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
+    s.split_ascii_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 // --- notes -----------------------------------------------------------------
