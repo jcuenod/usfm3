@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Requires WebAssembly SIMD
+
+The `.wasm` is now built with SIMD, which the parser's scanner uses. It needs Chrome
+91, Firefox 89, Safari 16.4, Node 16.4 or later (every engine released since 2023).
+
+### Performance
+
+No API or output changes. Measured in Node: SIMD makes `parse()` about 23% faster
+and `parseTape()` about 20% faster; the new marker lookup takes a further 9% off
+`parse()`; walking a tape with `children()` is about 22% faster. The Rust
+serializer changes listed in the crate changelog apply here too.
+
 ## 0.3.0
 
 A rewrite of the underlying parser. 0.2 built tokens, then a CST, then an AST plus a

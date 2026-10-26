@@ -10,6 +10,25 @@ Until 1.0, a minor version bump (0.2 → 0.3) may break the API. Cargo and npm t
 as breaking, so `usfm3 = "0.2"` and `"usfm3": "^0.2.1"` will not pick it up. pip has
 no such rule: pin `usfm3<0.3` if you aren't ready to upgrade.
 
+## Unreleased
+
+### Performance
+
+No API or output changes. Measured on the BSB and the door43 Hindi IRV, against
+0.3.0:
+
+| | change |
+| --- | --- |
+| parse | −25% |
+| `to_usj` | −27% |
+| `to_usx` | −32% |
+| `to_usfm` | −19% |
+| `to_vref_json` | −12% |
+| `to_packed_tape` (utf16 / chars) | −24% / −26% |
+
+Marker names are now looked up with a generated `match` rather than a `phf` map, so
+`phf` is no longer a dependency: `memchr` is the only one.
+
 ## 0.3.0
 
 A rewrite. 0.2 lexed into tokens, built a CST, then lowered that into an AST and a

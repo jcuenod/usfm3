@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Performance
+
+No API or output changes. `to_vref()` builds its dict directly instead of decoding
+JSON, which took 37–46% off the call in our measurements. The Rust core underneath
+is faster too (parse −25%, `to_usj()` −27%, `to_usx()` −32% natively; see the crate
+changelog).
+
 ## 0.3.0
 
 A rewrite of the underlying parser. 0.2 built tokens, then a CST, then an AST plus a
