@@ -6,12 +6,13 @@
 //! `ParsedDocument` handle — there is no separate token / AST / source-map stage.
 //!
 //! The core serializers emit JSON as strings; the JSON-shaped views
-//! (`cst`/`to_usj`/`to_vref`/`diagnostics`) are decoded at the boundary with the
+//! (`cst`/`to_usj`/`diagnostics`) are decoded at the boundary with the
 //! standard-library `json` module (native C speed, no extra Rust deps), so callers
-//! get plain dicts/lists. `to_usx`/`to_usfm` are returned as strings.
+//! get plain dicts/lists. `to_vref` is a flat string map, so it is built as a dict
+//! directly. `to_usx`/`to_usfm` are returned as strings.
 
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyModule};
+use pyo3::types::{PyBytes, PyDict, PyModule};
 
 use ::usfm3 as usfm3_lib;
 
@@ -69,7 +70,13 @@ impl ParsedDocument {
 
     /// Verse-reference → cleaned-text dict, in document order.
     fn to_vref(&self, py: Python<'_>) -> PyResult<PyObject> {
-        json_loads(py, &self.doc().to_vref_json())
+        // Built directly rather than via JSON: escaping it in Rust and decoding it
+        // again in Python was half the cost of this call.
+        let dict = PyDict::new(py);
+        for (key, text) in self.doc().vref_dict() {
+            dict.set_item(key, text)?;
+        }
+        Ok(dict.into_any().unbind())
     }
 
     /// Diagnostics as a flat list. Empty unless `diagnostics=True` was passed.
