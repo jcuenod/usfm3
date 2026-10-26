@@ -18,6 +18,7 @@
 
 use crate::Document;
 use crate::span::{OffsetMap, Offsets};
+use crate::tape::NodeKind;
 
 /// Buffer tag, `b"USFT"` read big-endian. Lets a host reject a buffer that is not a
 /// packed tape at all (a truncated `postMessage`, the wrong array).
@@ -83,6 +84,11 @@ impl Document<'_> {
         out.push(bytes);
         out.push(utf16);
         out.push(chars);
+        let source_len = match offsets {
+            Offsets::Utf8 => bytes,
+            Offsets::Utf16 => utf16,
+            Offsets::Chars => chars,
+        };
 
         for node in nodes {
             out.push(node.kind as u32 | (node.flags as u32) << 8 | (node.marker.0 as u32) << 16);
@@ -91,7 +97,13 @@ impl Document<'_> {
             // measured locally rather than by translating `end`, because a container's
             // end lies past its children and would force the scanner backwards.
             out.push(map.at(node.start));
-            out.push(map.span_len(node.start, node.span().end()));
+            // The root spans the whole source, whose length is already known;
+            // measuring it would be a second full pass.
+            out.push(if node.kind == NodeKind::Root {
+                source_len
+            } else {
+                map.span_len(node.start, node.span().end())
+            });
             // NOT an offset. `link` is a jump pointer for MarkerOpen/MarkerClose/
             // BlockEnd, the chapter/verse *number* for Chapter/Verse, the node's own
             // index for Text/Attribute/Error, and the last node index for Root.
