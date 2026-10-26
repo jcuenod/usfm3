@@ -13,18 +13,28 @@ use crate::tape::NodeKind;
 // --- JSON ------------------------------------------------------------------
 
 pub(crate) fn escape_json<W: Write>(s: &str, out: &mut W) -> fmt::Result {
-    for ch in s.chars() {
-        match ch {
-            '"' => out.write_str("\\\"")?,
-            '\\' => out.write_str("\\\\")?,
-            '\n' => out.write_str("\\n")?,
-            '\r' => out.write_str("\\r")?,
-            '\t' => out.write_str("\\t")?,
-            c if (c as u32) < 0x20 => write!(out, "\\u{:04x}", c as u32)?,
-            c => out.write_char(c)?,
-        }
+    // Every byte that needs escaping is ASCII, so copy the runs between them whole.
+    let mut start = 0;
+    for (i, &b) in s.as_bytes().iter().enumerate() {
+        let esc = match b {
+            b'"' => "\\\"",
+            b'\\' => "\\\\",
+            b'\n' => "\\n",
+            b'\r' => "\\r",
+            b'\t' => "\\t",
+            0x00..=0x1f => {
+                out.write_str(&s[start..i])?;
+                write!(out, "\\u{b:04x}")?;
+                start = i + 1;
+                continue;
+            }
+            _ => continue,
+        };
+        out.write_str(&s[start..i])?;
+        out.write_str(esc)?;
+        start = i + 1;
     }
-    Ok(())
+    out.write_str(&s[start..])
 }
 
 pub(crate) fn json_str<W: Write>(s: &str, out: &mut W) -> fmt::Result {
