@@ -17,10 +17,6 @@
 
 /** Kinds whose `marker` field indexes the schema's marker table. */
 const MARKER_BEARING = new Set(["marker", "close", "block_end", "chapter", "verse"]);
-/** Kinds that terminate a run of children (a parent's close token). */
-const CLOSING = new Set(["close", "block_end"]);
-/** Kinds whose `link` is a jump pointer to a close rather than a number or self-index. */
-const CONTAINER = new Set(["root", "marker"]);
 /** Kinds whose `link` holds a chapter/verse number. */
 const NUMBERED = new Set(["chapter", "verse"]);
 
@@ -89,6 +85,16 @@ export class Tape {
     this._base = headerWords;
     this._stride = nodeWords;
     this._synthetic = schema.flags.synthetic;
+
+    // Kind codes for traversal, which compares integers rather than resolving and
+    // looking up kind names on every step. Containers (`root`, `marker`) have a
+    // `link` that jumps to their close; a `close` or `block_end` ends a run of
+    // children.
+    const code = (name) => schema.kinds.indexOf(name);
+    this._kRoot = code("root");
+    this._kMarker = code("marker");
+    this._kClose = code("close");
+    this._kBlockEnd = code("block_end");
   }
 
   /**
@@ -263,20 +269,24 @@ export class TapeCursor {
 
   /** First child, or `null`. Mirrors `Cursor::first_child`. */
   firstChild() {
-    if (!CONTAINER.has(this.kind)) return null;
+    const t = this.tape;
+    const k = this.kindCode;
+    if (k !== t._kRoot && k !== t._kMarker) return null;
     const child = this.index + 1;
     // `link` is the matching close; adjacent means no children. Note the root's `link`
     // is the last node index rather than a close node, which this still handles.
-    return child < this.link ? this.tape.at(child) : null;
+    return child < this.link ? new TapeCursor(t, child) : null;
   }
 
   /** Next sibling, skipping this node's whole subtree. Mirrors `Cursor::next_sibling`. */
   nextSibling() {
-    const after = CONTAINER.has(this.kind) ? this.link + 1 : this.index + 1;
-    if (after >= this.tape.length) return null;
-    const next = this.tape.at(after);
+    const t = this.tape;
+    const k = this.kindCode;
+    const after = k === t._kRoot || k === t._kMarker ? this.link + 1 : this.index + 1;
+    if (after >= t.length) return null;
     // The parent's close terminates the run of children.
-    return CLOSING.has(next.kind) ? null : next;
+    const next = t.words[t._base + after * t._stride] & 0xff;
+    return next === t._kClose || next === t._kBlockEnd ? null : new TapeCursor(t, after);
   }
 
   /** Direct children, in order. */
