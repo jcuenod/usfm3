@@ -2,7 +2,8 @@
 
 `usfm3` is the JavaScript / TypeScript package for the Rust `usfm3` parser — an
 error-tolerant, blazingly fast USFM 3.x parser compiled to WebAssembly. It runs in
-browsers and in Node (the same `.wasm` powers both).
+browsers and in Node (the same `.wasm` powers both). It uses WebAssembly SIMD, so it
+needs Chrome 91, Firefox 89, Safari 16.4, Node 16.4 or later.
 
 A single `parse()` produces a flat tape; every output (USJ, USX, USFM, CST, vref,
 diagnostics) is a cheap view over it. There is no separate token/AST/source-map
