@@ -1,7 +1,7 @@
 # USFM marker specification — the single source of truth for the parser.
 #
-# `build.rs` reads this and generates per-version `MarkerTable`s (with a phf
-# perfect-hash name->id map) into $OUT_DIR/marker_tables.rs.
+# `build.rs` reads this and generates per-version `MarkerTable`s (with a
+# `match`-based name->id function) into $OUT_DIR/marker_tables.rs.
 #
 # Each [groups.<id>] entry shares one profile across many marker `names`:
 #   category : identification | chapter | verse | paragraph | character | note | milestone | other  (required)

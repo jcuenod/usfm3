@@ -12,13 +12,10 @@ categories = ["parser-implementations", "text-processing"]
 [dependencies]
 # SIMD-accelerated, stable-Rust scanning for the structural (stage 1) pass.
 memchr = "2"
-# Perfect-hash marker-name lookup; tables are generated at build time.
-phf = "0.11"
 
 [build-dependencies]
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
-phf_codegen = "0.11"
 
 [dev-dependencies]
 roxmltree = "0.20"

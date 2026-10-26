@@ -1,6 +1,6 @@
 //! Generates per-version `MarkerTable`s from `data/markers.toml` into
 //! `$OUT_DIR/marker_tables.rs`, which `marker.rs` includes. Each version gets a
-//! `&[MarkerInfo]` slice plus a `phf` perfect-hash `name -> id` map.
+//! `&[MarkerInfo]` slice plus a generated `match`-based `name -> id` function.
 
 use std::collections::{BTreeMap, HashSet};
 use std::env;
@@ -121,21 +121,20 @@ fn main() {
         }
         code.push_str("];\n");
 
-        // phf name -> index map.
-        let mut builder = phf_codegen::Map::new();
+        // name -> index as a plain `match`, which rustc lowers to a length + byte
+        // decision tree. Measured faster than a `phf` map, whose SipHash dominated
+        // parse time.
+        let index_fn = format!("{}_index", variant.to_lowercase());
+        writeln!(code, "fn {index_fn}(name: &str) -> Option<u16> {{").unwrap();
+        code.push_str("    match name {\n");
         for (i, m) in filtered.iter().enumerate() {
-            builder.entry(m.name.as_str(), &format!("{i}u16"));
+            writeln!(code, "        {:?} => Some({i}),", m.name).unwrap();
         }
-        writeln!(
-            code,
-            "static {variant}_INDEX: ::phf::Map<&'static str, u16> = {};",
-            builder.build()
-        )
-        .unwrap();
+        code.push_str("        _ => None,\n    }\n}\n");
 
         writeln!(
             code,
-            "pub static {variant}_TABLE: MarkerTable = MarkerTable {{ entries: {variant}_ENTRIES, index: &{variant}_INDEX }};\n"
+            "pub static {variant}_TABLE: MarkerTable = MarkerTable {{ entries: {variant}_ENTRIES, index: {index_fn} }};\n"
         )
         .unwrap();
     }
