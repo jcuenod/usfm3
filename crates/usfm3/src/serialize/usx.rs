@@ -409,12 +409,15 @@ fn usx_inline_nodes<W: Write>(
             let t = normalize_text(child.text(), trim_leading(prev));
             if !t.is_empty() {
                 // `//` → <optbreak /> (discretionary line break, spec).
-                for (i, seg) in t.split("//").enumerate() {
-                    if i > 0 {
-                        out.write_str("<optbreak />")?;
+                if !t.contains("//") {
+                    escape_xml(&t, out)?;
+                } else {
+                    for (i, seg) in t.split("//").enumerate() {
+                        if i > 0 {
+                            out.write_str("<optbreak />")?;
+                        }
+                        escape_xml(seg.trim(), out)?;
                     }
-                    let seg = if t.contains("//") { seg.trim() } else { seg };
-                    escape_xml(seg, out)?;
                 }
                 prev = Some(NodeKind::Text);
             }
@@ -592,26 +595,28 @@ fn write_xml_attributes<W: Write>(c: Cursor<'_>, marker: &str, out: &mut W) -> f
 }
 
 fn escape_xml<W: Write>(s: &str, out: &mut W) -> fmt::Result {
-    for ch in s.chars() {
-        match ch {
-            '<' => out.write_str("&lt;")?,
-            '>' => out.write_str("&gt;")?,
-            '&' => out.write_str("&amp;")?,
-            _ => out.write_char(ch)?,
-        }
-    }
-    Ok(())
+    escape_xml_with(s, false, out)
 }
 
 fn escape_xml_attr<W: Write>(s: &str, out: &mut W) -> fmt::Result {
-    for ch in s.chars() {
-        match ch {
-            '<' => out.write_str("&lt;")?,
-            '>' => out.write_str("&gt;")?,
-            '&' => out.write_str("&amp;")?,
-            '"' => out.write_str("&quot;")?,
-            _ => out.write_char(ch)?,
-        }
+    escape_xml_with(s, true, out)
+}
+
+/// Every byte that needs escaping is ASCII, so copy the runs between them whole.
+/// `attr` also escapes `"`, for attribute values.
+fn escape_xml_with<W: Write>(s: &str, attr: bool, out: &mut W) -> fmt::Result {
+    let mut start = 0;
+    for (i, &b) in s.as_bytes().iter().enumerate() {
+        let esc = match b {
+            b'<' => "&lt;",
+            b'>' => "&gt;",
+            b'&' => "&amp;",
+            b'"' if attr => "&quot;",
+            _ => continue,
+        };
+        out.write_str(&s[start..i])?;
+        out.write_str(esc)?;
+        start = i + 1;
     }
-    Ok(())
+    out.write_str(&s[start..])
 }
