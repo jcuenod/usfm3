@@ -82,19 +82,24 @@ pub(crate) fn trim_leading(prev: Option<NodeKind>) -> bool {
 /// source is text. The no-break space `~` (U+00A0 per spec) is substituted after
 /// the collapse.
 pub(crate) fn normalize_text(s: &str, trim_leading: bool) -> String {
-    let collapsed = collapse_all(s);
-    if collapsed.is_empty() {
+    let mut words = s.split_ascii_whitespace();
+    let Some(first) = words.next() else {
         return String::new();
-    }
+    };
     // Only a literal space (not \r or \n) is a meaningful word-separator; CRLF
     // files would otherwise get a spurious trailing space from the \r.
     let lead = !trim_leading && s.trim_start_matches(['\r', '\n']).starts_with(' ');
     let trail = s.trim_end_matches(['\r', '\n']).ends_with(' ');
-    let mut out = String::with_capacity(collapsed.len() + 2);
+    // One allocation: collapse straight into the output.
+    let mut out = String::with_capacity(s.len() + 2);
     if lead {
         out.push(' ');
     }
-    out.push_str(&collapsed);
+    out.push_str(first);
+    for word in words {
+        out.push(' ');
+        out.push_str(word);
+    }
     if trail {
         out.push(' ');
     }
@@ -107,7 +112,14 @@ pub(crate) fn normalize_text(s: &str, trim_leading: bool) -> String {
 /// Collapse every ASCII whitespace run to a single space, with no leading/trailing
 /// space. Non-ASCII spaces (U+00A0, U+3000, …) are text and are kept.
 pub(crate) fn collapse_all(s: &str) -> String {
-    s.split_ascii_whitespace().collect::<Vec<_>>().join(" ")
+    let mut out = String::with_capacity(s.len());
+    for word in s.split_ascii_whitespace() {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(word);
+    }
+    out
 }
 
 // --- notes -----------------------------------------------------------------
