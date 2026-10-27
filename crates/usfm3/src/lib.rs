@@ -829,6 +829,24 @@ mod tests {
     }
 
     #[test]
+    fn verse_sequence_allows_lettered_segments() {
+        let warns = |verses: &str| {
+            let src = format!("\\id JOB\n\\c 1\n\\p\n{verses}");
+            diagnostic_codes(&src).contains(&DiagnosticCode::InvalidVerseSequence)
+        };
+        // A plain verse may be followed by an added segment of itself (LXX Job
+        // 2:9a), and segments run on and into the next verse.
+        assert!(!warns("\\v 1 a\n\\v 1a b\n\\v 1b c\n\\v 2 d"));
+        assert!(!warns("\\v 1a a\n\\v 1b b\n\\v 2 c"));
+        assert!(!warns("\\v 1-2 a\n\\v 2a b\n\\v 3 c"));
+        // Going back, repeating a segment, or skipping a verse still warns.
+        assert!(warns("\\v 1 a\n\\v 2 b\n\\v 1a c"));
+        assert!(warns("\\v 1 a\n\\v 1a b\n\\v 1a c"));
+        assert!(warns("\\v 1 a\n\\v 3 b"));
+        assert!(warns("\\v 0a a"));
+    }
+
+    #[test]
     fn verse_ref_packs_and_formats() {
         let r = VerseRef::new(BookId::from_code("GEN").unwrap(), 1, 1);
         assert_eq!(r.to_string(), "GEN 1:1");

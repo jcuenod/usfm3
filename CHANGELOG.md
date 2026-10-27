@@ -27,6 +27,8 @@ now wins and the second stays a `char`).
   already read it, with a new `MissingSpaceBeforeNumber` warning. 0.3.1 reported a
   `MissingVerseNumber`/`MissingChapterNumber` error and lost its place in the
   verse sequence, so the next verse was flagged too.
+- A lettered segment may follow its plain verse (`\v 9` then `\v 9a`, as in LXX
+  Job 2:9a) without an `InvalidVerseSequence` warning.
 
 ## 0.3.1
 

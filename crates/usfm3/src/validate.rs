@@ -679,7 +679,13 @@ fn parse_verse_range_end(s: &str) -> Option<VersePart> {
 
 fn is_valid_verse_sequence(expected: VersePart, actual: VersePart) -> bool {
     if actual.num != expected.num {
-        expected.suffix.is_some() && actual.num == expected.num + 1
+        // After `9a`, `10` may follow; after `9`, a lettered `9a` may (an added
+        // segment, e.g. LXX Job 2:9a).
+        (expected.suffix.is_some() && actual.num == expected.num + 1)
+            || (expected.suffix.is_none()
+                && actual.suffix.is_some()
+                && actual.num >= 1
+                && actual.num + 1 == expected.num)
     } else {
         actual.suffix >= expected.suffix
     }
