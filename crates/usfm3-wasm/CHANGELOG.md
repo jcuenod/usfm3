@@ -7,6 +7,9 @@ that doesn't directly follow its `\c` or `\v`. A `\cp` after a verse, or a secon
 `\vp` on one verse, now stays a `char` instead of being folded into the verse; see
 the crate changelog.
 
+A number glued to its marker (`\v10`) is now read as written, with a
+`MissingSpaceBeforeNumber` warning instead of a missing-number error.
+
 ## 0.3.1
 
 ### Requires WebAssembly SIMD

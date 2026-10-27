@@ -21,6 +21,13 @@ element, as before, and now raises a `MisplacedNumberMarker` warning. That cover
 verse), and a second `\vp` on the same verse (0.3.1 kept only the last; the first
 now wins and the second stays a `char`).
 
+### Verse and chapter numbers in diagnostics
+
+- A number glued to its marker (`\v10`, `\c2`) is read the way the serializers
+  already read it, with a new `MissingSpaceBeforeNumber` warning. 0.3.1 reported a
+  `MissingVerseNumber`/`MissingChapterNumber` error and lost its place in the
+  verse sequence, so the next verse was flagged too.
+
 ## 0.3.1
 
 ### Performance

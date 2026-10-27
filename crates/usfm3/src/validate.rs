@@ -105,7 +105,8 @@ fn walk(
             NodeKind::Chapter => {
                 st.has_chapter = true;
                 let num = child.number().unwrap_or(0);
-                if number_label(child).is_empty() {
+                let number = number_label(child);
+                if number.label.is_empty() {
                     diags.push(Diagnostic::error(
                         DiagnosticCode::MissingChapterNumber,
                         child.span(),
@@ -134,7 +135,7 @@ fn walk(
                     num: 1,
                     suffix: None,
                 };
-                check_leading_zeros(child, "chapter", diags);
+                check_number_form(child, &number, "chapter", diags);
             }
             NodeKind::Verse => {
                 st.has_verse = true;
@@ -154,7 +155,8 @@ fn walk(
                         "a character marker spans a verse boundary (\\v inside a \\char span)",
                     ));
                 }
-                let label = number_label(child);
+                let number = number_label(child);
+                let label = number.label;
                 if label.is_empty() {
                     diags.push(Diagnostic::error(
                         DiagnosticCode::MissingVerseNumber,
@@ -174,7 +176,7 @@ fn walk(
                         .next_expected();
                 }
                 anchor = Some(child);
-                check_leading_zeros(child, "verse", diags);
+                check_number_form(child, &number, "verse", diags);
             }
             NodeKind::MarkerOpen => {
                 let Some(info) = child.marker_info() else {
@@ -326,8 +328,52 @@ fn is_attached(anchor: Cursor<'_>, number: Cursor<'_>) -> bool {
     attached_numbers(anchor).any(|c| c.span().start == at)
 }
 
-fn number_label<'a>(c: Cursor<'a>) -> &'a str {
-    c.text().split_whitespace().nth(1).unwrap_or("")
+/// A chapter/verse number as written.
+struct NumberLabel<'a> {
+    label: &'a str,
+    /// Glued to the marker (`\v10`, `\c2`): the parser accepts it, but the spec
+    /// requires the space.
+    glued: bool,
+}
+
+/// Read the number glued to the marker if there is one, or else the token after
+/// it. A `\c` line can carry a title after the number, so the marker name is
+/// checked first.
+fn number_label<'a>(c: Cursor<'a>) -> NumberLabel<'a> {
+    let name = c.marker_name();
+    let base = c.marker_info().map_or(name.len(), |m| m.name.len());
+    if name.len() > base {
+        return NumberLabel {
+            label: &name[base..],
+            glued: true,
+        };
+    }
+    NumberLabel {
+        label: c.text().split_whitespace().nth(1).unwrap_or(""),
+        glued: false,
+    }
+}
+
+/// Warn about a number glued to its marker, and about leading zeros.
+fn check_number_form(c: Cursor<'_>, n: &NumberLabel<'_>, kind: &str, diags: &mut Vec<Diagnostic>) {
+    let label = n.label;
+    if n.glued {
+        let name = c.marker_name();
+        let base = &name[..name.len() - label.len()];
+        diags.push(Diagnostic::warning(
+            DiagnosticCode::MissingSpaceBeforeNumber,
+            c.span(),
+            format!("\\{name} needs a space before its number; read as \\{base} {label}"),
+        ));
+    }
+    if label.len() > 1 && label.starts_with('0') {
+        // USFM chapter/verse numbers must not carry leading zeros (e.g. `\c 091`).
+        diags.push(Diagnostic::error(
+            DiagnosticCode::LeadingZeros,
+            c.span(),
+            format!("{kind} number `{label}` has leading zeros"),
+        ));
+    }
 }
 
 /// The book code = first whitespace token of the `\id` line's text.
@@ -549,18 +595,6 @@ fn validate_attributes(c: Cursor<'_>, marker: &str, diags: &mut Vec<Diagnostic>)
 /// that aren't start/end milestones (e.g. `\ts`).
 fn milestone_base(name: &str) -> Option<&str> {
     name.strip_suffix("-s").or_else(|| name.strip_suffix("-e"))
-}
-
-fn check_leading_zeros(c: Cursor<'_>, kind: &str, diags: &mut Vec<Diagnostic>) {
-    let label = number_label(c);
-    if label.len() > 1 && label.starts_with('0') {
-        // USFM chapter/verse numbers must not carry leading zeros (e.g. `\c 091`).
-        diags.push(Diagnostic::error(
-            DiagnosticCode::LeadingZeros,
-            c.span(),
-            format!("{kind} number `{label}` has leading zeros"),
-        ));
-    }
 }
 
 /// Front-matter / peripheral books that carry no chapters (so `\c` is not required

@@ -71,6 +71,7 @@ pub enum DiagnosticCode {
     UnclosedAtEof,
     DefaultAttributeNotDefined,
     MisplacedNumberMarker,
+    MissingSpaceBeforeNumber,
     // Reserved — these conditions are currently reported via a more general code
     // (a misnested close surfaces as StrayCloseMarker) or are niche advisories not
     // yet split out.
@@ -124,6 +125,7 @@ static DIAGNOSTIC_CODE_NAMES: &[&str] = &[
     "UnclosedAtEof",
     "DefaultAttributeNotDefined",
     "MisplacedNumberMarker",
+    "MissingSpaceBeforeNumber",
     "MisnestedMarker",
     "MissingNestingPrefix",
     "HeaderAfterBody",

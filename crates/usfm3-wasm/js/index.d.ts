@@ -64,6 +64,7 @@ export type DiagnosticCode =
   | "UnclosedAtEof"
   | "DefaultAttributeNotDefined"
   | "MisplacedNumberMarker"
+  | "MissingSpaceBeforeNumber"
   | "MisnestedMarker"
   | "MissingNestingPrefix"
   | "HeaderAfterBody";

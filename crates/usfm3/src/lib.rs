@@ -616,6 +616,10 @@ mod tests {
             DiagnosticCode::MisplacedNumberMarker.as_str(),
             "MisplacedNumberMarker"
         );
+        assert_eq!(
+            DiagnosticCode::MissingSpaceBeforeNumber.as_str(),
+            "MissingSpaceBeforeNumber"
+        );
         assert_eq!(DiagnosticCode::HeaderAfterBody.as_str(), "HeaderAfterBody");
     }
 
@@ -800,7 +804,28 @@ mod tests {
                 ),
                 "{glued} should not be unknown"
             );
+            // The glued number is read, not reported missing, and the missing
+            // space is a warning.
+            let codes = diagnostic_codes(&src);
+            assert!(
+                codes.contains(&DiagnosticCode::MissingSpaceBeforeNumber),
+                "{glued}: {codes:?}"
+            );
+            for missing in [
+                DiagnosticCode::MissingVerseNumber,
+                DiagnosticCode::MissingChapterNumber,
+            ] {
+                assert!(!codes.contains(&missing), "{glued}: {codes:?}");
+            }
         }
+        // A glued number keeps the verse sequence on track.
+        let codes = diagnostic_codes("\\id GEN\n\\c 1\n\\p\n\\v 1 a\n\\v2 b\n\\v 3 c");
+        assert_eq!(codes, [DiagnosticCode::MissingSpaceBeforeNumber]);
+    }
+
+    fn diagnostic_codes(src: &str) -> Vec<DiagnosticCode> {
+        let doc = parse_with(src, Version::V3_1, ParseOptions { diagnostics: true });
+        doc.diagnostics().iter().map(|d| d.code).collect()
     }
 
     #[test]
