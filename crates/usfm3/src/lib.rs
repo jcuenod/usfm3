@@ -612,6 +612,11 @@ mod tests {
             DiagnosticCode::DefaultAttributeNotDefined.as_str(),
             "DefaultAttributeNotDefined"
         );
+        assert_eq!(
+            DiagnosticCode::MisplacedNumberMarker.as_str(),
+            "MisplacedNumberMarker"
+        );
+        assert_eq!(DiagnosticCode::HeaderAfterBody.as_str(), "HeaderAfterBody");
     }
 
     #[test]

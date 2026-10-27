@@ -1332,6 +1332,68 @@ fn usx_folds_alternate_and_published_numbers() {
 }
 
 #[test]
+fn misplaced_alternate_and_published_numbers_stay_char_and_warn() {
+    let misplaced = |src: &str| -> Vec<String> {
+        let doc = parse_with_diagnostics(src);
+        doc.diagnostics()
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::MisplacedNumberMarker)
+            .inspect(|d| assert_eq!(d.severity, Severity::Warning))
+            .map(|d| src[d.span.start as usize..][..d.span.len as usize].to_string())
+            .collect()
+    };
+    let char_markers = |src: &str| -> Vec<String> {
+        collect_by_type(&parse_usj(src), "char")
+            .iter()
+            .map(|c| c["marker"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    // Attached numbers fold and don't warn, even \vp carrying markup (which stays
+    // a char because it can't fold).
+    let src = "\\id MAT\n\\c 1\n\\ca 2\\ca*\n\\cp M\n\\p\n\\v 1 \\va 3\\va*\\vp 1b\\vp* A.\n\\v 2 \\vp \\+it 2\\+it*\\vp* B.\n";
+    assert_eq!(misplaced(src), Vec::<String>::new());
+
+    // Mid-chapter \cp (TPI Greek Esther re-labels the chapter this way): it does
+    // not overwrite the chapter's pubnumber, stays a char, and warns.
+    let src = "\\id ESG\n\\c 1\n\\cp A\n\\p\n\\v 1 A.\n\\cp 1\n\\p\n\\v 2 B.\n";
+    let usj = parse_usj(src);
+    assert_eq!(collect_by_type(&usj, "chapter")[0]["pubnumber"], "A");
+    assert_eq!(char_markers(src), ["cp"]);
+    assert_eq!(misplaced(src), ["\\cp"]);
+
+    // A repeat isn't attached: the first \vp is the verse's, the second stays text.
+    let src = "\\id MAT\n\\c 1\n\\p\n\\v 1 \\vp 1a\\vp* \\vp 1b\\vp* A.\n";
+    let usj = parse_usj(src);
+    assert_eq!(collect_by_type(&usj, "verse")[0]["pubnumber"], "1a");
+    assert_eq!(char_markers(src), ["vp"]);
+    assert_eq!(misplaced(src).len(), 1);
+
+    // A chapter's number after a verse isn't the verse's, and vice versa.
+    let src = "\\id MAT\n\\c 1 \\va 2\\va*\n\\p\n\\v 1 \\cp B\\cp* A.\n";
+    let usj = parse_usj(src);
+    assert!(
+        collect_by_type(&usj, "chapter")[0]
+            .get("altnumber")
+            .is_none()
+    );
+    assert!(collect_by_type(&usj, "verse")[0].get("pubnumber").is_none());
+    assert_eq!(char_markers(src), ["va", "cp"]);
+    assert_eq!(misplaced(src), ["\\va", "\\cp"]);
+
+    // A number carrying markup stays a char and ends the run, so a \va after it
+    // isn't folded either, and only the \va warns.
+    let src = "\\id MAT\n\\c 1\n\\p\n\\v 1 \\vp \\+it 1\\+it*\\vp* \\va 2\\va* A.\n";
+    assert!(
+        collect_by_type(&parse_usj(src), "verse")[0]
+            .get("altnumber")
+            .is_none()
+    );
+    assert_eq!(char_markers(src), ["vp", "it", "va"]);
+    assert_eq!(misplaced(src), ["\\va"]);
+}
+
+#[test]
 fn usx_notes_refs_and_links() {
     let usx = parse(concat!(
         "\\id GEN\n\\c 1\n\\p\n\\v 1 Text\\f + \\cat ex\\cat*\\fr 1:1 \\ft See ",

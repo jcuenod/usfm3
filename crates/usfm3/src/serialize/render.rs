@@ -235,21 +235,107 @@ pub(crate) fn cell_align(marker: &str) -> &'static str {
 }
 
 /// Whether a `\ca`/`\va` (alternate) or `\cp`/`\vp` (published) number.
+#[derive(Clone, Copy)]
 pub(crate) enum AltPub {
     Alt,
     Pub,
 }
 
-/// Classify a node as an alternate (`\ca`/`\va`) or published (`\cp`/`\vp`) number.
-pub(crate) fn alt_pub_kind(c: Cursor<'_>) -> Option<AltPub> {
+/// The chapter/verse an alternate or published number belongs to, and which of
+/// its two numbers it is: `\ca`/`\cp` → chapter, `\va`/`\vp` → verse.
+pub(crate) fn alt_pub_kind(c: Cursor<'_>) -> Option<(NodeKind, AltPub)> {
     if c.kind() != NodeKind::MarkerOpen {
         return None;
     }
     match c.marker_name() {
-        "ca" | "va" => Some(AltPub::Alt),
-        "cp" | "vp" => Some(AltPub::Pub),
+        "ca" => Some((NodeKind::Chapter, AltPub::Alt)),
+        "cp" => Some((NodeKind::Chapter, AltPub::Pub)),
+        "va" => Some((NodeKind::Verse, AltPub::Alt)),
+        "vp" => Some((NodeKind::Verse, AltPub::Pub)),
         _ => None,
     }
+}
+
+/// The alternate and published numbers already given for one chapter or verse.
+/// The spec places them directly after their `\c`/`\v`, at most one of each.
+struct NumberSlots {
+    anchor: NodeKind,
+    alt: bool,
+    pubn: bool,
+    /// A number carrying markup stays a char element, which ends the run.
+    ended: bool,
+}
+
+impl NumberSlots {
+    fn new(anchor: NodeKind) -> Self {
+        Self {
+            anchor,
+            alt: false,
+            pubn: false,
+            ended: false,
+        }
+    }
+
+    /// Fill `c`'s slot if it is a number for this chapter/verse and that slot is
+    /// still empty, returning which number it is and whether it is plain text
+    /// (and so folds). A repeat, a `\cp` after a verse, or anything after a
+    /// number carrying markup (`\vp \+it 21\+it*\vp*`) is not attached.
+    fn claim(&mut self, c: Cursor<'_>) -> Option<(AltPub, bool)> {
+        if self.ended {
+            return None;
+        }
+        let (anchor, kind) = alt_pub_kind(c)?;
+        let slot = match kind {
+            AltPub::Alt => &mut self.alt,
+            AltPub::Pub => &mut self.pubn,
+        };
+        if anchor != self.anchor || std::mem::replace(slot, true) {
+            return None;
+        }
+        let plain = is_plain_text(c);
+        self.ended = !plain;
+        Some((kind, plain))
+    }
+}
+
+fn is_blank(c: Cursor<'_>) -> bool {
+    c.kind() == NodeKind::Text && c.text().trim().is_empty()
+}
+
+/// The `\ca`/`\cp` or `\va`/`\vp` markers attached to the chapter or verse
+/// `anchor`: the run of them directly after it, separated only by whitespace.
+/// Any other occurrence is ordinary character text.
+pub(crate) fn attached_numbers<'a>(anchor: Cursor<'a>) -> impl Iterator<Item = Cursor<'a>> {
+    let mut slots = NumberSlots::new(anchor.kind());
+    std::iter::successors(anchor.next_sibling(), |c| c.next_sibling())
+        .filter(|&c| !is_blank(c))
+        .map_while(move |c| slots.claim(c).map(|_| c))
+}
+
+/// Fold the numbers attached to the chapter or verse at `children[at]` into its
+/// `altnumber`/`pubnumber`, returning them and the index just past the run. Only
+/// a plain-text number folds; `\vp \+it 21\+it*\vp*` stays a real char element.
+pub(crate) fn fold_alt_pub(
+    children: &[Cursor<'_>],
+    at: usize,
+) -> (Option<String>, Option<String>, usize) {
+    let mut slots = NumberSlots::new(children[at].kind());
+    let (mut alt, mut pubn) = (None, None);
+    let mut j = at + 1;
+    while j < children.len() {
+        let n = children[j];
+        if is_blank(n) {
+            j += 1; // separator whitespace between the folded markers
+            continue;
+        }
+        match slots.claim(n) {
+            Some((AltPub::Alt, true)) => alt = Some(marker_inner_text(n)),
+            Some((AltPub::Pub, true)) => pubn = Some(marker_inner_text(n)),
+            _ => break,
+        }
+        j += 1;
+    }
+    (alt, pubn, j)
 }
 
 /// Whether a marker's content is plain text (no nested marker children).

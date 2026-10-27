@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+Diagnostics gain `MisplacedNumberMarker`, a warning for a `\ca`/`\cp`/`\va`/`\vp`
+that doesn't directly follow its `\c` or `\v`. A `\cp` after a verse, or a second
+`\vp` on one verse, now stays a `char` instead of being folded into the verse; see
+the crate changelog.
+
 ## 0.3.1
 
 ### Performance

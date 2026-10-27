@@ -8,9 +8,9 @@
 use std::fmt::{self, Write};
 
 use super::render::{
-    AltPub, Unknown, alt_pub_kind, category_of, cell_align, collect_attributes, figure_legacy,
-    is_category_marker, is_plain_text, is_table_row, marker_inner_text, normalize_text,
-    note_caller, remainder_after_first_token, trim_leading, unknown_shape, verse_label,
+    Unknown, category_of, cell_align, collect_attributes, figure_legacy, fold_alt_pub,
+    is_category_marker, is_table_row, normalize_text, note_caller, remainder_after_first_token,
+    trim_leading, unknown_shape, verse_label,
 };
 use crate::Document;
 use crate::cst::Cursor;
@@ -154,28 +154,6 @@ fn is_top_level_block(c: Cursor<'_>) -> bool {
         },
         _ => false,
     }
-}
-
-/// The `\ca`/`\va` (alternate) and `\cp`/`\vp` (published) numbers directly after
-/// the chapter or verse at `children[at]`, and the index just past them. Only a
-/// plain-text number folds; `\vp \+it 21\+it*\vp*` stays a real `<char>`.
-fn fold_alt_pub(children: &[Cursor<'_>], at: usize) -> (Option<String>, Option<String>, usize) {
-    let (mut alt, mut pubn) = (None, None);
-    let mut j = at + 1;
-    while j < children.len() {
-        let n = children[j];
-        if n.kind() == NodeKind::Text && n.text().trim().is_empty() {
-            j += 1;
-            continue;
-        }
-        match alt_pub_kind(n).filter(|_| is_plain_text(n)) {
-            Some(AltPub::Alt) => alt = Some(marker_inner_text(n)),
-            Some(AltPub::Pub) => pubn = Some(marker_inner_text(n)),
-            None => break,
-        }
-        j += 1;
-    }
-    (alt, pubn, j)
 }
 
 /// `<table>` of `<row style="tr">` of `<cell style align>`, one per line.

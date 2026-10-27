@@ -8,6 +8,9 @@
 
 mod render;
 
+// Validation warns about exactly the numbers the serializers don't fold.
+pub(crate) use render::{alt_pub_kind, attached_numbers};
+
 mod cst;
 pub mod packed;
 pub mod schema;

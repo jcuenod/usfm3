@@ -10,6 +10,7 @@ use crate::cst::Cursor;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::marker::{Category, TextRole, default_attribute};
 use crate::serialize::vref::BookId;
+use crate::serialize::{alt_pub_kind, attached_numbers};
 use crate::span::Span;
 use crate::tape::NodeKind;
 
@@ -96,6 +97,9 @@ fn walk(
     st: &mut State,
     diags: &mut Vec<Diagnostic>,
 ) {
+    // The latest chapter/verse among these siblings: the only one a following
+    // `\ca`/`\cp`/`\va`/`\vp` can be attached to.
+    let mut anchor = None;
     for child in parent.children() {
         match child.kind() {
             NodeKind::Chapter => {
@@ -124,6 +128,7 @@ fn walk(
                         format!("expected chapter {} but found {num}", st.expected_chapter),
                     ));
                 }
+                anchor = Some(child);
                 st.expected_chapter = num + 1;
                 st.expected_verse = VersePart {
                     num: 1,
@@ -168,6 +173,7 @@ fn walk(
                         .unwrap_or(start)
                         .next_expected();
                 }
+                anchor = Some(child);
                 check_leading_zeros(child, "verse", diags);
             }
             NodeKind::MarkerOpen => {
@@ -236,6 +242,29 @@ fn walk(
                         ),
                     ));
                 }
+                // The table-name test is a cheap prefilter for the rare markers
+                // that need the full check.
+                if matches!(info.name, "ca" | "cp" | "va" | "vp")
+                    && let Some((owner, _)) = alt_pub_kind(child)
+                    && !anchor.is_some_and(|a| is_attached(a, child))
+                {
+                    // Warning: published texts do this (TPI Greek Esther re-labels
+                    // the chapter mid-chapter with \cp), and the marker is kept as
+                    // character text, so nothing is lost.
+                    let (c, unit) = match owner {
+                        NodeKind::Chapter => ("c", "chapter"),
+                        _ => ("v", "verse"),
+                    };
+                    diags.push(Diagnostic::warning(
+                        DiagnosticCode::MisplacedNumberMarker,
+                        child.span(),
+                        format!(
+                            "\\{} must directly follow its \\{c} (at most once per {unit}); \
+                             it is kept as character text",
+                            child.marker_name()
+                        ),
+                    ));
+                }
                 if info.name == "fig" && figure_is_empty(child) {
                     diags.push(Diagnostic::error(
                         DiagnosticCode::EmptyFigure,
@@ -288,6 +317,13 @@ fn walk(
             _ => {}
         }
     }
+}
+
+/// Whether `number` is one of the alternate/published numbers the serializers
+/// fold into the chapter or verse `anchor`.
+fn is_attached(anchor: Cursor<'_>, number: Cursor<'_>) -> bool {
+    let at = number.span().start;
+    attached_numbers(anchor).any(|c| c.span().start == at)
 }
 
 fn number_label<'a>(c: Cursor<'a>) -> &'a str {

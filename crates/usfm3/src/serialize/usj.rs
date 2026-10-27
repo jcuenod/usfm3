@@ -9,10 +9,9 @@
 use std::fmt::{self, Write};
 
 use super::render::{
-    AltPub, Unknown, alt_pub_kind, category_of, cell_align, collapse_all, collect_attributes,
-    figure_legacy, is_category_marker, is_plain_text, is_table_row, json_str, marker_inner_text,
-    normalize_text, note_caller, remainder_after_first_token, trim_leading, unknown_shape,
-    verse_label,
+    Unknown, category_of, cell_align, collapse_all, collect_attributes, figure_legacy,
+    fold_alt_pub, is_category_marker, is_table_row, json_str, normalize_text, note_caller,
+    remainder_after_first_token, trim_leading, unknown_shape, verse_label,
 };
 use crate::Document;
 use crate::cst::Cursor;
@@ -70,23 +69,7 @@ fn write_content<W: Write>(parent: Cursor<'_>, out: &mut W, ctx: &mut Ctx) -> fm
             // Fold immediately-following alternate/published numbers into the
             // chapter/verse object: \ca…\ca*/\va…\va* → altnumber, \cp/\vp →
             // pubnumber (spec: docs.usfm.bible chapter/verse numbering).
-            let (mut alt, mut pubn) = (None, None);
-            let mut j = i + 1;
-            while j < kids.len() {
-                let n = kids[j];
-                if n.kind() == NodeKind::Text && n.text().trim().is_empty() {
-                    j += 1; // separator whitespace between the folded markers
-                    continue;
-                }
-                // Only fold a plain-text number. A \vp/\cp carrying nested markup
-                // (e.g. \vp \+it 21\+it*\vp*) is a real char element, not a number.
-                match alt_pub_kind(n).filter(|_| is_plain_text(n)) {
-                    Some(AltPub::Alt) => alt = Some(marker_inner_text(n)),
-                    Some(AltPub::Pub) => pubn = Some(marker_inner_text(n)),
-                    None => break,
-                }
-                j += 1;
-            }
+            let (alt, pubn, j) = fold_alt_pub(&kids, i);
             sep(out, &mut first)?;
             if k.kind() == NodeKind::Chapter {
                 write_chapter(k, alt.as_deref(), pubn.as_deref(), out, ctx)?;
