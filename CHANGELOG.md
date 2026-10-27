@@ -10,7 +10,7 @@ Until 1.0, a minor version bump (0.2 → 0.3) may break the API. Cargo and npm t
 as breaking, so `usfm3 = "0.2"` and `"usfm3": "^0.2.1"` will not pick it up. pip has
 no such rule: pin `usfm3<0.3` if you aren't ready to upgrade.
 
-## Unreleased
+## 0.3.1
 
 ### Performance
 

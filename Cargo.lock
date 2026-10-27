@@ -367,7 +367,7 @@ checksum = "7264e107f553ccae879d21fbea1d6724ac785e8c3bfc762137959b5802826ef3"
 
 [[package]]
 name = "usfm3"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "memchr",
  "roxmltree",
@@ -378,14 +378,14 @@ dependencies = [
 
 [[package]]
 name = "usfm3-cli"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "usfm3",
 ]
 
 [[package]]
 name = "usfm3-python"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "pyo3",
  "self_cell",
@@ -394,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "usfm3-wasm"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "js-sys",
  "self_cell",
