@@ -43,6 +43,19 @@ pub(crate) fn json_str<W: Write>(s: &str, out: &mut W) -> fmt::Result {
     out.write_char('"')
 }
 
+/// A normalized text as a JSON string: its words plus any separating edge spaces.
+pub(crate) fn json_text<W: Write>(t: &Normalized<'_>, out: &mut W) -> fmt::Result {
+    out.write_char('"')?;
+    if t.lead {
+        out.write_char(' ')?;
+    }
+    escape_json(&t.body, out)?;
+    if t.trail {
+        out.write_char(' ')?;
+    }
+    out.write_char('"')
+}
+
 // --- whitespace ------------------------------------------------------------
 
 /// Extract the verse or chapter number label from a cursor node.
@@ -118,42 +131,70 @@ pub(crate) fn is_inline(c: Cursor<'_>) -> bool {
     }
 }
 
-/// Collapse internal whitespace runs to a single space (docs.usfm.bible). Edge
-/// whitespace (any ASCII whitespace, newlines included) becomes one separating
-/// space when `keep_lead`/`keep_trail` say it separates words, which they work
-/// out only for text that has such whitespace. Whitespace alone is kept only
-/// when it separates on both sides.
+/// Text normalized for output (docs.usfm.bible): its words with internal
+/// whitespace runs collapsed to one space, plus one separating space before
+/// (`lead`) and after (`trail`) them. Whitespace alone that separates words on
+/// both sides is a lone `lead`.
+pub(crate) struct Normalized<'a> {
+    pub lead: bool,
+    /// The words; borrowed from the source when they are already single-spaced.
+    pub body: Cow<'a, str>,
+    pub trail: bool,
+}
+
+impl Normalized<'_> {
+    /// Nothing to write: no words and no separator.
+    pub(crate) fn is_empty(&self) -> bool {
+        !self.lead && self.body.is_empty()
+    }
+}
+
+/// Normalize `s` for output. Edge whitespace (any ASCII whitespace, newlines
+/// included) becomes one separating space when `keep_lead`/`keep_trail` say it
+/// separates words, which they work out only for text that has such whitespace.
 /// Only ASCII whitespace is collapsible: a no-break or ideographic space in the
 /// source is text. The no-break space `~` (U+00A0 per spec) is substituted after
 /// the collapse.
-pub(crate) fn normalize_text(
-    s: &str,
+pub(crate) fn normalize_text<'a>(
+    s: &'a str,
     keep_lead: impl FnOnce() -> bool,
     keep_trail: impl FnOnce() -> bool,
-) -> Cow<'static, str> {
-    let lead = s.starts_with(|c: char| c.is_ascii_whitespace()) && keep_lead();
-    let trail = s.ends_with(|c: char| c.is_ascii_whitespace()) && keep_trail();
-    let mut words = s.split_ascii_whitespace();
-    let Some(first) = words.next() else {
-        return Cow::Borrowed(if lead && trail { " " } else { "" });
+) -> Normalized<'a> {
+    let words = s.trim_ascii();
+    if words.is_empty() {
+        let separates = !s.is_empty() && keep_lead() && keep_trail();
+        return Normalized {
+            lead: separates,
+            body: Cow::Borrowed(""),
+            trail: false,
+        };
+    }
+    let bytes = s.as_bytes();
+    let lead = bytes.first().is_some_and(u8::is_ascii_whitespace) && keep_lead();
+    let trail = bytes.last().is_some_and(u8::is_ascii_whitespace) && keep_trail();
+    let body = if single_spaced(words) {
+        Cow::Borrowed(words)
+    } else {
+        let mut out = collapse_all(words);
+        if out.contains('~') {
+            out = out.replace('~', "\u{a0}");
+        }
+        Cow::Owned(out)
     };
-    // One allocation: collapse straight into the output.
-    let mut out = String::with_capacity(s.len() + 2);
-    if lead {
-        out.push(' ');
+    Normalized { lead, body, trail }
+}
+
+/// Whether trimmed text is already normalized: every whitespace in it is a lone
+/// space and there is no `~`.
+fn single_spaced(s: &str) -> bool {
+    let mut after_space = false;
+    for &b in s.as_bytes() {
+        if matches!(b, b'\t' | b'\n' | b'\x0c' | b'\r' | b'~') || (b == b' ' && after_space) {
+            return false;
+        }
+        after_space = b == b' ';
     }
-    out.push_str(first);
-    for word in words {
-        out.push(' ');
-        out.push_str(word);
-    }
-    if trail {
-        out.push(' ');
-    }
-    if out.contains('~') {
-        out = out.replace('~', "\u{a0}");
-    }
-    Cow::Owned(out)
+    true
 }
 
 /// Collapse every ASCII whitespace run to a single space, with no leading/trailing

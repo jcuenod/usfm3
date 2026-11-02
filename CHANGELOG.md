@@ -48,9 +48,21 @@ ended in a space. The text at the start of a note, after the caller, keeps its
 trailing space in USJ as it already did in USX.
 
 In the door43 Hindi IRV, whose `\w` words sit on separate lines, the fix adds 687k
-separator nodes. `to_usj`/`to_usx` are 3–6% slower in our measurements (more output,
-plus a look at neighbouring elements for text with edge whitespace); parsing and
-`to_vref` are unchanged.
+separator nodes, though only 1.7% more USJ and 0.6% more USX. Checking each one's
+neighbours costs time, which the change below pays back.
+
+### Performance
+
+USJ and USX now write text that is already single-spaced straight from the source,
+instead of copying it into a new string first; output is unchanged by this. Measured
+against 0.3.1, word separators included:
+
+| | BSB | door43 Hindi IRV |
+| --- | --- | --- |
+| `to_usj` | −20% | −3% |
+| `to_usx` | −30% | ±0% |
+
+Parsing and `to_vref` are unchanged.
 
 ## 0.3.1
 

@@ -8,7 +8,7 @@
 use std::fmt::{self, Write};
 
 use super::render::{
-    Unknown, category_of, cell_align, collect_attributes, figure_legacy, fold_alt_pub,
+    Normalized, Unknown, category_of, cell_align, collect_attributes, figure_legacy, fold_alt_pub,
     inline_follows, is_category_marker, is_table_row, normalize_text, note_caller, parent_followed,
     remainder_after_first_token, trim_leading, unknown_shape, verse_label,
 };
@@ -394,10 +394,10 @@ fn usx_inline_nodes<W: Write>(
             );
             if !t.is_empty() {
                 // `//` → <optbreak /> (discretionary line break, spec).
-                if !t.contains("//") {
-                    escape_xml(&t, out)?;
+                if !t.body.contains("//") {
+                    xml_text(&t, out)?;
                 } else {
-                    for (i, seg) in t.split("//").enumerate() {
+                    for (i, seg) in t.body.split("//").enumerate() {
                         if i > 0 {
                             out.write_str("<optbreak />")?;
                         }
@@ -504,7 +504,7 @@ fn usx_note<W: Write>(c: Cursor<'_>, marker: &str, out: &mut W, st: &mut UsxStat
             let rem = remainder_after_first_token(ch.text());
             let t = normalize_text(rem, || false, || inline_follows(ch) || followed());
             if !t.is_empty() {
-                escape_xml(&t, out)?;
+                xml_text(&t, out)?;
                 prev = Some(ch);
             }
         } else if ch.kind() == NodeKind::Text {
@@ -514,7 +514,7 @@ fn usx_note<W: Write>(c: Cursor<'_>, marker: &str, out: &mut W, st: &mut UsxStat
                 || inline_follows(ch) || followed(),
             );
             if !t.is_empty() {
-                escape_xml(&t, out)?;
+                xml_text(&t, out)?;
                 prev = Some(ch);
             }
         } else if ch.kind() != NodeKind::Attribute {
@@ -593,6 +593,18 @@ fn escape_xml<W: Write>(s: &str, out: &mut W) -> fmt::Result {
 
 fn escape_xml_attr<W: Write>(s: &str, out: &mut W) -> fmt::Result {
     escape_xml_with(s, true, out)
+}
+
+/// A normalized text: its words plus any separating edge spaces.
+fn xml_text<W: Write>(t: &Normalized<'_>, out: &mut W) -> fmt::Result {
+    if t.lead {
+        out.write_char(' ')?;
+    }
+    escape_xml(&t.body, out)?;
+    if t.trail {
+        out.write_char(' ')?;
+    }
+    Ok(())
 }
 
 /// Every byte that needs escaping is ASCII, so copy the runs between them whole.

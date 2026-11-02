@@ -10,9 +10,9 @@ use std::fmt::{self, Write};
 
 use super::render::{
     Unknown, category_of, cell_align, collapse_all, collect_attributes, figure_legacy,
-    fold_alt_pub, inline_follows, is_category_marker, is_table_row, json_str, normalize_text,
-    note_caller, parent_followed, remainder_after_first_token, trim_leading, unknown_shape,
-    verse_label,
+    fold_alt_pub, inline_follows, is_category_marker, is_table_row, json_str, json_text,
+    normalize_text, note_caller, parent_followed, remainder_after_first_token, trim_leading,
+    unknown_shape, verse_label,
 };
 use crate::Document;
 use crate::cst::Cursor;
@@ -153,15 +153,15 @@ fn emit_node<W: Write>(
             }
             // `//` is a discretionary line break → an `optbreak` node between the
             // surrounding text segments (spec: docs.usfm.bible).
-            if t == " " {
+            if t.body.is_empty() {
                 // A lone word separator, the commonest text in aligned files.
                 out.write_str(if *first { "\" \"" } else { ",\" \"" })?;
                 *first = false;
-            } else if !t.contains("//") {
+            } else if !t.body.contains("//") {
                 sep(out, first)?;
-                json_str(&t, out)?;
+                json_text(&t, out)?;
             } else {
-                for (i, seg) in t.split("//").enumerate() {
+                for (i, seg) in t.body.split("//").enumerate() {
                     if i > 0 {
                         sep(out, first)?;
                         out.write_str("{\"type\":\"optbreak\"}")?;
@@ -487,7 +487,7 @@ fn write_note<W: Write>(c: Cursor<'_>, out: &mut W, ctx: &mut Ctx) -> fmt::Resul
             let t = normalize_text(rem, || false, || inline_follows(ch) || followed());
             if !t.is_empty() {
                 sep(out, &mut first)?;
-                json_str(&t, out)?;
+                json_text(&t, out)?;
                 prev = Some(ch);
             }
         } else if emit_node(ch, out, ctx, &mut first, prev, &followed)? {

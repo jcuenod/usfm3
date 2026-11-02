@@ -16,6 +16,10 @@ dropped it when it stood alone or was a newline, so `\nd Lord\nd* \x …\x*had` 
 out as "Lordhad" and `\w` words on separate lines ran together. See the crate
 changelog.
 
+`to_usj()` and `to_usx()` are faster on books with long runs of plain text: the Rust
+serializers no longer copy text that is already single-spaced (−20% and −30%
+natively on the BSB; see the crate changelog).
+
 ## 0.3.1
 
 ### Performance
