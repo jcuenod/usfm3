@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.2
 
 Diagnostics gain `MisplacedNumberMarker`, a warning for a `\ca`/`\cp`/`\va`/`\vp`
 that doesn't directly follow its `\c` or `\v`. A `\cp` after a verse, or a second
