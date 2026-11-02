@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use std::fmt::{self, Write};
 
 use crate::cst::Cursor;
-use crate::marker::default_attribute;
+use crate::marker::{Category, default_attribute};
 use crate::tape::NodeKind;
 
 // --- JSON ------------------------------------------------------------------
@@ -71,25 +71,72 @@ pub(crate) fn verse_label<'a>(c: Cursor<'a>) -> &'a str {
 /// number) from the text that follows is not content, so it is dropped. After a
 /// *closing* marker the space is a real word separator and is kept. `prev` is the
 /// previous emitted sibling (`None` = right after the parent's opening marker).
-pub(crate) fn trim_leading(prev: Option<NodeKind>) -> bool {
-    matches!(prev, None | Some(NodeKind::Chapter) | Some(NodeKind::Verse))
+/// After a block there is no running text to separate from.
+pub(crate) fn trim_leading(prev: Option<Cursor<'_>>) -> bool {
+    prev.is_none_or(|p| matches!(p.kind(), NodeKind::Chapter | NodeKind::Verse) || !is_inline(p))
 }
 
-/// Collapse internal whitespace runs to a single space (docs.usfm.bible). A
-/// leading space is dropped when it is a marker separator (`trim_leading`); a
-/// trailing space is preserved as a word separator before the next sibling.
+/// Whether a later sibling of `node` is inline content, so whitespace ending
+/// `node` separates words. When none is, that whitespace still separates words if
+/// `node`'s parent is inline and is itself followed by inline content: see
+/// [`parent_followed`].
+pub(crate) fn inline_follows(node: Cursor<'_>) -> bool {
+    let mut next = node.next_sibling();
+    while let Some(c) = next {
+        match c.kind() {
+            NodeKind::Attribute | NodeKind::Error => {}
+            NodeKind::Text if c.text().trim_ascii().is_empty() => {}
+            _ => return is_inline(c),
+        }
+        next = c.next_sibling();
+    }
+    false
+}
+
+/// Whether inline content follows `parent`, so whitespace ending its last child
+/// separates words. A block ends running text; an inline parent is followed when
+/// a later sibling is inline or, one level up, its own parent is (`outer`). The
+/// check runs only when a child's whitespace needs it.
+pub(crate) fn parent_followed(parent: Cursor<'_>, outer: bool) -> impl Fn() -> bool {
+    let inline = is_inline(parent);
+    move || inline && (outer || inline_follows(parent))
+}
+
+/// Whether a node runs inside text (text, a verse, a character, note or
+/// milestone marker) rather than being a block.
+pub(crate) fn is_inline(c: Cursor<'_>) -> bool {
+    match c.kind() {
+        NodeKind::Text | NodeKind::Verse => true,
+        NodeKind::MarkerOpen => match c.marker_info() {
+            Some(info) => matches!(
+                info.category,
+                Category::Character | Category::Note | Category::Milestone
+            ),
+            None => unknown_shape(c) == Some(Unknown::Inline),
+        },
+        _ => false,
+    }
+}
+
+/// Collapse internal whitespace runs to a single space (docs.usfm.bible). Edge
+/// whitespace (any ASCII whitespace, newlines included) becomes one separating
+/// space when `keep_lead`/`keep_trail` say it separates words, which they work
+/// out only for text that has such whitespace. Whitespace alone is kept only
+/// when it separates on both sides.
 /// Only ASCII whitespace is collapsible: a no-break or ideographic space in the
 /// source is text. The no-break space `~` (U+00A0 per spec) is substituted after
 /// the collapse.
-pub(crate) fn normalize_text(s: &str, trim_leading: bool) -> String {
+pub(crate) fn normalize_text(
+    s: &str,
+    keep_lead: impl FnOnce() -> bool,
+    keep_trail: impl FnOnce() -> bool,
+) -> Cow<'static, str> {
+    let lead = s.starts_with(|c: char| c.is_ascii_whitespace()) && keep_lead();
+    let trail = s.ends_with(|c: char| c.is_ascii_whitespace()) && keep_trail();
     let mut words = s.split_ascii_whitespace();
     let Some(first) = words.next() else {
-        return String::new();
+        return Cow::Borrowed(if lead && trail { " " } else { "" });
     };
-    // Only a literal space (not \r or \n) is a meaningful word-separator; CRLF
-    // files would otherwise get a spurious trailing space from the \r.
-    let lead = !trim_leading && s.trim_start_matches(['\r', '\n']).starts_with(' ');
-    let trail = s.trim_end_matches(['\r', '\n']).ends_with(' ');
     // One allocation: collapse straight into the output.
     let mut out = String::with_capacity(s.len() + 2);
     if lead {
@@ -106,7 +153,7 @@ pub(crate) fn normalize_text(s: &str, trim_leading: bool) -> String {
     if out.contains('~') {
         out = out.replace('~', "\u{a0}");
     }
-    out
+    Cow::Owned(out)
 }
 
 /// Collapse every ASCII whitespace run to a single space, with no leading/trailing

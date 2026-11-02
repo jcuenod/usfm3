@@ -513,6 +513,36 @@ fn table_row_newlines_do_not_become_trailing_cell_space() {
 }
 
 #[test]
+fn whitespace_between_inline_siblings_separates_words() {
+    let src = "\\id GEN\n\\c 1\n\\p\n\\v 1 the \\nd Lord\\nd* \\x - \\xt 1:1\\x*had \\w a\\w*\n\\w b\\w*\nc\n\\p d\n";
+    let usj = parse_usj(src);
+    let paras = collect_by_type(&usj, "para");
+    let text: Vec<_> = paras[0]["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(text, ["the ", " ", "had ", " ", " c"]);
+    assert_eq!(
+        usj["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|n| n.is_string())
+            .count(),
+        0
+    );
+
+    let usx = parse(src).to_usx();
+    assert!(usx.contains("Lord</char> <note"), "{usx}");
+    assert!(
+        usx.contains("a</char> <char style=\"w\">b</char> c</para>"),
+        "{usx}"
+    );
+}
+
+#[test]
 fn table_cell_opening_whitespace_is_structural() {
     let usj = parse_usj("\\id GEN\n\\c 1\n\\tr \\tc1   Judah \\tc2   Issachar");
     let cells = collect_by_type(&usj, "table:cell");

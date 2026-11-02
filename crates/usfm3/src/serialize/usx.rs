@@ -9,8 +9,8 @@ use std::fmt::{self, Write};
 
 use super::render::{
     Unknown, category_of, cell_align, collect_attributes, figure_legacy, fold_alt_pub,
-    is_category_marker, is_table_row, normalize_text, note_caller, remainder_after_first_token,
-    trim_leading, unknown_shape, verse_label,
+    inline_follows, is_category_marker, is_table_row, normalize_text, note_caller, parent_followed,
+    remainder_after_first_token, trim_leading, unknown_shape, verse_label,
 };
 use crate::Document;
 use crate::cst::Cursor;
@@ -33,6 +33,7 @@ struct UsxState {
     chapter_num: String,
     chapter_sid: Option<String>,
     verse_sid: Option<String>,
+    follows: bool, // inline content follows the parent of the node being written
 }
 
 impl UsxState {
@@ -130,7 +131,7 @@ fn usx_blocks<W: Write>(
             }
             block_line(depth, out)?;
             out.write_str("<para style=\"p\">")?;
-            usx_inline_nodes(&children[start..i], out, st)?;
+            usx_inline_nodes(&children[start..i], &|| false, out, st)?;
             out.write_str("</para>")?;
             continue;
         }
@@ -176,6 +177,7 @@ fn usx_table<W: Write>(
             write!(out, "<cell style=\"{name}\" align=\"{}\"", cell_align(name))?;
             if has_content(cell) {
                 out.write_char('>')?;
+                st.follows = false; // a row is a block
                 usx_inline(cell, out, st)?;
                 out.write_str("</cell>")?;
             } else {
@@ -363,15 +365,16 @@ fn usx_node<W: Write>(c: Cursor<'_>, out: &mut W, st: &mut UsxState) -> fmt::Res
 /// Emit a parent's children as inline USX, normalizing text whitespace in context.
 fn usx_inline<W: Write>(parent: Cursor<'_>, out: &mut W, st: &mut UsxState) -> fmt::Result {
     let children: Vec<_> = parent.children().collect();
-    usx_inline_nodes(&children, out, st)
+    usx_inline_nodes(&children, &parent_followed(parent, st.follows), out, st)
 }
 
 fn usx_inline_nodes<W: Write>(
     children: &[Cursor<'_>],
+    followed: &dyn Fn() -> bool,
     out: &mut W,
     st: &mut UsxState,
 ) -> fmt::Result {
-    let mut prev: Option<NodeKind> = None;
+    let mut prev: Option<Cursor<'_>> = None;
     let mut i = 0;
     while i < children.len() {
         let child = children[i];
@@ -379,12 +382,16 @@ fn usx_inline_nodes<W: Write>(
         if child.kind() == NodeKind::Verse {
             let (alt, pubn, next) = fold_alt_pub(children, i - 1);
             usx_verse(child, alt.as_deref(), pubn.as_deref(), out, st)?;
-            prev = Some(NodeKind::Verse);
+            prev = Some(child);
             i = next;
             continue;
         }
         if child.kind() == NodeKind::Text {
-            let t = normalize_text(child.text(), trim_leading(prev));
+            let t = normalize_text(
+                child.text(),
+                || !trim_leading(prev),
+                || inline_follows(child) || followed(),
+            );
             if !t.is_empty() {
                 // `//` → <optbreak /> (discretionary line break, spec).
                 if !t.contains("//") {
@@ -397,17 +404,18 @@ fn usx_inline_nodes<W: Write>(
                         escape_xml(seg.trim(), out)?;
                     }
                 }
-                prev = Some(NodeKind::Text);
+                prev = Some(child);
             }
         } else if child.kind() == NodeKind::Attribute {
             // consumed by the enclosing element
         } else {
+            st.follows = followed();
             usx_node(child, out, st)?;
             if !matches!(
                 child.kind(),
                 NodeKind::MarkerClose | NodeKind::BlockEnd | NodeKind::Error
             ) {
-                prev = Some(child.kind());
+                prev = Some(child);
             }
         }
     }
@@ -485,31 +493,38 @@ fn usx_note<W: Write>(c: Cursor<'_>, marker: &str, out: &mut W, st: &mut UsxStat
     }
     out.write_char('>')?;
     // Skip the caller token in the note's leading text.
-    let mut prev: Option<NodeKind> = None;
+    let outer = st.follows;
+    let followed = || outer || inline_follows(c); // a note is inline
+    let mut prev: Option<Cursor<'_>> = None;
     for (i, ch) in c.children().enumerate() {
         if is_category_marker(ch) {
             continue; // folded into `category`
         }
         if i == 0 && ch.kind() == NodeKind::Text {
             let rem = remainder_after_first_token(ch.text());
-            let t = normalize_text(rem, true);
+            let t = normalize_text(rem, || false, || inline_follows(ch) || followed());
             if !t.is_empty() {
                 escape_xml(&t, out)?;
-                prev = Some(NodeKind::Text);
+                prev = Some(ch);
             }
         } else if ch.kind() == NodeKind::Text {
-            let t = normalize_text(ch.text(), trim_leading(prev));
+            let t = normalize_text(
+                ch.text(),
+                || !trim_leading(prev),
+                || inline_follows(ch) || followed(),
+            );
             if !t.is_empty() {
                 escape_xml(&t, out)?;
-                prev = Some(NodeKind::Text);
+                prev = Some(ch);
             }
         } else if ch.kind() != NodeKind::Attribute {
+            st.follows = followed();
             usx_node(ch, out, st)?;
             if !matches!(
                 ch.kind(),
                 NodeKind::MarkerClose | NodeKind::BlockEnd | NodeKind::Error
             ) {
-                prev = Some(ch.kind());
+                prev = Some(ch);
             }
         }
     }

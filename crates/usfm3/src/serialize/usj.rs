@@ -10,8 +10,9 @@ use std::fmt::{self, Write};
 
 use super::render::{
     Unknown, category_of, cell_align, collapse_all, collect_attributes, figure_legacy,
-    fold_alt_pub, is_category_marker, is_table_row, json_str, normalize_text, note_caller,
-    remainder_after_first_token, trim_leading, unknown_shape, verse_label,
+    fold_alt_pub, inline_follows, is_category_marker, is_table_row, json_str, normalize_text,
+    note_caller, parent_followed, remainder_after_first_token, trim_leading, unknown_shape,
+    verse_label,
 };
 use crate::Document;
 use crate::cst::Cursor;
@@ -32,6 +33,7 @@ impl Document<'_> {
 struct Ctx {
     book: String,    // current book code, e.g. "GEN"
     chapter: String, // current chapter number, e.g. "1"
+    follows: bool,   // inline content follows the parent of the node being written
 }
 
 fn write_usj<W: Write>(root: Cursor<'_>, implicit_chapter: u16, out: &mut W) -> fmt::Result {
@@ -49,9 +51,10 @@ fn write_usj<W: Write>(root: Cursor<'_>, implicit_chapter: u16, out: &mut W) -> 
 /// `\tr` rows are grouped into a single `table`.
 fn write_content<W: Write>(parent: Cursor<'_>, out: &mut W, ctx: &mut Ctx) -> fmt::Result {
     let kids: Vec<Cursor<'_>> = parent.children().collect();
+    let followed = parent_followed(parent, ctx.follows);
     out.write_char('[')?;
     let mut first = true;
-    let mut prev: Option<NodeKind> = None;
+    let mut prev: Option<Cursor<'_>> = None;
     let mut i = 0;
     while i < kids.len() {
         if is_table_row(kids[i]) {
@@ -61,7 +64,7 @@ fn write_content<W: Write>(parent: Cursor<'_>, out: &mut W, ctx: &mut Ctx) -> fm
             }
             sep(out, &mut first)?;
             write_table(&kids[start..i], out, ctx)?;
-            prev = Some(NodeKind::MarkerOpen);
+            prev = Some(kids[i - 1]);
             continue;
         }
         let k = kids[i];
@@ -76,12 +79,12 @@ fn write_content<W: Write>(parent: Cursor<'_>, out: &mut W, ctx: &mut Ctx) -> fm
             } else {
                 write_verse(k, alt.as_deref(), pubn.as_deref(), out, ctx)?;
             }
-            prev = Some(k.kind());
+            prev = Some(k);
             i = j;
             continue;
         }
-        if emit_node(k, out, ctx, &mut first, trim_leading(prev))? {
-            prev = Some(k.kind());
+        if emit_node(k, out, ctx, &mut first, prev, &followed)? {
+            prev = Some(k);
         }
         i += 1;
     }
@@ -109,6 +112,7 @@ fn write_table<W: Write>(rows: &[Cursor<'_>], out: &mut W, ctx: &mut Ctx) -> fmt
             out.write_str("{\"type\":\"table:cell\",\"marker\":")?;
             json_str(name, out)?;
             out.write_str(",\"content\":")?;
+            ctx.follows = false; // a row is a block
             write_content(cell, out, ctx)?;
             write!(out, ",\"align\":\"{}\"", cell_align(name))?;
             out.write_char('}')?;
@@ -126,24 +130,34 @@ fn sep<W: Write>(out: &mut W, first: &mut bool) -> fmt::Result {
     Ok(())
 }
 
-/// Emit one child as a USJ value. Returns `true` if a value was written (so the
-/// caller can advance its "previous sibling" tracking).
+/// Emit one child as a USJ value, given its previous emitted sibling and whether
+/// inline content follows its parent (for text whitespace). Returns `true` if a
+/// value was written (so the caller can advance its "previous sibling" tracking).
 fn emit_node<W: Write>(
     c: Cursor<'_>,
     out: &mut W,
     ctx: &mut Ctx,
     first: &mut bool,
-    trim_leading: bool,
+    prev: Option<Cursor<'_>>,
+    followed: &dyn Fn() -> bool,
 ) -> Result<bool, fmt::Error> {
     match c.kind() {
         NodeKind::Text => {
-            let t = normalize_text(c.text(), trim_leading);
+            let t = normalize_text(
+                c.text(),
+                || !trim_leading(prev),
+                || inline_follows(c) || followed(),
+            );
             if t.is_empty() {
                 return Ok(false);
             }
             // `//` is a discretionary line break → an `optbreak` node between the
             // surrounding text segments (spec: docs.usfm.bible).
-            if !t.contains("//") {
+            if t == " " {
+                // A lone word separator, the commonest text in aligned files.
+                out.write_str(if *first { "\" \"" } else { ",\" \"" })?;
+                *first = false;
+            } else if !t.contains("//") {
                 sep(out, first)?;
                 json_str(&t, out)?;
             } else {
@@ -169,6 +183,7 @@ fn emit_node<W: Write>(
             write_verse(c, None, None, out, ctx)?;
         }
         NodeKind::MarkerOpen => {
+            ctx.follows = followed();
             let Some(info) = c.marker_info() else {
                 // An unknown marker keeps the shape the parser gave it.
                 match unknown_shape(c) {
@@ -400,13 +415,13 @@ fn write_sidebar<W: Write>(c: Cursor<'_>, out: &mut W, ctx: &mut Ctx) -> fmt::Re
     }
     out.write_str(",\"content\":[")?;
     let mut first = true;
-    let mut prev: Option<NodeKind> = None;
+    let mut prev: Option<Cursor<'_>> = None;
     for ch in c.children() {
         if is_category_marker(ch) {
             continue; // folded into `category`
         }
-        if emit_node(ch, out, ctx, &mut first, trim_leading(prev))? {
-            prev = Some(ch.kind());
+        if emit_node(ch, out, ctx, &mut first, prev, &|| false)? {
+            prev = Some(ch);
         }
     }
     out.write_str("]}")
@@ -433,13 +448,13 @@ fn write_periph<W: Write>(c: Cursor<'_>, out: &mut W, ctx: &mut Ctx) -> fmt::Res
     }
     out.write_str(",\"content\":[")?;
     let mut first = true;
-    let mut prev: Option<NodeKind> = None;
+    let mut prev: Option<Cursor<'_>> = None;
     for ch in c.children() {
         if matches!(ch.kind(), NodeKind::Text | NodeKind::Attribute) {
             continue; // leading text is `alt`; attributes already inlined
         }
-        if emit_node(ch, out, ctx, &mut first, trim_leading(prev))? {
-            prev = Some(ch.kind());
+        if emit_node(ch, out, ctx, &mut first, prev, &|| false)? {
+            prev = Some(ch);
         }
     }
     out.write_str("]}")
@@ -458,8 +473,10 @@ fn write_note<W: Write>(c: Cursor<'_>, out: &mut W, ctx: &mut Ctx) -> fmt::Resul
         json_str(cat.trim(), out)?;
     }
     out.write_str(",\"content\":[")?;
+    let outer = ctx.follows;
+    let followed = || outer || inline_follows(c); // a note is inline
     let mut first = true;
-    let mut prev: Option<NodeKind> = None;
+    let mut prev: Option<Cursor<'_>> = None;
     for (i, ch) in c.children().enumerate() {
         if is_category_marker(ch) {
             continue; // folded into the `category` field above
@@ -467,13 +484,14 @@ fn write_note<W: Write>(c: Cursor<'_>, out: &mut W, ctx: &mut Ctx) -> fmt::Resul
         if i == 0 && ch.kind() == NodeKind::Text {
             // Drop the caller token; keep any text that follows it on the line.
             let rem = remainder_after_first_token(ch.text());
-            if !rem.trim().is_empty() {
+            let t = normalize_text(rem, || false, || inline_follows(ch) || followed());
+            if !t.is_empty() {
                 sep(out, &mut first)?;
-                json_str(rem.trim(), out)?;
-                prev = Some(NodeKind::Text);
+                json_str(&t, out)?;
+                prev = Some(ch);
             }
-        } else if emit_node(ch, out, ctx, &mut first, trim_leading(prev))? {
-            prev = Some(ch.kind());
+        } else if emit_node(ch, out, ctx, &mut first, prev, &followed)? {
+            prev = Some(ch);
         }
     }
     out.write_str("]}")

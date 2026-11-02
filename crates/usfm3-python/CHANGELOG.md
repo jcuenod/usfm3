@@ -11,6 +11,11 @@ A number glued to its marker (`\v10`) is now read as written, with a
 `MissingSpaceBeforeNumber` warning instead of a missing-number error, and `\v 9`
 followed by `\v 9a` no longer warns about the verse sequence.
 
+USJ and USX keep the whitespace between two inline elements as a space. 0.3.1
+dropped it when it stood alone or was a newline, so `\nd Lord\nd* \x …\x*had` came
+out as "Lordhad" and `\w` words on separate lines ran together. See the crate
+changelog.
+
 ## 0.3.1
 
 ### Performance

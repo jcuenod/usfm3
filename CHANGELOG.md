@@ -30,6 +30,28 @@ now wins and the second stays a `char`).
 - A lettered segment may follow its plain verse (`\v 9` then `\v 9a`, as in LXX
   Job 2:9a) without an `InvalidVerseSequence` warning.
 
+### Word separators in USJ and USX
+
+Whitespace between two inline elements is now kept as a single space. 0.3.1 dropped
+it in two cases, gluing words together where `to_vref` kept them apart:
+
+- whitespace on its own between markers: `\nd Lord\nd* \x …\x*had` gave
+  `"Lord"`, then the note, then `"had"`, and `\w a\w* \w b\w*` gave `ab`. Such
+  whitespace is now a `" "` text node (USX: a space);
+- a newline next to a marker: `\w a\w*` and `\w b\w*` on separate lines, or a line
+  ending in `\w*` followed by a line of text.
+
+Whitespace at the start or end of a paragraph, a table row or another block is still
+dropped, and so is the space after an opening marker or a verse number. Text ending
+in a newline before a `\v` now ends in a space, as it already did when the line
+ended in a space. The text at the start of a note, after the caller, keeps its
+trailing space in USJ as it already did in USX.
+
+In the door43 Hindi IRV, whose `\w` words sit on separate lines, the fix adds 687k
+separator nodes. `to_usj`/`to_usx` are 3–6% slower in our measurements (more output,
+plus a look at neighbouring elements for text with edge whitespace); parsing and
+`to_vref` are unchanged.
+
 ## 0.3.1
 
 ### Performance
